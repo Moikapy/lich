@@ -33,6 +33,8 @@
     "test": "node node_modules/vitest/vitest.mjs run",
     "test:watch": "node node_modules/vitest/vitest.mjs",
     "cli": "bun src/cli.ts",
+    "release": "bun scripts/release.ts",
+    "release:package": "bun scripts/release.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"

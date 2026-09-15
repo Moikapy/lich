@@ -181,6 +181,18 @@ node node_modules/tsup/dist/cli-default.js src/index.ts src/cli.ts --format esm 
 Use project-local binaries for vitest/tsup (not `bun x`), which would isolate
 packages in /tmp and break dependency resolution.
 
+## Releasing
+
+```sh
+bun release patch    # or minor | major
+```
+
+Fails closed on a dirty tree, a non-main branch, a typecheck error, or a
+test failure; bumps via `npm version`, builds, and packs + audits
+`test/.tmp/lich-<version>.tgz` (SHA-512 + scope verification) before
+committing, tagging `v<version>`, and pushing main. Publishing stays manual
+(`npm publish test/.tmp/lich-<version>.tgz`) so npm can prompt for the OTP.
+
 ## License
 
 MIT
