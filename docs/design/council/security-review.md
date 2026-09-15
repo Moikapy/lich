@@ -1,0 +1,39 @@
+# Council Review — Security & Safety
+
+## Verdict
+
+**REJECT.** The plan's central safety claim — "the veto cannot be bypassed by the agent because hooks wrap the executor" — is factually false against the actual code: hooks wrap `ToolExecutor.execute` (src/plugins/hooks.ts:88-104), but the builtin `terminal` tool runs arbitrary `bash -lc` (src/tools/builtin/terminal.ts:69), so any name-keyed veto (`git_commit`, config writes, plugin edits) is bypassed in one shell call. The loop is salvageable, but the gatekeeper must be redesigned from "in-process veto" to "fail-closed integrity + human gate", and v1 memory injection into the system prompt must be cut.
+
+## Blocking findings
+
+1. **Gatekeeper bypass via `terminal`** — HIGH. `terminal` executes any command with exit-code capture and no command inspection (terminal.ts:69, 104-112). A veto keyed on `git_commit` is defeated by `terminal("git commit -m ...")`, `git add -f .env`, `bun run build` (overwrites `dist/`, which `loader.ts:67-69` dynamic-imports — code replacement without any tool call), or killing/rewriting anything under `.lich/`. Fix: implement `git_commit` via git plumbing, never shell; when `allow_self_commit` runs are active, veto `terminal` commands matching `git (add|commit|push)` and writes to `.lich/` (best-effort — bash obfuscation defeats denylists, so this raises cost, it does not close the hole). Honest note: fully closing it conflicts with keeping `terminal` useful; the real floor is the human reviewing the commit. Tension with the 60-line-helper rule: a shell-command scanner wants to be its own module.
+
+2. **The gate is fail-open and self-deletable** — HIGH. `load_plugins` never throws; broken/missing entries are collected, warned, and skipped (loader.ts:99-101), and `agent.ts:209-215` only logs. The agent can delete its plugin entry from `.lich/config.json` or `rm` the plugin file with `write_file`/`terminal` (both confined only to work_dir — guard.ts:12-20 — and the plugin/config live *inside* work_dir); next startup runs ungated, silently. Fix: hash-pin the gatekeeper entry and config plugin list outside the agent-writable tree (e.g. XDG state dir); on mismatch/absence, refuse to start *or* refuse to expose `git_commit`/`run_tests` at all (hard-fail beats warn). Note tension: hard startup failure annoys normal users who disable plugins on purpose — scope the hard failure to self-improvement tools only.
+
+3. **The "tests ran in same run" state is forgeable and stale (TOCTOU)** — HIGH. The gate tracks "a `run_tests` call succeeded in the same run" (plan §3); an agent can run tests on clean code, edit source, then commit — the seal never re-checks the tree. It also can't see outcomes: `after_tool_call` gets a 300-char clamp of `error ?? output` (hooks.ts:23, 99-101), so structured `{passed, total, failures[]}` truncates and a "pass" prefix is all the hook sees. Fix: the gatekeeper seals `{run_id, HEAD, hash("git status --porcelain"), tests_ok}` at test time into a file outside work_dir, and `before_tool_call` on `git_commit` re-derives the current porcelain hash and vetoes on mismatch. That kills run-across-edit staleness; same-run edits after a green test still require a re-run.
+
+4. **MEMORY.md in the system prompt is persistent prompt injection** — HIGH. First 40 lines of a file the agent's own tools write are injected into every future run's system prompt. Poison planted via a tool result this run → candidates.md → consolidation LLM → MEMORY.md steers all later runs, with no human in that path (plan §5). "The system prompt marks it as notes" is a wish, not a control. Fix for v1: do **not** put memory in the system prompt; expose `memory_read` as a tool and keep writes human-reviewed (or quarantined pending review). Sanitizing prose is not reliable — don't pretend otherwise.
+
+5. **Skills/skill_save are injected-influenced data with no trust boundary** — MED/HIGH. "Skills are DATA, not instructions" is asserted in the plan text, not enforced anywhere in the reviewed code — `docs_read`/`docs_search` return raw file text as tool output (docs_read.ts:195, 231), and skills read the same way. A poisoned skill file is indistinguishable from a doc the model will follow. Docs get human review via commits; agent-written skills don't. Fix: v1 skills are written only through the commit path (human-reviewed), or are read-only to the agent and auto-never-loaded (see Q2).
+
+6. **Reflector write path has no schema or failure contract** — MED. Consolidation is a plain ChatFn call; `ProviderError` kinds (rate_limit/network/auth/overflow/bad_request, providers/types.ts:9-15) are unspecified here, and the compressor precedent is warn-and-keep-old (loop doc "best-effort fallback"). But this LLM's output is *written to disk* as memory/skill — a truncated or injected reply becomes durable state. Fix: dedicated provider slot (Q4: yes), no tools attached to the call, strict output schema (≤200 chars/line, no URLs), failures leave candidates.md untouched.
+
+7. **Plugin tools bypass `tools_enabled`** — MED. `filter_registry` applies the allowlist to builtins only; `register_plugin_tools` registers plugin tools afterwards (agent.ts:47-56, 72-83). A gatekeeper shipped as a plugin cannot be disabled by the user via config, and once finding #2's write access exists, a swapped plugin gets the full registry. Fix: apply the allowlist to plugin tools too, or ship the gatekeeper in core.
+
+8. **Concurrent runs corrupt the memory store** — MED. `memory_write` appends while consolidation rewrites MEMORY.md read-modify-write; two runs → lost lines, torn files, duplicate skills (NFS makes this worse — the gvfs mount already saw a suite-file cleanup flake). Fix: per-run candidate files `candidates/<run_id>.md` (append-only, no cross-writer contention); consolidation is the single writer, guarded by an exclusive lockfile.
+
+## Non-blocking observations
+
+- `git_commit` staging: partial staging (agent stages file A, misses helper B) passes a seal keyed on "tests green earlier"; require the tool to stage exactly the named set and re-run tests post-stage, or commit on a dedicated `agent/*` branch only (never current/main) — also answers wrong-branch and non-lich-repo (`work_dir` is config-driven; require the commit target repo to be the pinned lich repo).
+- `git add -f .env` style secret leaks remain possible via terminal even with the seal; mitigations are best-effort vetoes (finding 1), so pre-commit `git diff --cached` review in the veto reason is worthwhile.
+- `spawn("bash", ["-lc", ...])` inherits full `process.env` (terminal.ts:69) and `env_get` exists; combined with `fetch_url` this is a pre-existing exfiltration path the loop makes more valuable to exploit.
+- Session JSONL under `.lich/sessions` is agent-writable; transcripts are forgeable "history" — keep out of any trust decision.
+- `max_commits_per_run=1` (Q3) is fine as a blast-radius cap but is a speed bump, not a gate; per-run reset state is only as trustworthy as finding 3's seal.
+
+## Answers to the plan's open questions
+
+- **Q1**: Restrict `run_tests` to the pinned lich work_dir (git-repo check); generalizing it turns a safety signal into an arbitrary-code launcher in any directory.
+- **Q2**: Only explicit `skill_search`/`skill_read`; auto-load would make file descriptions (writable by the agent) injected prompt content — persistent injection by another name.
+- **Q3**: 1 commit/run is reasonable as a cap, meaningless as safety; the seal (finding 3) is the actual control.
+- **Q4**: Dedicated cheaper provider slot, tools-free, schema-parsed — also isolates cost and prompt-injection surface from the main chain.
+- **Q5**: YAGNI for v1 — skills written only via human-reviewed commits make versioning redundant; revisit only if agent-written skills ever ship.

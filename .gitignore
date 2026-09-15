@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.lich/
+test/.tmp/
+.env
+*.log
+docs/.vitepress/dist/
+docs/.vitepress/cache/

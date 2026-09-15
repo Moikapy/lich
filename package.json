@@ -1,0 +1,54 @@
+{
+  "name": "@moikapy/lich",
+  "version": "0.3.0",
+  "description": "Lich — a TypeScript AI agent harness (library + CLI) inspired by Hermes",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moikapy/lich.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "lich": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "!docs/.vitepress/dist",
+    "!docs/.vitepress/cache",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node node_modules/tsup/dist/cli-default.js src/index.ts src/cli.ts --format esm --dts --clean --sourcemap",
+    "typecheck": "bun x tsc --noEmit",
+    "test": "node node_modules/vitest/vitest.mjs run",
+    "test:watch": "node node_modules/vitest/vitest.mjs",
+    "cli": "bun src/cli.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "dependencies": {
+    "ink": "^6.0.0",
+    "react": "^19.0.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0",
+    "vitepress": "^1.6.4"
+  }
+}

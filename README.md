@@ -1,0 +1,186 @@
+# lich
+
+Lich is a TypeScript AI agent harness (library + CLI) that runs a
+Think-Act-Observe loop: an LLM plans, calls tools, observes results, and
+repeats until it produces a final answer. It ships with provider failover,
+tool guardrails, context compression, and JSONL session persistence.
+
+## Documentation
+
+| Page | Contents |
+| --- | --- |
+| [Docs home](docs/index.md) | Overview, feature map, and a 60-second quickstart. |
+| [Getting started](docs/getting-started.md) | Zero-to-first-reply: install, config paths, one-shot, TUI, gateway. |
+| [CLI reference](docs/user-guide/cli.md) | All four modes, flags, provider resolution, config schema, recipes. |
+| [TUI guide](docs/user-guide/tui.md) | Launch, slash commands, status bar, memory semantics. |
+| [Gateway guide](docs/user-guide/gateway.md) | Webhook/Telegram/Discord/Twitch setup and the webhook API. |
+| [Library guide](docs/user-guide/library.md) | Embedding: `create_agent`, events, multi-turn history, errors. |
+
+## Quick start (CLI)
+
+```sh
+# one-shot task
+LICH_MODEL=gpt-4.1-mini LICH_PROVIDER_KIND=openai_compat bun src/cli.ts "summarize this repo"
+
+# interactive chat (commands: /exit, /quit)
+LICH_MODEL=claude-sonnet-4 LICH_PROVIDER_KIND=anthropic bun src/cli.ts chat
+
+# local ollama (no api key needed)
+ollama pull llama3.2
+LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 bun src/cli.ts "hello"
+
+# terminal UI
+lich tui
+
+# messaging gateway (webhook | telegram | discord | twitch)
+lich gateway webhook
+```
+
+The CLI has four modes: **one-shot** (`lich "task"`), **chat**
+(`lich chat`), **tui** (`lich tui`), and **gateway**
+(`lich gateway <platform...>`).
+
+Or use a JSON config file: `bun src/cli.ts --config lich.json "task"` (see
+`AgentConfig` in `src/agent/config.ts` for the schema).
+
+## Library usage
+
+```ts
+import { run_agent } from "lich";
+
+const result = await run_agent(
+  {
+    providers: [
+      { kind: "ollama", name: "local", model: "llama3.2:latest" },
+    ],
+  },
+  "Use the list_dir tool to list files, then summarize.",
+);
+console.log(result.outcome.final?.content);
+```
+
+## Tools
+
+Twelve builtins ship with the agent (`register_builtin_tools`); all accept
+snake_case args and are registered under the `builtin` toolset.
+
+| Tool | Purpose |
+| --- | --- |
+| `read_file` | Read a text file inside the working directory, with optional offset/limit. |
+| `write_file` | Write (or overwrite) a file inside the working directory. |
+| `edit_file` | Replace a unique string in a file, with an optional replace-all. |
+| `list_dir` | List a directory tree iteratively (dirs first, file sizes). |
+| `terminal` | Run a shell command via `bash -lc` and capture output plus exit code. |
+| `grep_files` | Regex search across files, skipping node_modules/.git/dist and binaries. |
+| `fetch_url` | GET an http(s) URL and return the body text with a status header. |
+| `web_search` | Web search via DuckDuckGo's HTML endpoint (no api key). |
+| `http_request` | Generic HTTP calls (method/headers/body) for REST-ish APIs. |
+| `process_list` | Snapshot running processes from /proc with an optional filter. |
+| `disk_usage` | `du -sb` sizes for depth-1 entries of a directory, sorted with a total. |
+| `env_get` | Inspect environment variables (names/lengths; secrets always masked). |
+| `docs_read` | Read a bundled lich doc (path relative to docs root; offset/limit; `.md` optional). |
+| `docs_search` | Keyword search across bundled lich docs with scored section snippets. |
+
+## Plugins
+
+Customize lich with your own tools and lifecycle hooks: keep a `Plugin`
+object (`{name, tools?, hooks?}`) in your repo, list its file path in the
+`plugins` config array, and the agent merges your tools and lets your hooks
+observe or veto tool calls. See
+[docs/user-guide/plugins.md](docs/user-guide/plugins.md).
+
+## Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `LICH_MODEL` | model name (e.g. `gpt-4.1-mini`, `claude-sonnet-4`, `llama3.2`) |
+| `LICH_PROVIDER_KIND` | `openai_compat` \| `anthropic` \| `ollama` (default `openai_compat`) |
+| `LICH_BASE_URL` | provider base url (ollama default: `http://localhost:11434`) |
+| `LICH_API_KEY_ENV` | env var holding the api key (unused by ollama) |
+
+## Ollama
+
+Ollama needs no api key and defaults to `http://localhost:11434`:
+
+```sh
+LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 bun src/cli.ts "Reply with ok"
+```
+
+Notes:
+
+- Requests go to `POST /api/chat` with `stream: false`; tool calls use the
+  OpenAI-style function shape, and tool results are sent 1:1 as
+  `{role: "tool", tool_name, content}` messages.
+- Set `think: true` on the provider config (or chat options) to request
+  thinking mode; `keep_alive` controls model residency (e.g. `"10m"`).
+- 429/5xx are retried with backoff before failing over to the next provider.
+
+## Gateway
+
+`lich gateway` turns lich into a long-running messaging gateway: every
+supported platform (Telegram, Discord, Twitch, plus a zero-config webhook
+HTTP endpoint) is routed into **one shared agent** with **per-conversation
+memory**, so each chat keeps its own bounded history while the tools,
+guardrails, and provider failover stay common.
+
+```sh
+lich gateway webhook                 # http only
+lich gateway webhook telegram        # http + telegram polling
+lich gateway telegram discord twitch # no webhook server
+```
+
+Environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `LICH_GATEWAY_PORT` | webhook port (default `8089`) |
+| `LICH_GATEWAY_TOKEN` | webhook auth: requests must send header `x-lich-token` |
+| `LICH_TELEGRAM_BOT_TOKEN` | telegram bot token (adapter idles without it) |
+| `LICH_DISCORD_BOT_TOKEN` | discord bot token (adapter idles without it) |
+| `LICH_DISCORD_BOT_ID` | discord bot id; mentions of `<@id>` are stripped |
+| `LICH_TWITCH_OAUTH_TOKEN` | twitch irc oauth token (adapter idles without it) |
+| `LICH_TWITCH_NICK` | twitch irc nickname |
+| `LICH_TWITCH_CHANNELS` | comma-separated twitch channels to join |
+
+Adapters whose tokens are missing start **idle** (they log and skip) — the
+gateway still runs the rest. The discord adapter has no reconnect-resume:
+if its gateway websocket drops, messages are missed until the process
+restarts.
+
+Webhook API:
+
+```sh
+curl -X POST http://localhost:8089/message \
+  -H "content-type: application/json" -d '{"text": "Reply with ok"}'
+# -> {"reply":"...","usage":{...}}
+
+curl http://localhost:8089/health    # -> {"status":"ok"}
+```
+
+## TUI
+
+`lich tui` launches an ink-based terminal UI: a scrolling transcript with
+tool-call rows, a status bar (model, turns, tokens), and a command input
+row with Up/Down history recall (Ctrl+C quits).
+
+```sh
+lich tui
+```
+
+Slash commands: `/help`, `/model`, `/usage`, `/clear`, `/sessions`,
+`/exit` (also `/quit`, `/q`). The transcript shows the newest 50 blocks.
+
+## Development
+
+```sh
+bun x tsc --noEmit                       # typecheck
+node node_modules/vitest/vitest.mjs run  # tests (project-local binaries)
+node node_modules/tsup/dist/cli-default.js src/index.ts src/cli.ts --format esm --dts --clean --sourcemap  # build
+```
+
+Use project-local binaries for vitest/tsup (not `bun x`), which would isolate
+packages in /tmp and break dependency resolution.
+
+## License
+
+MIT
