@@ -1,6 +1,6 @@
 # Plugin architecture
 
-How the plugin system loads user modules, merges tools into the registry, and intercepts tool calls with hooks. Source: [`src/plugins/`](../../src/plugins).
+How the plugin system loads user modules, merges tools into the registry, and intercepts tool calls with hooks. Sources: [`loader.ts`](../../src/plugins/loader.ts), [`hooks.ts`](../../src/plugins/hooks.ts), [`types.ts`](../../src/plugins/types.ts).
 
 ## Loader flow
 
