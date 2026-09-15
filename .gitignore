@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .lich/
+CLAUDE.md
 test/.tmp/
 .env
 *.log
