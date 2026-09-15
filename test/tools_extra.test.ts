@@ -3,10 +3,9 @@ import { mkdir, mkdtemp, readdir, rmdir, unlink, writeFile } from "node:fs/promi
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import { register_builtin_tools } from "../src/tools/builtin/index.js";
+import { TMP_BASE } from "./helpers/tmp_base.js";
 import { ToolExecutor } from "../src/tools/executor.js";
 import { ToolRegistry } from "../src/tools/registry.js";
-
-const TMP_BASE = "/home/moika/nas/code/lich/test/.tmp";
 
 let tmp_root: string;
 let executor: ToolExecutor;

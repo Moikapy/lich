@@ -14,8 +14,7 @@ import { ToolExecutor } from "../src/tools/executor.js";
 import { default_tool_context, ToolRegistry } from "../src/tools/registry.js";
 import { builtin_toolset, register_builtin_tools } from "../src/tools/builtin/index.js";
 import type { Tool, ToolContext, ToolResult } from "../src/tools/types.js";
-
-const TMP_BASE = "/home/moika/nas/code/lich/test/.tmp";
+import { TMP_BASE } from "./helpers/tmp_base.js";
 
 let tmp_root: string;
 

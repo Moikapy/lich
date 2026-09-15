@@ -7,8 +7,7 @@ import { docs_search_tool, reset_docs_search_cache } from "../src/tools/builtin/
 import { DOCS_UNAVAILABLE, docs_read_tool, reset_docs_cache, set_docs_root_resolver } from "../src/tools/builtin/docs_read.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import type { ToolContext, ToolResult } from "../src/tools/types.js";
-
-const TMP_BASE = "/home/moika/nas/code/lich/test/.tmp";
+import { TMP_BASE } from "./helpers/tmp_base.js";
 
 let tmp_root: string;
 let fixture_base: string;

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import path from "node:path";
 import { parse_agent_config } from "../src/agent/config.js";
+import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const minimal_providers = [{ kind: "openai_compat", name: "main", model: "mock-model" }];
 
@@ -48,11 +51,16 @@ describe("parse_agent_config", () => {
     expect(config.log_level).toBe("debug");
   });
 
-  it("computes session_dir from work_dir at parse time", () => {
-    const work_dir = "/home/moika/nas/code/lich/test/.tmp/config-work";
-    const config = parse_agent_config({ providers: minimal_providers, work_dir });
-    expect(config.work_dir).toBe(work_dir);
-    expect(config.session_dir).toBe(`${work_dir}/.lich/sessions`);
+  it("computes session_dir from work_dir at parse time", async () => {
+    await mkdir(TMP_BASE, { recursive: true });
+    const work_dir = await mkdtemp(path.join(TMP_BASE, "config-work-"));
+    try {
+      const config = parse_agent_config({ providers: minimal_providers, work_dir });
+      expect(config.work_dir).toBe(work_dir);
+      expect(config.session_dir).toBe(`${work_dir}/.lich/sessions`);
+    } finally {
+      await rm(work_dir, { recursive: true, force: true });
+    }
   });
 
   it("returns a deep-frozen config object", () => {
