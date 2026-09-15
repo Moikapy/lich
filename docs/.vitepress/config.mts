@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
+  base: '/lich/',
   title: 'Lich',
   description:
     'A TypeScript AI agent harness — Think-Act-Observe loop, provider failover, tools, gateway, TUI.',
