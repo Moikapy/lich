@@ -118,9 +118,10 @@ args, context?)`:
    defaults (falling back to `process.cwd()`) plus the configured `env`.
 3. **Cancelled fast path**: if the context signal is already aborted, return
    `{ ok: false, output: "", error: "cancelled" }` without running the tool.
-4. **Signal merge + 30 s timeout**: a fresh `AbortController` is aborted by
+4. **Signal merge + timeout**: a fresh `AbortController` is aborted by
    the external signal (an `abort` listener), by the `with_timeout` deadline
-   (`DEFAULT_TOOL_TIMEOUT_MS = 30000`), and the merged signal is what the tool
+   (the tool's own `timeout_ms` when declared, else
+   `DEFAULT_TOOL_TIMEOUT_MS = 30000`), and the merged signal is what the tool
    receives. The external listener is removed in a `finally`.
 5. **Output clamping**: successful results pass through `clamp_result`
    (`clamp_output`, 20 000 chars).

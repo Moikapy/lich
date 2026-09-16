@@ -59,18 +59,20 @@ structural interfaces ([`src/agent/loop.ts`](../../src/agent/loop.ts)):
 
 - `ChatFn` - `(messages, tools, options?) => Promise<ChatResult>` (declared in
   `src/context/compressor.ts`, since compression needs the same shape).
-- `ToolRunner` - `{ execute(name, args) => Promise<ToolResult> }`.
+- `ToolRunner` - `{ execute(name, args, context?) => Promise<ToolResult> }`.
 
 `run_conversation` receives a `LoopDeps` object holding a `ChatFn`, a
-`ToolRunner`, a `definitions()` callback for tool schemas, and an optional
-emitter. The `Agent` class (`src/agent/agent.ts`) is the composition root: its
-`loop_deps()` method wires the real implementations -
+`ToolRunner`, a `definitions()` callback for tool schemas, an optional
+emitter, and an optional per-run `tool_context` threaded to every tool
+execution. The `Agent` class (`src/agent/agent.ts`) is the composition root:
+its `loop_deps()` method wires the real implementations -
 
 ```ts
 chat: (messages, tools, chat_options) => this.router.chat_with_failover(messages, tools, chat_options),
 tools: this.executor,
 definitions: () => this.registry.definitions(),
 emitter: this.events,
+tool_context,
 ```
 
 (src/agent/agent.ts, `loop_deps()`)

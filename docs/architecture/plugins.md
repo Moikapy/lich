@@ -23,7 +23,7 @@ flowchart LR
     K -- yes --> M["LoadedPlugin collected"]
     M --> N["Agent constructor"]
     N --> O["registry merge:\nplugin tools appended\n(dup tool name → warn+skip)"]
-    N --> P["hook concat:\nPluginHooks[] in config order"]
+    N --> P["hooked plugins kept\nwhole (per-plugin state channel)"]
     P --> Q["HookedToolRunner wraps\nToolExecutor when hooks exist"]
     E --> R["warn + continue"]
     H --> R
@@ -53,8 +53,8 @@ sequenceDiagram
     else no blocker
         H->>E: execute(name, args, context?)
         E-->>H: ToolResult
-        H->>A: await hook({...info, result_summary}, ctx)
-        note over A: summary = 300 chars of output/error
+        H->>A: await hook({...info, result_summary, ok, error?}, ctx)
+        note over A: summary = 300 chars of output/error; ok/error are structured
         H-->>L: ToolResult unchanged
     end
 ```
@@ -74,7 +74,8 @@ Lifecycle fan-outs live on the same wrapper: `Agent.run` calls `call_run_start({
 | --- | --- | --- |
 | `Plugin` | type | `{name, version?, tools?, hooks?}` — what a plugin module exports. |
 | `PluginHooks` | type | The four optional lifecycle hooks with their signatures. |
-| `HookContext` | type | `{work_dir}` passed to every hook. |
+| `HookContext` | type | `{work_dir, state?}` passed to every hook; `state` is the invoking plugin's own per-run bag. |
+| `AfterToolCallInfo` | type | Tool name/args plus the 300-char `result_summary` and structured `ok`/`error` fields. |
 | `LoadedPlugin` | type | `{plugin, entry}` — a loaded plugin and its source path. |
 | `load_plugins` | function | `(entries, base_dir) => {plugins, errors}` — dynamic import + shape validation. |
 | `plugin_errors_summary` | function | Joins error entries into one warn-able string. |
