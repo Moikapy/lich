@@ -6,6 +6,10 @@
   (`create_agent_with_plugins`). one-shot, chat, tui, and the gateway
   bus no longer ignore plugin entries. broken plugins still warn and
   continue. `create_agent` stays plugin-free.
+- add `lich update`: compare the installed version with `npm view
+  @moikapy/lich version` and, when newer, run
+  `npm install -g @moikapy/lich@latest`. git clones are told to
+  `git pull`; npx cannot persist an update.
 
 ## 0.4.0
 
