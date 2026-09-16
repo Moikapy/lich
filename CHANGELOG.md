@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0 (unreleased)
+
+- add a display-only undead theme: frozen `lich` strings, `theme` / `--theme`, and `~/.lich/themes/<name>.json` that falls back to the built-in theme when missing or invalid.
+
 ## 0.5.1
 
 - fix the CLI so bun's global bin enters main (symlink argv no longer skips the entry).

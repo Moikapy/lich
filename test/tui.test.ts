@@ -22,6 +22,7 @@ import {
   type UiState,
 } from "../src/tui/state.js";
 import type { AgentRunResult } from "../src/agent/agent.js";
+import { LICH_THEME } from "../src/util/lore.js";
 import type { LoopOutcome } from "../src/agent/loop.js";
 import type { Message, Usage } from "../src/providers/types.js";
 
@@ -190,11 +191,11 @@ describe("format_usage", () => {
 
 describe("format_message_block", () => {
   it("formats user and assistant lines with role tags", () => {
-    const user = format_message_block({ role: "user", content: "hi there" });
+    const user = format_message_block({ role: "user", content: "hi there" }, LICH_THEME);
     expect(user.role).toBe("user");
-    expect(user.lines).toEqual(["you › hi there"]);
+    expect(user.lines).toEqual(["mortal › hi there"]);
 
-    const assistant = format_message_block({ role: "assistant", content: "hello" });
+    const assistant = format_message_block({ role: "assistant", content: "hello" }, LICH_THEME);
     expect(assistant.role).toBe("lich");
     expect(assistant.lines[0]).toBe("lich › hello");
   });
@@ -205,7 +206,7 @@ describe("format_message_block", () => {
       role: "assistant",
       content: "",
       tool_calls: [{ id: "1", name: "read_file", args: long_args }],
-    });
+    }, LICH_THEME);
     expect(block.role).toBe("lich");
     expect(block.lines).toHaveLength(2);
     expect(block.lines[1]?.startsWith("  ⎿ {")).toBe(true);
@@ -213,7 +214,7 @@ describe("format_message_block", () => {
   });
 
   it("formats tool messages as ok/error result lines", () => {
-    const ok = format_message_block({ role: "tool", tool_call_id: "1", name: "shell", content: "listed files" });
+    const ok = format_message_block({ role: "tool", tool_call_id: "1", name: "shell", content: "listed files" }, LICH_THEME);
     expect(ok.role).toBe("tool");
     expect(ok.lines[0]).toBe("  ⎿ shell: ok (listed files)");
 
@@ -223,13 +224,13 @@ describe("format_message_block", () => {
       name: "shell",
       content: "not found",
       is_error: true,
-    });
+    }, LICH_THEME);
     expect(failure.role).toBe("error");
     expect(failure.lines[0]).toBe("  ⎿ shell: error (not found)");
   });
 
   it("maps system messages to meta blocks", () => {
-    const block = format_message_block({ role: "system", content: "be brief" });
+    const block = format_message_block({ role: "system", content: "be brief" }, LICH_THEME);
     expect(block.role).toBe("meta");
   });
 });
@@ -243,14 +244,14 @@ describe("split_history_blocks", () => {
       messages.push(user_message(index));
     }
     messages.push({ role: "system", content: "prompt" });
-    const blocks = split_history_blocks(messages, 50);
+    const blocks = split_history_blocks(messages, 50, LICH_THEME);
     expect(blocks).toHaveLength(50);
-    expect(blocks[0]?.lines[0]).toBe("you › msg 10");
-    expect(blocks[49]?.lines[0]).toBe("you › msg 59");
+    expect(blocks[0]?.lines[0]).toBe("mortal › msg 10");
+    expect(blocks[49]?.lines[0]).toBe("mortal › msg 59");
   });
 
   it("returns fewer blocks when under the cap and drops system messages", () => {
-    const blocks = split_history_blocks([user_message(1), { role: "system", content: "s" }, user_message(2)], 50);
+    const blocks = split_history_blocks([user_message(1), { role: "system", content: "s" }, user_message(2)], 50, LICH_THEME);
     expect(blocks).toHaveLength(2);
   });
 });
@@ -262,10 +263,12 @@ describe("notice blocks", () => {
       messages: [],
       usage_total: usage(9),
       session_path: undefined,
-    });
+    }, LICH_THEME);
     expect(blocks).toHaveLength(2);
     expect(blocks[0]?.role).toBe("error");
-    expect(blocks[1]?.lines[0]).toBe("lich › partial");
+    expect(blocks[0]?.lines[0]).toContain("budget exhausted");
+    expect(blocks[0]?.lines[0]).toContain("the ritual is spent");
+    expect(blocks[1]?.lines[0]).toBe(`${LICH_THEME.response_label} › partial`);
   });
 
   it("omits the final block when content is empty", () => {
@@ -274,12 +277,12 @@ describe("notice blocks", () => {
       messages: [],
       usage_total: usage(0),
       session_path: undefined,
-    });
+    }, LICH_THEME);
     expect(blocks).toEqual([]);
   });
 
   it("formats compress, error, usage, model, and unknown-command notices", () => {
-    expect(compress_notice_block(512).lines[0]).toContain("context compressed (summary 512 chars)");
+    expect(compress_notice_block(512, LICH_THEME).lines[0]).toContain("context compressed — memories distilled (summary 512 chars)");
     expect(error_notice_block("kaboom").role).toBe("error");
     expect(usage_notice_block(1234).lines[0]).toContain("1,234");
     expect(model_label_block({ providers: [{ model: "glm-5.3-flash:cloud", kind: "ollama" }] }).lines[0]).toContain(
@@ -311,8 +314,10 @@ describe("notice blocks", () => {
         { name: "old.jsonl", size_bytes: 10, mtime_ms: 1 },
         { name: "new.jsonl", size_bytes: 20, mtime_ms: 2 },
       ],
+      LICH_THEME,
       10,
     );
+    expect(block.lines[0]).toBe("· phylacteries (2):");
     expect(block.lines[1]).toBe("  new.jsonl (20 bytes)");
     expect(help_block().lines.length).toBeGreaterThan(1);
   });

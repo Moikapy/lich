@@ -31,7 +31,7 @@ const provider_schema = z
 
 const agent_config_schema = z
   .object({
-    /** Display name used by the TUI banner. */
+    /** Wizard label. The TUI banner uses the active theme welcome string. */
     agent_name: z.string().min(1).default("lich"),
     system_prompt: z.string().optional(),
     max_turns: z.number().int().min(1).default(25),
@@ -48,6 +48,7 @@ const agent_config_schema = z
     plugins: z.array(z.string()).default([]),
     gateway: gateway_schema,
     log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
+    theme: z.string().min(1).default("lich"),
   })
   .transform((config) => {
     const work_dir = config.work_dir ?? process.cwd();

@@ -146,6 +146,7 @@ describe("config_template", () => {
       expect(template.providers[0]?.["model"]).toBe("<model-name>");
       expect(template.providers[0]?.["base_url"]).toBe("http://localhost:11434");
       expect(template.max_turns).toBe(25);
+      expect((template as { theme?: string }).theme).toBe("lich");
     });
   });
 
