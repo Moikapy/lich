@@ -124,6 +124,17 @@ jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content)"' .lich
 | `[lich] budget exhausted after N turns` | The task did not finish within `max_turns` (default 25). Raise it with `--max-turns 50` or in config. |
 | `unknown flag: --foo` | Flag typo, or the flag was placed where a subcommand is expected. Run `lich --help`. |
 
+## Updating
+
+Lich updates in place with npm:
+
+```sh
+npm install -g @moikapy/lich@latest
+lich --version   # -> the version you just installed
+```
+
+Updates never touch your data: the per-project `.lich/` directory holds your config and session transcripts, installers neither read nor migrate it, and it is gitignored by design so a checkout never collides with it. For what changed between versions, see the [changelog](https://github.com/moikapy/lich/blob/main/CHANGELOG.md).
+
 ## Development install (from source)
 
 To hack on Lich itself, run the CLI straight from a clone instead of the npm package:
