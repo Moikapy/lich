@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gatekeeper_plugin } from "../src/plugins/builtin/gatekeeper.plugin.js";
 import type { AfterToolCallInfo, BeforeToolCallInfo, HookContext, Plugin } from "../src/plugins/types.js";
@@ -19,6 +19,32 @@ function git(dir: string, args: readonly string[]): Promise<{ code: number; out:
       resolve({ code: err === null ? 0 : (err as { code?: number }).code ?? 1, out: `${stdout}${stderr}` });
     });
   });
+}
+
+/** Executor holding only the gatekeeper's git_commit tool. */
+function commit_executor(): ToolExecutor {
+  const registry = new ToolRegistry();
+  for (const tool of gatekeeper_plugin(true).tools ?? []) {
+    registry.register(tool);
+  }
+  return new ToolExecutor(registry);
+}
+
+/** Poll a pid file written by a blocking git filter. Not recursive. */
+async function wait_for_text(file: string): Promise<string> {
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    try {
+      const text = (await readFile(file, "utf8")).trim();
+      if (text.length > 0) {
+        return text;
+      }
+    } catch {
+      // not written yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("timed_out_waiting_for_filter_pid");
 }
 
 /** Seed a fresh repo with a root commit (A3) and return its dir. */
@@ -91,6 +117,19 @@ describe("gatekeeper plugin", () => {
       expect(verdict?.reason).toContain("git_denylist");
     }
     const innocent = await plugin.hooks?.before_tool_call?.(before_info("terminal", { command: "ls -la" }), ctx_for(state));
+    expect(innocent?.block).toBeUndefined();
+  });
+
+  it("vetoes commit-tree hidden in a git alias and allows an innocent ls", async () => {
+    const plugin = gatekeeper_plugin(true);
+    const state = new Map<string, unknown>();
+    const hidden = await plugin.hooks?.before_tool_call?.(
+      before_info("terminal", { command: "git -c alias.ct=commit-tree ct HEAD" }),
+      ctx_for(state),
+    );
+    expect(hidden?.block).toBe(true);
+    expect(hidden?.reason).toContain("commit-tree");
+    const innocent = await plugin.hooks?.before_tool_call?.(before_info("terminal", { command: "ls" }), ctx_for(state));
     expect(innocent?.block).toBeUndefined();
   });
 
@@ -235,6 +274,72 @@ describe("gatekeeper plugin", () => {
     const result = await executor.execute("git_commit", { message: "m", paths: ["x.txt"] }, { work_dir: fresh, env: {} });
     expect(result.ok).toBe(false);
     expect(result.error).toContain("no_head_commit");
+  });
+
+  it("rejects pathspec magic, directories, and a nested secret basename", async () => {
+    const executor = commit_executor();
+    await mkdir(path.join(tmp_root, "sub"));
+    await mkdir(path.join(tmp_root, "nested"));
+    await writeFile(path.join(tmp_root, "sub", ".env"), "SECRET=1\n");
+    await writeFile(path.join(tmp_root, "nested", ".env"), "SECRET=2\n");
+    const cases: Array<{ paths: string[]; error: string }> = [
+      { paths: [":(glob)*"], error: "invalid_path" },
+      { paths: ["*"], error: "invalid_path" },
+      { paths: ["sub/"], error: "invalid_path" },
+      { paths: ["sub"], error: "invalid_path" },
+      { paths: ["nested/.env"], error: "secret_path" },
+    ];
+    for (const item of cases) {
+      const result = await executor.execute("git_commit", { message: "m", paths: item.paths }, { work_dir: tmp_root, env: {} });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain(item.error);
+    }
+    const count = await git(tmp_root, ["rev-list", "--count", "HEAD"]);
+    expect(count.out.trim()).toBe("1");
+    const staged = await git(tmp_root, ["diff", "--cached", "--name-only"]);
+    expect(staged.out).not.toContain(".env");
+  });
+
+  it("does not run an executable post-commit hook", async () => {
+    const marker = path.join(tmp_root, "hook-ran");
+    const hook = path.join(tmp_root, ".git", "hooks", "post-commit");
+    await writeFile(hook, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\n`);
+    await chmod(hook, 0o755);
+    await writeFile(path.join(tmp_root, "committed.txt"), "content");
+    const result = await commit_executor().execute(
+      "git_commit",
+      { message: "add committed", paths: ["committed.txt"] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(result.ok).toBe(true);
+    await expect(access(marker)).rejects.toThrow();
+  });
+
+  it("kills a live git child when the tool signal aborts", async () => {
+    const pid_file = path.join(tmp_root, "filter.pid");
+    await writeFile(path.join(tmp_root, "slow.txt"), "x");
+    await writeFile(path.join(tmp_root, ".gitattributes"), "slow.txt filter=hang\n");
+    await git(tmp_root, ["config", "filter.hang.clean", `sh -c 'echo $$ > ${pid_file}; exec sleep 8'`]);
+    await git(tmp_root, ["config", "filter.hang.required", "true"]);
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = commit_executor().execute(
+      "git_commit",
+      { message: "m", paths: ["slow.txt"] },
+      { work_dir: tmp_root, env: {}, signal: controller.signal },
+    );
+    const filter_pid = Number(await wait_for_text(pid_file));
+    controller.abort();
+    const result = await pending;
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(result.ok).toBe(false);
+    try {
+      process.kill(filter_pid, "SIGKILL");
+    } catch {
+      // filter child already reaped
+    }
+    const count = await git(tmp_root, ["rev-list", "--count", "HEAD"]);
+    expect(count.out.trim()).toBe("1");
   });
 
   it("loader hard-rejects builtin-colliding plugin names (A5)", async () => {

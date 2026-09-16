@@ -24,13 +24,6 @@ export type TestCommandRunner = (
   on_chunk: (stream: "stdout" | "stderr", chunk: Buffer) => void,
 ) => Promise<{ exit_code: number }>;
 
-/** Outcome shape used by the structured result and tests. */
-export interface TestOutcome {
-  ok: boolean;
-  output: string;
-  error?: string;
-}
-
 /** Module-level mutex: one run_tests per process; concurrent calls fail closed. */
 let busy = false;
 
@@ -55,9 +48,14 @@ function default_runner(
   });
 }
 
+/** One argv token for bash -lc; the operator command stays a shell string. */
+function shell_quote(token: string): string {
+  return `'${token.replaceAll("'", "'\\''")}'`;
+}
+
 function build_command(filter: string | undefined, env: Record<string, string>): string {
   const base = optional_string_arg(env, "LICH_TEST_COMMAND", DEFAULT_TEST_COMMAND);
-  return filter === undefined ? base : `${base} ${filter}`;
+  return filter === undefined ? base : `${base} ${shell_quote(filter)}`;
 }
 
 /** Replace the subprocess runner (test seam only; tests restore after). */

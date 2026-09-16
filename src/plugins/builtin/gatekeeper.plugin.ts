@@ -7,8 +7,9 @@
  * hardcoded git denylist. Per-run state lives in the plugin state channel.
  */
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import path from "node:path";
-import { resolve_safe_path } from "../../tools/guard.js";
+import { clamp_output, resolve_safe_path } from "../../tools/guard.js";
 import type { Tool } from "../../tools/types.js";
 import type {
   AfterToolCallInfo,
@@ -19,8 +20,11 @@ import type {
   PluginHooks,
 } from "../types.js";
 
-/** Flag-tolerant git verbs: commit/push with or without dashes + always-bad plumbing. */
-const GIT_DENYLIST: readonly string[] = ["commit", "-commit", "--commit", "push", "-push", "--push", "commit-tree", "update-ref"];
+/** -c beats repo config; --no-verify does not skip post-commit. */
+const HOOKS_OFF: readonly string[] = ["-c", "core.hooksPath=/dev/null"];
+
+/** Pathspec magic that must never reach git (glob, magic signatures). */
+const PATHSPEC_MAGIC = /[:*?[]/;
 
 /** Basenames never committable by the agent (secret-ish, hardcoded). */
 const SECRET_BASENAMES: readonly string[] = [".env", ".env.local", "id_rsa"];
@@ -45,61 +49,106 @@ function state_count(ctx: HookContext, key: string): number {
   return typeof value === "number" ? value : 0;
 }
 
-/** Split a shell-ish command into words for denylist matching. */
-function command_words(command: string): string[] {
-  return command.split(/\s+/).filter((word) => word.length > 0);
-}
-
-/** True when the terminal command matches a denylisted git subcommand. */
+/**
+ * Denylist hit on the raw command. commit-tree and update-ref are
+ * any-occurrence; commit/push stay flag-tolerant whole words. Not a shell parser.
+ */
 function matches_git_denylist(command: string): string | undefined {
-  const words = command_words(command);
-  for (const pattern of GIT_DENYLIST) {
-    const is_flag = pattern.startsWith("-") === true;
-    const target = pattern.replace(/^-+/, "");
-    for (const word of words) {
-      const stripped = word.replace(/^-+/, "");
-      if (is_flag === true && word.startsWith("-") === true && stripped === target) {
-        return pattern;
-      }
-      if (is_flag === false && word === pattern) {
-        return pattern;
-      }
-    }
+  const plumbing = /commit-tree|update-ref/.exec(command);
+  if (plumbing !== null) {
+    return plumbing[0];
   }
-  return undefined;
+  const verb = /(?:^|\s)(-{0,2})(commit|push)(?=\s|$)/.exec(command);
+  if (verb === null) {
+    return undefined;
+  }
+  return `${verb[1] ?? ""}${verb[2] ?? ""}`;
 }
 
-/** One git subprocess call in work_dir; returns {exit_code, output} pairs. */
-function run_git(args: readonly string[], work_dir: string): Promise<{ exit_code: number; output: string }> {
+/** One git subprocess; SIGKILL on abort so a timeout cannot leave a live child (terminal.ts wire_kill). */
+function run_git(
+  args: readonly string[],
+  work_dir: string,
+  signal?: AbortSignal,
+): Promise<{ exit_code: number; output: string }> {
   return new Promise((resolve) => {
     const child = spawn("git", args, { cwd: work_dir, env: process.env });
+    let settled = false;
     let out = "";
+    const on_abort = (): void => {
+      child.kill("SIGKILL");
+    };
+    const finish = (code: number): void => {
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      signal?.removeEventListener("abort", on_abort);
+      resolve({ exit_code: code, output: out });
+    };
+    if (signal?.aborted === true) {
+      on_abort();
+    } else {
+      signal?.addEventListener("abort", on_abort, { once: true });
+    }
     child.stdout?.on("data", (chunk: Buffer) => {
       out += chunk.toString("utf8");
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       out += chunk.toString("utf8");
     });
-    child.on("close", (code) => resolve({ exit_code: code ?? -1, output: out }));
-    child.on("error", () => resolve({ exit_code: -1, output: "" }));
+    // exit, not close: a grandchild holding inherited pipes must not keep git's caller alive after SIGKILL.
+    child.on("exit", (code, signal_name) => {
+      if (signal?.aborted === true || signal_name === "SIGKILL") {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        finish(code ?? -1);
+      }
+    });
+    child.on("close", (code) => finish(code ?? -1));
+    child.on("error", () => finish(-1));
   });
 }
 
-/** Validate commit paths against A2 + secret basenames; returns error or undefined. */
+/** True when the path exists and is not a regular file (a directory would stage sub/.env). */
+function existing_non_file(resolved: string): boolean {
+  try {
+    return statSync(resolved).isFile() !== true;
+  } catch {
+    return false;
+  }
+}
+
+/** Validate one path: pathspec magic, secrets, and non-files never reach git. */
+function invalid_commit_path(raw: string, work_dir: string): string | undefined {
+  if (raw === "" || raw === "." || raw === "./") {
+    return `invalid_path: ${raw === "" ? "(empty)" : raw}`;
+  }
+  if (PATHSPEC_MAGIC.test(raw) === true) {
+    return `invalid_path: ${raw}`;
+  }
+  const resolved = resolve_safe_path(work_dir, raw);
+  if (resolved === path.resolve(work_dir)) {
+    return `invalid_path: ${raw} resolves to work_dir`;
+  }
+  if (is_secret_path(raw) === true) {
+    return `secret_path: ${raw}`;
+  }
+  if (existing_non_file(resolved) === true) {
+    return `invalid_path: ${raw} is not a file`;
+  }
+  return undefined;
+}
+
+/** Validate commit paths against A2 + pathspec + secret basenames; returns error or undefined. */
 function validate_paths(paths: readonly string[], work_dir: string): string | undefined {
   if (paths.length < 1 || paths.length > 50) {
     return "paths_must_have_1_to_50_entries";
   }
   for (const raw of paths) {
-    if (raw === "" || raw === "." || raw === "./") {
-      return `invalid_path: ${raw === "" ? "(empty)" : raw}`;
-    }
-    const resolved = resolve_safe_path(work_dir, raw);
-    if (resolved === path.resolve(work_dir)) {
-      return `invalid_path: ${raw} resolves to work_dir`;
-    }
-    if (is_secret_path(raw) === true) {
-      return `secret_path: ${raw}`;
+    const bad = invalid_commit_path(raw, work_dir);
+    if (bad !== undefined) {
+      return bad;
     }
   }
   return undefined;
@@ -135,33 +184,23 @@ function git_commit_tool(): Tool {
       if (invalid !== undefined) {
         return { ok: false, output: "", error: invalid };
       }
-      const head = await run_git(["rev-parse", "--verify", "HEAD"], context.work_dir);
+      const head = await run_git(["rev-parse", "--verify", "HEAD"], context.work_dir, context.signal);
       if (head.exit_code !== 0) {
         return { ok: false, output: "", error: "no_head_commit: refusing to commit on an unborn branch" };
       }
-      const add = await run_git(["add", "--", ...path_strings], context.work_dir);
+      const add = await run_git([...HOOKS_OFF, "add", "--", ...path_strings], context.work_dir, context.signal);
       if (add.exit_code !== 0) {
-        return { ok: false, output: "", error: `git_add_failed: ${add.output.trim()}` };
+        return { ok: false, output: "", error: clamp_output(`git_add_failed: ${add.output.trim()}`) };
       }
       const commit = await run_git(
-        [
-          "-c",
-          "user.name=lich",
-          "-c",
-          "user.email=lich@localhost",
-          "commit",
-          "--only",
-          "-m",
-          message,
-          "--",
-          ...path_strings,
-        ],
+        [...HOOKS_OFF, "-c", "user.name=lich", "-c", "user.email=lich@localhost", "commit", "--only", "-m", message, "--", ...path_strings],
         context.work_dir,
+        context.signal,
       );
       if (commit.exit_code !== 0) {
-        return { ok: false, output: "", error: `git_commit_failed: ${commit.output.trim()}` };
+        return { ok: false, output: "", error: clamp_output(`git_commit_failed: ${commit.output.trim()}`) };
       }
-      const sha = await run_git(["rev-parse", "--short", "HEAD"], context.work_dir);
+      const sha = await run_git(["rev-parse", "--short", "HEAD"], context.work_dir, context.signal);
       return { ok: true, output: `${sha.output.trim()} ${path_strings.join(" ")}` };
     },
   };

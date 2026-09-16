@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import { ToolExecutor } from "../src/tools/executor.js";
@@ -88,7 +90,19 @@ describe("run_tests", () => {
     const { calls, runner } = recording_runner({ exit_code: 0 });
     set_test_command_runner(runner);
     await executor.execute("run_tests", { filter: "test/loop.test.ts" }, { work_dir: tmp_root, env: {} });
-    expect(calls[0]?.command).toContain("vitest.mjs run test/loop.test.ts");
+    expect(calls[0]?.command).toContain("vitest.mjs run 'test/loop.test.ts'");
+  });
+
+  it("quotes the filter so a semicolon cannot start a second statement", async () => {
+    const marker = path.join(tmp_root, "breakout");
+    const { calls, runner } = recording_runner({ exit_code: 0 });
+    set_test_command_runner(runner);
+    await executor.execute("run_tests", { filter: `; touch ${marker}` }, { work_dir: tmp_root, env: { LICH_TEST_COMMAND: "true" } });
+    const command = calls[0]?.command ?? "";
+    expect(command).toBe(`true '; touch ${marker}'`);
+    const probed = spawnSync("bash", ["-lc", command], { cwd: tmp_root });
+    expect(probed.status).toBe(0);
+    expect(existsSync(marker)).toBe(false);
   });
 
   it("runs in context.work_dir, not process.cwd()", async () => {
