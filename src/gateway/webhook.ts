@@ -6,6 +6,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { logger } from "../util/log.js";
 import { format_agent_reply } from "./format.js";
+import { read_platform_token } from "./token_env.js";
 import type { AdapterParams, PlatformAdapter } from "./types.js";
 
 export const DEFAULT_GATEWAY_PORT = 8089;
@@ -25,7 +26,7 @@ interface IncomingPayload {
 
 export function create_webhook_adapter(params: WebhookAdapterParams): PlatformAdapter {
   const port = params.port ?? read_port_env() ?? DEFAULT_GATEWAY_PORT;
-  const token = process.env.LICH_GATEWAY_TOKEN;
+  const token = read_platform_token(params.config, "webhook");
   let server: Server | undefined;
 
   return {

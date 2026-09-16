@@ -6,6 +6,12 @@
   (`create_agent_with_plugins`). one-shot, chat, tui, and the gateway
   bus no longer ignore plugin entries. broken plugins still warn and
   continue. `create_agent` stays plugin-free.
+- bare `lich` opens the TUI. On a TTY, when no config is in the search
+  chain and `LICH_MODEL` is unset, a readline wizard collects agent name,
+  provider, gateway env-var names (never secrets), and plugins, then
+  writes `.lich/config.json` once. Non-TTY stdin skips the wizard and
+  prints guidance. `lich init` writes the starter file through the same
+  writer and never overwrites an existing `.lich/config.json`.
 
 ## 0.4.0
 

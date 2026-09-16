@@ -4,6 +4,7 @@
  * an idle adapter. No resume support — reconnects are fresh by design.
  */
 import { logger } from "../util/log.js";
+import { platform_token_env, read_platform_token } from "./token_env.js";
 import type { AdapterParams, PlatformAdapter, RawSocket } from "./types.js";
 import { create_idle_adapter, open_socket, run_inbound_message } from "./types.js";
 
@@ -27,9 +28,9 @@ interface DiscordMessageData {
 }
 
 export function create_discord_adapter(params: AdapterParams): PlatformAdapter {
-  const token = process.env.LICH_DISCORD_BOT_TOKEN;
-  if (token === undefined || token.length === 0) {
-    return create_idle_adapter("discord", "LICH_DISCORD_BOT_TOKEN not set");
+  const token = read_platform_token(params.config, "discord");
+  if (token === undefined) {
+    return create_idle_adapter("discord", `${platform_token_env(params.config, "discord")} not set`);
   }
   let running = false;
   let socket: RawSocket | undefined;
@@ -130,11 +131,11 @@ async function on_message_create(params: AdapterParams, data: Record<string, unk
     message.author_id,
     message.content,
   );
-  await rest_send_message(message.channel_id, reply);
+  await rest_send_message(params, message.channel_id, reply);
 }
 
-async function rest_send_message(channel_id: string, text: string): Promise<void> {
-  const token = process.env.LICH_DISCORD_BOT_TOKEN;
+async function rest_send_message(params: AdapterParams, channel_id: string, text: string): Promise<void> {
+  const token = read_platform_token(params.config, "discord");
   if (token === undefined || channel_id === "") {
     return;
   }

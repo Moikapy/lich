@@ -11,7 +11,8 @@ import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./ag
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import { AgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
-import { load_config, config_template } from "./cli_config.js";
+import { load_config, config_template, existing_config_path, starter_config_object, write_lich_config } from "./cli_config.js";
+import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
 
 type ProviderKind = "openai_compat" | "anthropic" | "ollama";
 
@@ -52,6 +53,8 @@ function usage_text(): string {
     "lich — a TypeScript AI agent harness",
     "",
     "Usage:",
+    "  lich                   open the TUI (first run: setup wizard, then TUI)",
+    "  lich init              write .lich/config.json without the wizard (never overwrites)",
     '  lich "one shot task"   run a single task and print the reply',
     "  lich chat              interactive chat (commands: /exit, /quit)",
     "  lich tui               interactive terminal UI (ink)",
@@ -314,17 +317,100 @@ export async function run_chat(config: unknown): Promise<number> {
   }
 }
 
+function model_hint(options: CliOptions): string | undefined {
+  const model = options.overrides["provider_model"] ?? process.env.LICH_MODEL;
+  if (model === undefined || model.length === 0) {
+    return undefined;
+  }
+  return model;
+}
+
+function skip_setup_message(existing: string): string {
+  if (existing.endsWith(`${path.sep}.lich${path.sep}config.json`) === true) {
+    return `lich: .lich/config.json already exists at ${existing}; skipping setup`;
+  }
+  return `lich: config already exists at ${existing}; skipping setup`;
+}
+
+function work_dir_of(options: CliOptions): string {
+  return options.overrides["work_dir"] ?? process.cwd();
+}
+
+async function offer_wizard(work_dir: string, hint?: string): Promise<string | "cancelled"> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answers = await collect_setup_answers(work_dir, (prompt) => ask_wizard_line(rl, prompt), hint);
+    if (answers === undefined) {
+      return "cancelled";
+    }
+    const result = write_lich_config(work_dir, build_setup_config(answers));
+    process.stdout.write(`${result.message}\n`);
+    return result.path;
+  } finally {
+    rl.close();
+  }
+}
+
+async function maybe_first_run(options: CliOptions, work_dir: string): Promise<number | undefined> {
+  if (options.config_path !== undefined) {
+    return undefined;
+  }
+  const existing = existing_config_path(work_dir);
+  if (existing !== undefined) {
+    process.stdout.write(`${skip_setup_message(existing)}\n`);
+    options.config_path = existing;
+    return undefined;
+  }
+  const wrote = await offer_wizard(work_dir, model_hint(options));
+  if (wrote === "cancelled") {
+    process.stderr.write("lich: setup cancelled; nothing written\n");
+    return 1;
+  }
+  options.config_path = wrote;
+  return undefined;
+}
+
+async function run_bare(options: CliOptions): Promise<number> {
+  if (process.stdin.isTTY !== true) {
+    process.stderr.write("lich: stdin is not a TTY; skipping setup wizard. Run `lich init` to write .lich/config.json, or `lich --help` for usage.\n");
+    return 1;
+  }
+  const work_dir = work_dir_of(options);
+  const stopped = await maybe_first_run(options, work_dir);
+  if (stopped !== undefined) {
+    return stopped;
+  }
+  return run_tui_entry(build_config_for(options, "tui"));
+}
+
+function run_init(options: CliOptions): number {
+  if (options.positionals.length > 1) {
+    throw new Error("init takes no extra arguments");
+  }
+  const result = write_lich_config(work_dir_of(options), starter_config_object());
+  process.stdout.write(`${result.message}\n`);
+  if (result.written === true) {
+    process.stdout.write("next: edit the model in .lich/config.json if needed, then run `lich`\n");
+  }
+  return 0;
+}
+
 async function run_tui_entry(config: ReturnType<typeof build_config>): Promise<number> {
   const { run_tui } = await import("./tui.js");
   return run_tui(config);
 }
 
-async function run_gateway_entry(
-  config: ReturnType<typeof build_config>,
-  platforms: string[],
-): Promise<number> {
+function gateway_platforms(config: AgentConfig, cli_platforms: readonly string[]): readonly string[] {
+  if (cli_platforms.length > 0) {
+    return cli_platforms;
+  }
+  const configured = config.gateway?.platforms ?? [];
+  return configured.length === 0 ? ["webhook"] : configured;
+}
+
+async function run_gateway_entry(config: AgentConfig, platforms: string[]): Promise<number> {
   const { run_gateway } = await import("./gateway.js");
-  return run_gateway(config, platforms.length === 0 ? ["webhook"] : platforms);
+  return run_gateway(config, gateway_platforms(config, platforms));
 }
 
 function is_main_module(): boolean {
@@ -335,7 +421,7 @@ function is_main_module(): boolean {
   return import.meta.url === pathToFileURL(path.resolve(entry)).href;
 }
 
-async function main(argv: string[]): Promise<number> {
+export async function run_cli(argv: string[]): Promise<number> {
   const options = parse_args(argv);
   if (options.help === true) {
     process.stdout.write(`${usage_text()}\n`);
@@ -347,8 +433,10 @@ async function main(argv: string[]): Promise<number> {
   }
   const [first] = options.positionals;
   if (first === undefined) {
-    process.stderr.write(`${usage_text()}\n`);
-    return 1;
+    return run_bare(options);
+  }
+  if (first === "init") {
+    return run_init(options);
   }
   if (first === "config") {
     process.stdout.write(`${config_template()}\n`);
@@ -370,7 +458,7 @@ async function main(argv: string[]): Promise<number> {
 }
 
 if (is_main_module() === true) {
-  main(process.argv.slice(2))
+  run_cli(process.argv.slice(2))
     .then((code) => {
       process.exitCode = code;
     })
