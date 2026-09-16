@@ -15,6 +15,7 @@ describe("parse_agent_config", () => {
     expect(config.tools_enabled).toBe("all");
     expect(config.terminal_timeout_ms).toBe(60000);
     expect(config.log_level).toBe("info");
+    expect(config.theme).toBe("lich");
     expect(config.work_dir).toBe(process.cwd());
     expect(config.session_dir).toBe(`${process.cwd()}/.lich/sessions`);
   });

@@ -306,6 +306,7 @@ describe("Agent with plugins", () => {
     });
     const config: AgentConfig = {
       agent_name: "lich",
+      theme: "lich",
       providers: [{ kind: "openai_compat", name: "mock", model: "mock-model", base_url: "http://mock.local/v1", fetch_fn: fetch_script.fetch_fn }],
       work_dir,
       session_dir: path.join(work_dir, "sessions"),
@@ -337,6 +338,7 @@ describe("Agent with plugins", () => {
     });
     const config: AgentConfig = {
       agent_name: "lich",
+      theme: "lich",
       providers: [{ kind: "openai_compat", name: "mock", model: "mock-model", base_url: "http://mock.local/v1", fetch_fn: fetch_script.fetch_fn }],
       work_dir,
       session_dir: path.join(work_dir, "sessions"),

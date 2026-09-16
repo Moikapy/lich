@@ -1,9 +1,28 @@
-# lich
+# ⚱ lich
 
 Lich is a TypeScript AI agent harness (library + CLI) that runs a
 Think-Act-Observe loop: an LLM plans, calls tools, observes results, and
 repeats until it produces a final answer. It ships with provider failover,
 tool guardrails, context compression, and JSONL session persistence.
+
+## Lore glossary
+
+Lore names are prose only. Identifiers, config keys, event types, and tool
+names do not change. The default system prompt is a myth-free behavior spec;
+mythology lives in display strings only.
+
+| Lore term | Actual concept | Where it appears |
+| --- | --- | --- |
+| **phylacteries** | JSONL session files in `.lich/sessions/` — conversations survive process death | This glossary; TUI `/sessions` listing label |
+| **vessel-hopping** | Provider failover: 429/5xx retried with backoff, then the next provider takes over | This glossary |
+| **the lair / wards** | `work_dir` confinement + `path_escape` guardrails | This glossary |
+| **lair actions** | Plugin hooks that observe or veto tool calls | This glossary |
+| **familiars** | Gateway adapters (webhook/telegram/discord/twitch) routing into one shared agent | This glossary |
+| **spells** | Builtin tools in the registry | This glossary |
+| **distillation** | Context compression: old turns summarized to fit the token budget | TUI compress notice |
+| **the ritual is spent** | Turn-budget exhaustion | TUI + CLI budget notices |
+| **dormant / deliberating / casting** | idle / thinking / tool phases | TUI status bar phase labels |
+| **mortal** | The human user | TUI user transcript label |
 
 ## Documentation
 
@@ -183,6 +202,42 @@ lich tui
 
 Slash commands: `/help`, `/model`, `/usage`, `/clear`, `/sessions`,
 `/exit` (also `/quit`, `/q`). The transcript shows the newest 50 blocks.
+
+## Themes
+
+Display strings come from one active theme per process. Set `"theme": "lich"`
+in `.lich/config.json`, or pass `--theme <name>`. The built-in `lich` theme
+is frozen data: `~/.lich/themes/lich.json` is ignored. Any other name is read
+from `~/.lich/themes/<name>.json`. A missing file, invalid JSON, or a file
+that fails the theme schema logs one warning and falls back to `lich`. Themes
+do not change the system prompt, tool descriptions, event types, or slash
+command names.
+
+The built-in tagline is `the agent that will not stay dead`, and it appears once, in the TUI banner (`welcome`). Greppable keywords
+stay in place: budget notices still start with `budget exhausted`, and
+compression notices still start with `context compressed`.
+
+```json
+{
+  "name": "vampire",
+  "agent_name": "vampire",
+  "glyph": "🦇",
+  "tagline": "night's clerk, unpaid",
+  "welcome": "🦇 vampire v{version} — night's clerk, unpaid · {model} ({kind})",
+  "goodbye": "dawn approaches",
+  "response_label": "vampire",
+  "user_label": "mortal",
+  "phase_labels": { "idle": "sleeping", "thinking": "scheming", "tool": "feeding" },
+  "notices": {
+    "budget_exhausted": "budget exhausted — the blood bank is dry (turn cap reached)",
+    "compressed": "context compressed — memories enthralled (summary {chars} chars)",
+    "sessions": "coffins ({count}):"
+  }
+}
+```
+
+`welcome` substitutes `{version}`, `{model}`, and `{kind}`. `notices.compressed`
+substitutes `{chars}`; `notices.sessions` substitutes `{count}`.
 
 ## Development
 

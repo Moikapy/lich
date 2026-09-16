@@ -55,7 +55,7 @@ export function config_template(): string {
   if (kind === "ollama") {
     provider["base_url"] = "http://localhost:11434";
   }
-  return JSON.stringify({ providers: [provider], max_turns: 25 }, null, 2);
+  return JSON.stringify({ providers: [provider], max_turns: 25, theme: "lich" }, null, 2);
 }
 
 /** mkdir -p `${work_dir}/.lich` and return the directory path. */

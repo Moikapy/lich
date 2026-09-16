@@ -74,6 +74,7 @@ import { read_platform_token } from "../src/gateway/token_env.js";
 import { build_setup_config, collect_setup_answers } from "../src/setup_wizard.js";
 import { run_cli } from "../src/cli.js";
 import { tui_banner_text } from "../src/tui/state.js";
+import { LICH_THEME } from "../src/util/lore.js";
 
 const created: string[] = [];
 const saved_env: Record<string, string | undefined> = {};
@@ -410,8 +411,8 @@ describe("setup wizard fields", () => {
     expect(config.gateway?.platforms).toEqual(["telegram", "webhook"]);
     expect(config.gateway?.token_envs).toEqual({ telegram: "MY_TG_TOKEN", webhook: "LICH_GATEWAY_TOKEN" });
     expect(config.plugins).toEqual([".lich/plugins/demo.ts"]);
-    expect(tui_banner_text(config.agent_name, "0.3.0", config.providers[0]?.model ?? "", config.providers[0]?.kind ?? "")).toBe(
-      "ada v0.3.0 — claude-test (anthropic)",
+    expect(tui_banner_text(LICH_THEME, "0.3.0", config.providers[0]?.model ?? "", config.providers[0]?.kind ?? "")).toBe(
+      "⚱ lich v0.3.0 — the agent that will not stay dead · claude-test (anthropic)",
     );
     process.env.MY_TG_TOKEN = "super-secret";
     try {

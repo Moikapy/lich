@@ -43,6 +43,7 @@ Flags work before or after the subcommand. Every value flag can also be set via 
 | `--system-prompt <s>` | Replaces the default system prompt. | built-in concise-assistant prompt |
 | `--session-dir <path>` | Transcript directory. | `<work_dir>/.lich/sessions` |
 | `--log-level <level>` | `debug` \| `info` \| `warn` \| `error`. | `info` |
+| `--theme <name>` | Display theme loaded once at startup. `lich` is built-in; other names read `~/.lich/themes/<name>.json`. | `lich` |
 
 Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a positive integer`. Unknown flags fail with `unknown flag: --foo`. A flag missing its value fails with `<flag> requires a value`.
 
@@ -95,7 +96,8 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
   "compress_threshold": 0.8,
   "session_dir": "/home/me/project/.lich/sessions",
   "terminal_timeout_ms": 60000,
-  "log_level": "info"
+  "log_level": "info",
+  "theme": "lich"
 }
 ```
 
@@ -111,7 +113,8 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `providers[].timeout_ms` | positive int | none | Per-request abort deadline. |
 | `providers[].think` | boolean | – | Ollama only: request thinking mode. |
 | `providers[].keep_alive` | string | – | Ollama only: model residency (e.g. `"10m"`). |
-| `agent_name` | string | `lich` | Display name in the TUI banner. |
+| `agent_name` | string | `lich` | Wizard label. The TUI banner uses the active theme welcome string, not this field. |
+| `theme` | string | `lich` | Display theme name. See [Themes](../../README.md#themes). |
 | `gateway` | object | omitted | Optional. `platforms` (`webhook` \| `telegram` \| `discord` \| `twitch`) and `token_envs` (platform → env-var name). Secrets stay in the environment. |
 | `system_prompt` | string | built-in | Replaces the default system prompt. |
 | `max_turns` | int >= 1 | `25` | Turn budget per run. |
