@@ -6,7 +6,7 @@
 
 ```sh
 lich                   # open the TUI; first run on a TTY starts the setup wizard
-lich init              # write .lich/config.json without the wizard (never overwrites)
+lich init              # write .lich/config.json without the wizard (flags apply; never overwrites)
 lich "one shot task"   # run a single task and print the reply
 lich chat              # interactive chat (commands: /exit, /quit)
 lich tui               # interactive terminal UI (ink)
@@ -17,7 +17,7 @@ lich --version         # print 0.3.0
 ```
 
 - **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if neither `.lich/config.json` nor `~/.config/lich/config.json` exists and `LICH_MODEL` / `--model` is unset, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. An existing `.lich/config.json` skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
-- **`lich init`** writes that starter file without prompts, using the same writer as the wizard. It never overwrites an existing `.lich/config.json`. `.lich/` is gitignored.
+- **`lich init`** writes that starter file without prompts, using the same writer as the wizard. Existing flags such as `--model` are written into the file and win over `LICH_MODEL`. It never overwrites an existing `.lich/config.json`. `.lich/` is gitignored.
 - **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr.
 - **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer.
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).

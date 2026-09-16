@@ -54,7 +54,7 @@ function usage_text(): string {
     "",
     "Usage:",
     "  lich                   open the TUI (first run: setup wizard, then TUI)",
-    "  lich init              write .lich/config.json without the wizard (never overwrites)",
+    "  lich init              write .lich/config.json without the wizard (flags apply; never overwrites)",
     '  lich "one shot task"   run a single task and print the reply',
     "  lich chat              interactive chat (commands: /exit, /quit)",
     "  lich tui               interactive terminal UI (ink)",
@@ -383,13 +383,24 @@ async function run_bare(options: CliOptions): Promise<number> {
   return run_tui_entry(build_config_for(options, "tui"));
 }
 
+function model_still_placeholder(config: Record<string, unknown>): boolean {
+  const providers = config["providers"];
+  const first = Array.isArray(providers) === true ? providers[0] : undefined;
+  if (typeof first !== "object" || first === null) {
+    return false;
+  }
+  return (first as Record<string, unknown>)["model"] === "<model-name>";
+}
+
 function run_init(options: CliOptions): number {
   if (options.positionals.length > 1) {
     throw new Error("init takes no extra arguments");
   }
-  const result = write_lich_config(work_dir_of(options), starter_config_object());
+  const config = starter_config_object();
+  apply_overrides(config, options.overrides);
+  const result = write_lich_config(work_dir_of(options), config);
   process.stdout.write(`${result.message}\n`);
-  if (result.written === true) {
+  if (result.written === true && model_still_placeholder(config) === true) {
     process.stdout.write("next: edit the model in .lich/config.json if needed, then run `lich`\n");
   }
   return 0;

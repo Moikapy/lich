@@ -184,6 +184,7 @@ describe("lich init and bare lich", () => {
         const init_file = project_config_path(init_dir);
         const before = readFileSync(init_file, "utf8");
         expect(JSON.parse(before)).toMatchObject({ providers: [{ kind: "ollama" }] });
+        expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toContain("edit the model");
         stdout.mockClear();
         expect(await run_cli(["init", "--work-dir", init_dir])).toBe(0);
         expect(readFileSync(init_file, "utf8")).toBe(before);
@@ -194,6 +195,45 @@ describe("lich init and bare lich", () => {
         restore_tty();
       }
     });
+  });
+
+  it("writes --model once, does not overwrite, and does not read a prompt", async () => {
+    await without_model_env(async () => {
+      const dir = make_temp_dir("init-model");
+      wizard.lines = ["should-not-be-read"];
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        expect(await run_cli(["init", "--model", "script-model", "--work-dir", dir])).toBe(0);
+        const file = project_config_path(dir);
+        const body = readFileSync(file, "utf8");
+        expect(JSON.parse(body)).toMatchObject({ providers: [{ model: "script-model" }] });
+        expect(body).not.toContain("<model-name>");
+        expect(stdout.mock.calls.map((call) => String(call[0])).join("")).not.toContain("edit the model");
+        expect(wizard.lines).toEqual(["should-not-be-read"]);
+        stdout.mockClear();
+        expect(await run_cli(["init", "--model", "other-model", "--work-dir", dir])).toBe(0);
+        expect(readFileSync(file, "utf8")).toBe(body);
+        expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toContain("not overwriting");
+        expect(wizard.lines).toEqual(["should-not-be-read"]);
+      } finally {
+        stdout.mockRestore();
+      }
+    });
+  });
+
+  it("lets init flags win over LICH_MODEL", async () => {
+    const dir = make_temp_dir("init-flag-wins");
+    process.env.LICH_MODEL = "from-env";
+    process.env.LICH_PROVIDER_KIND = "ollama";
+    try {
+      expect(await run_cli(["init", "--work-dir", dir, "--model", "from-flag", "--provider-kind", "anthropic"])).toBe(0);
+      expect(JSON.parse(readFileSync(project_config_path(dir), "utf8"))).toMatchObject({
+        providers: [{ kind: "anthropic", model: "from-flag" }],
+      });
+    } finally {
+      delete process.env.LICH_MODEL;
+      delete process.env.LICH_PROVIDER_KIND;
+    }
   });
 
   it("skips the wizard when .lich/config.json already exists", async () => {
