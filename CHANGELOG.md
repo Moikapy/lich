@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- fix the CLI so bun's global bin enters main (symlink argv no longer skips the entry).
+- read LICH_VERSION from package.json so lich --version is not stuck at 0.3.0.
+
 ## 0.5.0
 
 - add a `game_bridge` example plugin that queues batched enemy actions
