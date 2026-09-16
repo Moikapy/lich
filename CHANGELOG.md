@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
+
+- Fix: published CLI bin now works — `dist/cli.js` shipped without its
+  `#!/usr/bin/env node` shebang, so the `lich` command failed after npm
+  install; shebang restored (5d7d9c9).
+- Fix: TUI header showed a stale hardcoded version; now reads LICH_VERSION
+  to match the package.
+- Docs: npm install is the primary usage path (package now published);
+  new Updating section in getting-started; docs-site fixes (dead links,
+  vitepress base for the pages subpath).
+- Tests: suite passes under both vitest and `bun test`
+  (runner-independent stubs); portable fixtures — no more NAS-hardcoded
+  paths.
+- Dev: `bun release patch|minor|major` release pipeline
+  (scripts/release.ts) — version bump, pack, and audit.
+
+## 0.3.0
 
 - Plugin system (v0.3.0): load user-authored tools and lifecycle hooks from
   explicit module paths (`plugins` config array). Hooks cover
