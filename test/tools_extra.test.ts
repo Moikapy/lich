@@ -1,4 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
@@ -13,6 +15,35 @@ let executor: ToolExecutor;
 function fake_response(body: string, init: { status?: number; headers?: Record<string, string> } = {}): Response {
   const status = init.status ?? 200;
   return new Response(body, { status, headers: init.headers ?? {} });
+}
+
+const real_fetch: typeof fetch = globalThis.fetch;
+
+/** Assign mock_fn as the global fetch; restore_fetch() undoes it. */
+function stub_fetch(mock_fn: typeof fetch): void {
+  globalThis.fetch = mock_fn as typeof fetch;
+}
+
+/** Restore the real global fetch captured before any stubbing. */
+function restore_fetch(): void {
+  globalThis.fetch = real_fetch;
+}
+
+const MARKER_NAME = "lich_pl_test_marker_7f3d";
+
+interface MarkerProcess {
+  name: string;
+  child: ChildProcess;
+}
+
+/** Spawn a uniquely-named sleeper so process_list filtering is deterministic. */
+async function spawn_marker_process(): Promise<MarkerProcess> {
+  const child = spawn("bash", ["-c", `exec -a ${MARKER_NAME} sleep 60`], { stdio: "ignore" });
+  await new Promise<void>((resolve) => {
+    child.on("spawn", () => resolve());
+    child.on("error", () => resolve());
+  });
+  return { name: MARKER_NAME, child };
 }
 
 async function write_temp(relative: string, content: string | Buffer): Promise<void> {
@@ -92,7 +123,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  restore_fetch();
   vi.restoreAllMocks();
   delete process.env.LICH_TEST_SECRET_1;
   delete process.env.LICH_TEST_PLAIN;
@@ -104,10 +135,9 @@ afterAll(async () => {
 
 describe("fetch_url", () => {
   it("returns status header, html marker, and clamped body", async () => {
-    const fetch_mock = vi.fn(async () =>
+    stub_fetch(vi.fn(async () =>
       fake_response("<html><body>hello world</body></html>", { headers: { "content-type": "text/html; charset=utf-8" } }),
-    );
-    vi.stubGlobal("fetch", fetch_mock);
+    ));
     const result = await executor.execute("fetch_url", { url: "https://example.com/page", max_chars: 5000 });
     expect(result.ok).toBe(true);
     expect(result.output.startsWith("# 200 text/html; charset=utf-8 (")).toBe(true);
@@ -116,21 +146,19 @@ describe("fetch_url", () => {
   });
 
   it("maps non-2xx to http_<status> error", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => fake_response("nope", { status: 404, headers: { "content-type": "text/plain" } })));
+    stub_fetch(vi.fn(async () => fake_response("nope", { status: 404, headers: { "content-type": "text/plain" } })));
     const result = await executor.execute("fetch_url", { url: "https://example.com/missing" });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("http_404");
   });
 
   it("rejects image and octet-stream content types", async () => {
-    vi.stubGlobal(
-      "fetch",
+    stub_fetch(
       vi.fn(async () => fake_response("bytes", { headers: { "content-type": "image/png" } })),
     );
     const image = await executor.execute("fetch_url", { url: "https://example.com/pic.png" });
     expect(image.error).toBe("unsupported_content_type: image/png");
-    vi.stubGlobal(
-      "fetch",
+    stub_fetch(
       vi.fn(async () => fake_response("bytes", { headers: { "content-type": "application/octet-stream" } })),
     );
     const binary = await executor.execute("fetch_url", { url: "https://example.com/blob" });
@@ -150,7 +178,7 @@ describe("fetch_url", () => {
   });
 
   it("converts fetch failures into ok:false with a message", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => {
+    stub_fetch(vi.fn(async () => {
       throw new Error("connect ECONNREFUSED 127.0.0.1:1");
     }));
     const result = await executor.execute("fetch_url", { url: "https://127.0.0.1:1/x" });
@@ -161,7 +189,7 @@ describe("fetch_url", () => {
 
 describe("web_search", () => {
   it("parses results, unwraps ddg redirects, and decodes entities", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => fake_response(DDG_HTML, { headers: { "content-type": "text/html" } })));
+    stub_fetch(vi.fn(async () => fake_response(DDG_HTML, { headers: { "content-type": "text/html" } })));
     const result = await executor.execute("web_search", { query: "nodejs official site" });
     expect(result.ok).toBe(true);
     expect(result.output.includes("1. Node.js & More")).toBe(true);
@@ -171,18 +199,18 @@ describe("web_search", () => {
   });
 
   it("reports no results for empty html", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => fake_response("<html><body>nothing here</body></html>")));
+    stub_fetch(vi.fn(async () => fake_response("<html><body>nothing here</body></html>")));
     const result = await executor.execute("web_search", { query: "zero match query" });
     expect(result.ok).toBe(true);
     expect(result.output).toBe("no results");
   });
 
   it("wraps http failures as search_failed", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => fake_response("robot", { status: 403, headers: { "content-type": "text/plain" } })));
+    stub_fetch(vi.fn(async () => fake_response("robot", { status: 403, headers: { "content-type": "text/plain" } })));
     const denied = await executor.execute("web_search", { query: "anything" });
     expect(denied.ok).toBe(false);
     expect(denied.error).toBe("search_failed: http_403");
-    vi.stubGlobal("fetch", vi.fn(async () => {
+    stub_fetch(vi.fn(async () => {
       throw new Error("network down");
     }));
     const thrown = await executor.execute("web_search", { query: "anything" });
@@ -193,10 +221,10 @@ describe("web_search", () => {
 
 describe("http_request", () => {
   it("passes method, headers, and body through; renders status/content-type/body", async () => {
-    const fetch_mock = vi.fn(async (_url: string, init?: RequestInit) =>
+    const fetch_mock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
       fake_response('{"ok":true}', { headers: { "content-type": "application/json", "ratelimit-remaining": "59" } }),
     );
-    vi.stubGlobal("fetch", fetch_mock);
+    stub_fetch(fetch_mock);
     const result = await executor.execute("http_request", {
       url: "https://api.example.com/v1/items",
       method: "post",
@@ -218,8 +246,8 @@ describe("http_request", () => {
   });
 
   it("sends no body for GET and rejects invalid methods", async () => {
-    const fetch_mock = vi.fn(async (_url: string, init?: RequestInit) => fake_response("fine"));
-    vi.stubGlobal("fetch", fetch_mock);
+    const fetch_mock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => fake_response("fine"));
+    stub_fetch(fetch_mock);
     const result = await executor.execute("http_request", { url: "https://api.example.com/ping", method: "GET", body: "ignored" });
     expect(result.ok).toBe(true);
     const call = fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined;
@@ -243,9 +271,14 @@ describe("process_list", () => {
     const filtered = await executor.execute("process_list", { filter: "no_such_filter_xyz" });
     expect(filtered.ok).toBe(true);
     expect(filtered.output).toBe("no matching processes");
-    const self_filter = await executor.execute("process_list", { filter: "vitest" });
-    expect(self_filter.ok).toBe(true);
-    expect(self_filter.output.includes("vitest")).toBe(true);
+    const marker = await spawn_marker_process();
+    try {
+      const marker_filter = await executor.execute("process_list", { filter: marker.name });
+      expect(marker_filter.ok).toBe(true);
+      expect(marker_filter.output.includes(marker.name)).toBe(true);
+    } finally {
+      marker.child.kill("SIGKILL");
+    }
   });
 });
 
