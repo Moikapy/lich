@@ -28,7 +28,7 @@ flowchart TB
     CLIENTS["openai_compat / anthropic / ollama<br/>HTTP clients"]
     EXEC["ToolExecutor<br/>(src/tools/executor.ts)"]
     REG["ToolRegistry<br/>(src/tools/registry.ts)"]
-    BUILTIN["12 builtin tools<br/>(src/tools/builtin/*)"]
+        BUILTIN["builtin tools<br/>(src/tools/builtin/*)"]
     COMP["ContextCompressor<br/>(src/context/compressor.ts)"]
     SESSION["SessionStore<br/>(src/session/store.ts)"]
 
@@ -168,7 +168,7 @@ Walkthrough of a single `Agent.run({ input })` call
 | `src/tools/guard.ts` | Path confinement, timeouts, clamping, arg coercion. |
 | `src/tools/registry.ts` | Name-keyed tool registry; duplicate rejection. |
 | `src/tools/executor.ts` | Never-throw execution with timeout and abort. |
-| `src/tools/builtin/*` | The 12 builtin tools (see [tools](./tools.md)). |
+| `src/tools/builtin/*` | Builtin tools, including `run_tests` (see [tools](./tools.md)). |
 | `src/gateway/bus.ts` | Conversation-keyed runner over one shared `Agent`. |
 | `src/gateway/runner.ts` | Adapter construction, signal handling, process lifetime. |
 | `src/gateway/{telegram,discord,twitch,webhook}.ts` | Platform adapters. |

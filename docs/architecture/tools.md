@@ -138,8 +138,9 @@ form back with `parse_tool_message_content` (src/tui/state.ts).
 
 ## Builtin catalog
 
-Twelve tools, registered by `register_builtin_tools`
-([`src/tools/builtin/index.ts`](../../src/tools/builtin/index.ts)):
+Registered by `register_builtin_tools`
+([`src/tools/builtin/index.ts`](../../src/tools/builtin/index.ts)).
+Docs tools join the list only when a docs root resolves.
 
 | Tool | Key args | Implementation insight |
 | --- | --- | --- |
@@ -155,12 +156,22 @@ Twelve tools, registered by `register_builtin_tools`
 | `process_list` | `filter?`, `max_results?` | Reads `/proc` synchronously: numeric dirs are pids, `cmdline` is NUL-separated; missing entries (process died mid-scan) read as empty. |
 | `disk_usage` | `path?`, `max_entries?` | One `du -sb` subprocess per depth-1 entry with a 10 s timeout; sorted desc with a `TOTAL` row; `du` missing yields `du_unavailable`. |
 | `env_get` | `keys?`, `prefix?`, `reveal?` | Values are hidden unless `reveal`; names matching `/(secret\|token\|password\|key\|credential\|auth)/i` are **always** masked as `<redacted: N chars>`. |
+| `run_tests` | `filter?` | Runs `LICH_TEST_COMMAND` (default `node node_modules/vitest/vitest.mjs run`) in `work_dir` via `bash -lc`. `timeout_ms` is 600000. A module mutex makes a concurrent call return `{ok:false, error:"run_tests_busy"}`. `ok` is the structured pass/fail the gatekeeper reads; output is clamped to 2000 chars. One lich process per repo — a second process is fail-closed busy or failed. |
 
 The three HTTP tools (`fetch_url`, `web_search`, `http_request`) share
 helpers from `fetch_url.ts`: `valid_http_url` (URL parse + protocol
 allowlist), `compose_abort_signal` (per-call `AbortSignal.timeout` merged
 with the executor's cancellation via `AbortSignal.any`), and `clamp_int_arg`
 (floored, bounded to `[1, max]`).
+
+## Docs search and skills
+
+`docs_search` scores sections under the resolved docs root (memoized) and, when
+`<work_dir>/.lich/skills/` exists, also walks that directory. The skills
+candidate is existence-only: it does not need `index.md`. The walk is fresh
+on every call — user-writable skill files are not memoized into the package
+docs cache. Skills are reference data, written with `write_file`, not
+instructions. See the [plugins guide](../user-guide/plugins.md#skills-and-memory).
 
 ## Registry
 

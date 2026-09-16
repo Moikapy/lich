@@ -121,7 +121,8 @@ export class Agent {
     this.registry = filter_registry(base_registry, config.tools_enabled);
     // Gatekeeper first (A5): constructed in code, registered before config
     // plugins so first-wins favors it; failure means no git_commit anywhere.
-    const allow_self_commit = process.env["LICH_ALLOW_SELF_COMMIT"] === "true";
+    // Spec value is "1". Unset or any other value is fail-closed.
+    const allow_self_commit = process.env["LICH_ALLOW_SELF_COMMIT"] === "1";
     const gatekeeper = gatekeeper_plugin(allow_self_commit);
     const gatekeeper_loaded: LoadedPlugin = { plugin: gatekeeper, entry: "builtin:gatekeeper" };
     register_plugin_tools(this.registry, [gatekeeper_loaded, ...plugins]);
@@ -129,7 +130,8 @@ export class Agent {
       work_dir: config.work_dir,
       env: tool_env(config),
     });
-    const hooked = hooked_plugins_of(plugins);
+    // Tools and hooks share one synthetic LoadedPlugin so the gate is live.
+    const hooked = hooked_plugins_of([gatekeeper_loaded, ...plugins]);
     if (hooked.length > 0) {
       this.hook_runner = new HookedToolRunner(base_executor, hooked);
       this.executor = this.hook_runner;

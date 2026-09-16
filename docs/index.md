@@ -8,14 +8,14 @@ outline: [2, 3]
 
 Lich is a TypeScript AI agent harness: a library and a CLI that run a chat model inside a Think-Act-Observe loop. A chat wrapper forwards one prompt and prints one completion. A harness keeps going: the model plans (think), calls tools such as `read_file` or `terminal` (act), reads the tool results (observe), and repeats until it can produce a final answer. Lich wraps that loop with the machinery real deployments need: provider failover with bounded retries, path confinement and output clamps on every tool, context compression when the transcript grows past a token budget, and append-only JSONL session transcripts.
 
-One package, four ways to drive the same agent: a one-shot CLI, an interactive chat REPL, an ink-based terminal UI, and a long-running messaging gateway that bridges Telegram, Discord, Twitch, and a zero-config HTTP webhook. All four share the same twelve builtin tools, the same provider configuration, and the same session store.
+One package, four ways to drive the same agent: a one-shot CLI, an interactive chat REPL, an ink-based terminal UI, and a long-running messaging gateway that bridges Telegram, Discord, Twitch, and a zero-config HTTP webhook. All four share the same builtin tools, the same provider configuration, and the same session store.
 
 ## Feature overview
 
 | Capability | What it gives you |
 | --- | --- |
 | Providers | `openai_compat`, `anthropic`, and `ollama` with automatic failover between configured providers; 429/5xx and network errors retry with backoff before failing over. |
-| Tools | Twelve builtins (file read/write/edit, directory listing, shell, grep, HTTP fetch/request, web search, process list, disk usage, env inspection), all confined to the working directory. |
+| Tools | Builtins (file read/write/edit, directory listing, shell, grep, HTTP fetch/request, web search, process list, disk usage, env inspection, `run_tests`), all confined to the working directory. `git_commit` is the gatekeeper's tool, not a config plugin. |
 | Context compression | Transcript summarized in place when estimated tokens cross `compress_threshold` of `context_budget_tokens`; the 8 most recent turns always stay verbatim. |
 | Sessions | Every run persists a `.jsonl` transcript under `.lich/sessions/`, labeled by origin (`tui`, `gw:<platform>:<chat>`). |
 | CLI | One-shot tasks, chat REPL, TUI, gateway, and a `config` template command, all with flag/env/config-file configuration. |
@@ -33,7 +33,7 @@ One package, four ways to drive the same agent: a one-shot CLI, an interactive c
 | [TUI guide](user-guide/tui.md) | Run the terminal UI and use slash commands and the status bar. |
 | [Gateway guide](user-guide/gateway.md) | Wire Telegram, Discord, Twitch, and the HTTP webhook to one agent. |
 | [Library guide](user-guide/library.md) | Embed the agent in TypeScript with events and multi-turn history. |
-| [Plugins guide](user-guide/plugins.md) | Add your own tools and lifecycle hooks to the agent. |
+| [Plugins guide](user-guide/plugins.md) | Add your own tools and lifecycle hooks, and run the self-improvement loop. |
 | [Architecture overview](architecture/overview.md) | Understand how the harness works inside. |
 
 ## How it works

@@ -47,7 +47,7 @@ const result = await run_agent(
 
 ## Agent class
 
-`new Agent(config)` (or `create_agent(raw)`) builds the provider router, registers the twelve builtin tools (filtered by `tools_enabled`), and exposes:
+`new Agent(config)` (or `create_agent(raw)`) builds the provider router, registers the builtin tools (filtered by `tools_enabled`) plus the gatekeeper's `git_commit`, and exposes:
 
 | Member | Type | Purpose |
 | --- | --- | --- |
@@ -140,6 +140,8 @@ const config = {
 ```
 
 Listed providers form a failover chain tried in order: `rate_limit`/`network` errors retry with backoff (3 attempts) on the current provider before failing over; `auth`, `overflow`, and `bad_request` fail over immediately. The last error is rethrown when all providers fail.
+
+`LICH_ALLOW_SELF_COMMIT` and `LICH_TEST_COMMAND` are process-env knobs, not config fields. See the [CLI environment](cli.md#self-improvement-environment).
 
 ## Custom tool filtering
 
