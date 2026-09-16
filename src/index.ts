@@ -1,7 +1,19 @@
 /**
- * Public surface of the lich agent harness. Pure re-exports only.
+ * Public surface of the lich agent harness. Pure re-exports, plus the package version.
  */
-export const LICH_VERSION = "0.3.0";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+function read_package_version(): string {
+  const pkg_path = fileURLToPath(new URL("../package.json", import.meta.url));
+  const pkg = JSON.parse(readFileSync(pkg_path, "utf8")) as { version?: unknown };
+  if (typeof pkg.version !== "string" || pkg.version.length === 0) {
+    throw new Error("package.json is missing version");
+  }
+  return pkg.version;
+}
+
+export const LICH_VERSION = read_package_version();
 
 export { Agent, create_agent, run_agent, create_agent_with_plugins } from "./agent/agent.js";
 export type { AgentRunOptions, AgentRunResult } from "./agent/agent.js";

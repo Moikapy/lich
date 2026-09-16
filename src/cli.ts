@@ -3,7 +3,7 @@
  * Thin zero-dependency CLI for lich: one-shot tasks, interactive chat,
  * config files, and environment-based provider resolution.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createInterface, type Interface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -437,12 +437,46 @@ async function run_gateway_entry(config: AgentConfig, platforms: string[]): Prom
   return run_gateway(config, gateway_platforms(config, platforms));
 }
 
+export interface CliEntryInput {
+  bun: boolean;
+  import_meta_main: boolean | undefined;
+  module_url: string;
+  argv1: string | undefined;
+}
+
+/** Bun uses `import.meta.main`. Node compares argv to this file, including a bin symlink. */
+export function is_cli_entry(input: CliEntryInput): boolean {
+  if (input.bun === true) {
+    return input.import_meta_main === true;
+  }
+  return node_entry_matches(input.module_url, input.argv1);
+}
+
 function is_main_module(): boolean {
-  const entry = process.argv[1];
-  if (entry === undefined) {
+  return is_cli_entry({
+    bun: process.versions.bun !== undefined,
+    import_meta_main: import.meta.main,
+    module_url: import.meta.url,
+    argv1: process.argv[1],
+  });
+}
+
+function node_entry_matches(module_url: string, entry: string | undefined): boolean {
+  if (entry === undefined || entry === "") {
     return false;
   }
-  return import.meta.url === pathToFileURL(path.resolve(entry)).href;
+  const resolved = path.resolve(entry);
+  if (module_url === pathToFileURL(resolved).href) {
+    return true;
+  }
+  return same_real_file(fileURLToPath(module_url), resolved);
+}
+
+function same_real_file(left: string, right: string): boolean {
+  if (existsSync(left) === false || existsSync(right) === false) {
+    return false;
+  }
+  return realpathSync(left) === realpathSync(right);
 }
 
 export async function run_cli(argv: string[]): Promise<number> {

@@ -187,8 +187,19 @@ export async function run_lich_update(request: UpdateRequest): Promise<number> {
   return install_if_newer(request, registry);
 }
 
+function running_under_bun(): boolean {
+  return process.versions.bun !== undefined;
+}
+
 /** Default spawn. Forwards only `npm install` output; `npm view` stays quiet. */
 export function default_command_runner(command: string, args: readonly string[]): Promise<CommandResult> {
+  if (running_under_bun() === true) {
+    return bun_command_runner(command, args);
+  }
+  return node_command_runner(command, args);
+}
+
+function node_command_runner(command: string, args: readonly string[]): Promise<CommandResult> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -223,6 +234,51 @@ export function default_command_runner(command: string, args: readonly string[])
       finish({ exit_code: code ?? 1, stdout, stderr });
     });
   });
+}
+
+async function read_piped_text(
+  stream: ReadableStream<Uint8Array>,
+  forward: boolean,
+  write: (text: string) => void,
+): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const next = await reader.read();
+    if (next.done === true) {
+      return text;
+    }
+    const chunk = decoder.decode(next.value, { stream: true });
+    text += chunk;
+    if (forward === true) {
+      write(chunk);
+    }
+  }
+}
+
+function bun_command_runner(command: string, args: readonly string[]): Promise<CommandResult> {
+  const forward = args[0] === "install";
+  try {
+    const child = Bun.spawn([command, ...args], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return Promise.all([
+      read_piped_text(child.stdout, forward, (text) => {
+        process.stdout.write(text);
+      }),
+      read_piped_text(child.stderr, forward, (text) => {
+        process.stderr.write(text);
+      }),
+      child.exited,
+    ]).then(([stdout, stderr, exit_code]) => ({ exit_code, stdout, stderr }));
+  } catch (error) {
+    const coded = error as { code?: string; message?: string };
+    const stderr = typeof coded.message === "string" ? coded.message : "spawn failed";
+    return Promise.resolve({ exit_code: 127, stdout: "", stderr, error_code: coded.code });
+  }
 }
 
 export async function run_update(module_path: string): Promise<number> {
