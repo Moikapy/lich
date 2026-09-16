@@ -6,12 +6,13 @@
 import { readFileSync } from "node:fs";
 import { createInterface, type Interface } from "node:readline";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./agent/agent.js";
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import { AgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
 import { load_config, config_template, existing_config_path, starter_config_object, write_lich_config } from "./cli_config.js";
+import { run_update } from "./cli_update.js";
 import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
 
 type ProviderKind = "openai_compat" | "anthropic" | "ollama";
@@ -60,6 +61,7 @@ function usage_text(): string {
     "  lich tui               interactive terminal UI (ink)",
     "  lich gateway <plat..>  messaging gateway (webhook|telegram|discord|twitch)",
     "  lich config            print a starter config template (save as .lich/config.json)",
+    "  lich update            install a newer @moikapy/lich from npm, if one exists",
     "  lich --help            show this help",
     "  lich --version         print version",
     "",
@@ -452,6 +454,12 @@ export async function run_cli(argv: string[]): Promise<number> {
   if (first === "config") {
     process.stdout.write(`${config_template()}\n`);
     return 0;
+  }
+  if (first === "update") {
+    if (options.positionals.length > 1) {
+      throw new Error("update takes no arguments");
+    }
+    return run_update(fileURLToPath(import.meta.url));
   }
   if (first === "chat") {
     if (options.positionals.length > 1) {

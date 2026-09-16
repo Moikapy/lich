@@ -129,12 +129,20 @@ jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content)"' .lich
 
 ## Updating
 
-Lich updates in place with npm:
+Check the npm registry and install a newer release with:
+
+```sh
+lich update
+lich --version   # -> the version you just installed
+```
+
+`lich update` compares the installed version to `npm view @moikapy/lich version`. When the registry copy is newer, it runs the equivalent command:
 
 ```sh
 npm install -g @moikapy/lich@latest
-lich --version   # -> the version you just installed
 ```
+
+Exit any running `lich tui` or `lich gateway` first — npm cannot replace the package while those processes are running. A git clone updates with `git pull` instead; `npx` cannot persist an update.
 
 Updates never touch your data: the per-project `.lich/` directory holds your config and session transcripts, installers neither read nor migrate it, and it is gitignored by design so a checkout never collides with it. For what changed between versions, see the [changelog](https://github.com/moikapy/lich/blob/main/CHANGELOG.md).
 

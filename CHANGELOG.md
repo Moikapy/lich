@@ -12,6 +12,10 @@
   writes `.lich/config.json` once. Non-TTY stdin skips the wizard and
   prints guidance. `lich init` writes the starter file through the same
   writer and never overwrites an existing `.lich/config.json`.
+- add `lich update`: compare the installed version with `npm view
+  @moikapy/lich version` and, when newer, run
+  `npm install -g @moikapy/lich@latest`. git clones are told to
+  `git pull`; npx cannot persist an update.
 
 ## 0.4.0
 

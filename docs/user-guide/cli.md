@@ -12,6 +12,7 @@ lich chat              # interactive chat (commands: /exit, /quit)
 lich tui               # interactive terminal UI (ink)
 lich gateway <plat..>  # messaging gateway (webhook|telegram|discord|twitch)
 lich config            # print a starter config template
+lich update            # install a newer npm release, if one exists
 lich --help            # usage text
 lich --version         # print 0.3.0
 ```
@@ -22,6 +23,7 @@ lich --version         # print 0.3.0
 - **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer.
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
 - **Gateway** runs platform adapters (defaults to `webhook` when no platform is given). See the [Gateway guide](gateway.md). Unknown platform names are skipped with a warning; if none remain, the CLI exits `1`.
+- **Update** compares the installed version to the npm registry and, when a newer release exists, runs `npm install -g @moikapy/lich@latest`. Exit any running TUI or gateway first; npm cannot replace the package while those processes are running. A git clone is told to `git pull`. See [Updating](../getting-started.md#updating).
 
 The installed `lich` binary and `bun src/cli.ts` (from a repository clone) accept identical arguments.
 
