@@ -21,6 +21,7 @@
     "docs",
     "!docs/.vitepress/dist",
     "!docs/.vitepress/cache",
+    "examples/game_bridge",
     "README.md",
     "CHANGELOG.md"
   ],
