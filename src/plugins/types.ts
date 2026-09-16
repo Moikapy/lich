@@ -10,6 +10,12 @@ import type { Tool } from "../tools/types.js";
 /** Runtime info handed to every hook call. */
 export interface HookContext {
   work_dir: string;
+  /**
+   * This plugin's own per-run state sub-map. Every hook invocation receives
+   * a ctx exposing only the invoking plugin's bag; the bag is swapped fresh
+   * at each run start. Absent only on hand-built contexts outside the runner.
+   */
+  state?: Map<string, unknown>;
 }
 
 /** Argument passed to before_tool_call hooks. */
@@ -27,6 +33,9 @@ export interface BeforeToolCallResult {
 /** Argument passed to after_tool_call hooks. */
 export interface AfterToolCallInfo extends BeforeToolCallInfo {
   result_summary: string;
+  /** Structured executor outcome; gate on this, never parse result_summary. */
+  ok: boolean;
+  error?: string;
 }
 
 export interface RunEndInfo {

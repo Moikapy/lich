@@ -33,6 +33,8 @@ export interface LoopDeps {
   tools: ToolRunner;
   definitions: () => ToolDefinition[];
   emitter?: AgentEmitter;
+  /** Per-run ToolContext threaded to every tool execution (A6). */
+  tool_context?: ToolContext;
 }
 
 export interface LoopParams {
@@ -91,7 +93,7 @@ async function run_tool_calls(
 ): Promise<void> {
   for (const call of calls) {
     emitter?.emit({ type: "tool_call_start", turn, call });
-    const result = await deps.tools.execute(call.name, call.args);
+    const result = await deps.tools.execute(call.name, call.args, deps.tool_context);
     const tool_message: ToolMessage = {
       role: "tool",
       tool_call_id: call.id,
