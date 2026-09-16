@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0
+
+- add a self-improvement loop: `run_tests`, a gatekeeper plugin, and
+  `git_commit` (one commit per run, never pushes). `git_commit` is
+  registered by the gatekeeper, not the builtin tool list.
+- fail-closed unless `LICH_ALLOW_SELF_COMMIT=1` at startup; unset or any
+  other value vetoes `git_commit`. a commit also needs a green `run_tests`
+  on a tree with no later `write_file`/`edit_file`.
+- `run_tests` runs `LICH_TEST_COMMAND` in `work_dir` (default vitest) and
+  appends an optional filter as a quoted shell token.
+- `docs_search` finds markdown skills under `.lich/skills` (fresh walk, no
+  `index.md` gate). `MEMORY.md` is never auto-loaded.
+- close gatekeeper fail-open holes: git spawned with `hooksPath=/dev/null`,
+  pathspec magic rejected, denylist matches `commit-tree`/`update-ref` on
+  any occurrence, abort SIGKILLs the git child.
+- honor per-tool `timeout_ms` (terminal is 5 min) instead of a flat 30s
+  executor budget.
+
 ## 0.3.1
 
 - Fix: published CLI bin now works — `dist/cli.js` shipped without its
