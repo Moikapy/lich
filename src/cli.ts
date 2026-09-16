@@ -211,9 +211,20 @@ function apply_overrides(config: Record<string, unknown>, overrides: Record<stri
   apply_provider_override(config, overrides);
 }
 
+/** Same search as the wizard: `--work-dir` (else cwd), then the user-home file. */
+function load_discovered_config(work_dir: string): Record<string, unknown> | undefined {
+  const found = existing_config_path(work_dir);
+  if (found === undefined) {
+    return undefined;
+  }
+  return load_config(found);
+}
+
 function build_config(options: CliOptions): AgentConfig {
   const base =
-    options.config_path === undefined ? load_config() ?? { providers: [env_provider(options.overrides)] } : load_config_file(options.config_path);
+    options.config_path === undefined
+      ? load_discovered_config(work_dir_of(options)) ?? { providers: [env_provider(options.overrides)] }
+      : load_config_file(options.config_path);
   apply_overrides(base, options.overrides);
   const providers = base["providers"];
   if (Array.isArray(providers) === false || providers.length === 0) {
