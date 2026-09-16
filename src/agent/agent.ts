@@ -7,6 +7,7 @@ import { register_builtin_tools } from "../tools/builtin/index.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { HookedToolRunner } from "../plugins/hooks.js";
+import { gatekeeper_plugin } from "../plugins/builtin/gatekeeper.plugin.js";
 import { load_plugins, plugin_errors_summary, type LoadedPlugin } from "../plugins/loader.js";
 import type { HookContext, Plugin } from "../plugins/types.js";
 import type { Message, Usage } from "../providers/types.js";
@@ -117,7 +118,12 @@ export class Agent {
     const base_registry = new ToolRegistry();
     register_builtin_tools(base_registry);
     this.registry = filter_registry(base_registry, config.tools_enabled);
-    register_plugin_tools(this.registry, plugins);
+    // Gatekeeper first (A5): constructed in code, registered before config
+    // plugins so first-wins favors it; failure means no git_commit anywhere.
+    const allow_self_commit = process.env["LICH_ALLOW_SELF_COMMIT"] === "true";
+    const gatekeeper = gatekeeper_plugin(allow_self_commit);
+    const gatekeeper_loaded: LoadedPlugin = { plugin: gatekeeper, entry: "builtin:gatekeeper" };
+    register_plugin_tools(this.registry, [gatekeeper_loaded, ...plugins]);
     const base_executor = new ToolExecutor(this.registry, {
       work_dir: config.work_dir,
       env: tool_env(config),
