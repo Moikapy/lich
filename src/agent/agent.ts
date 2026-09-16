@@ -240,6 +240,6 @@ export async function run_agent(
   input: string,
   options?: { signal?: AbortSignal; label?: string },
 ): Promise<AgentRunResult> {
-  const agent = create_agent(raw_config);
+  const agent = await create_agent_with_plugins(raw_config);
   return agent.run({ input, signal: options?.signal, label: options?.label });
 }
