@@ -7,6 +7,8 @@ import type { AgentEvent } from "../agent/events.js";
 import type { AgentRunResult } from "../agent/agent.js";
 import type { AssistantMessage, Message, ToolCall, Usage } from "../providers/types.js";
 import { safe_json_parse, truncate_text } from "../util/json.js";
+import type { ThemeSpec } from "../util/lore.js";
+import { fill_template } from "../util/theme.js";
 
 export type UiPhase = "idle" | "thinking" | "tool";
 
@@ -107,9 +109,9 @@ export function parse_command(raw_input: string): ParsedInput {
   return { kind: "slash", name: body.slice(0, space_index), args: body.slice(space_index + 1).trim() };
 }
 
-/** Dim header line: agent name, version, model, provider kind. */
-export function tui_banner_text(agent_name: string, version: string, model: string, kind: string): string {
-  return `${agent_name} v${version} — ${model} (${kind})`;
+/** Dim header: the theme welcome string, the one tagline placement. */
+export function tui_banner_text(theme: ThemeSpec, version: string, model: string, kind: string): string {
+  return fill_template(theme.welcome, { version, model, kind });
 }
 
 /** 1234567 -> "1,234,567" (US grouping, matching the status bar style). */
@@ -129,12 +131,12 @@ function assistant_tool_line(call: ToolCall): string {
   return `  \u23bf ${truncate_text(args_json, TOOL_ARGS_PREVIEW_CHARS)}`;
 }
 
-function format_message_lines(message: Message): string[] {
+function format_message_lines(message: Message, theme: ThemeSpec): string[] {
   if (message.role === "user") {
-    return [`you \u203a ${message.content}`];
+    return [`${theme.user_label} \u203a ${message.content}`];
   }
   if (message.role === "assistant") {
-    const lines = [`lich \u203a ${message.content}`];
+    const lines = [`${theme.response_label} \u203a ${message.content}`];
     for (const call of message.tool_calls ?? []) {
       lines.push(assistant_tool_line(call));
     }
@@ -148,40 +150,40 @@ function format_message_lines(message: Message): string[] {
 }
 
 /** Map one transcript Message to display lines with its role tag. */
-export function format_message_block(message: Message): HistoryBlock {
+export function format_message_block(message: Message, theme: ThemeSpec): HistoryBlock {
   if (message.role === "tool") {
     const ok = message.is_error !== true;
-    return { role: ok === true ? "tool" : "error", lines: format_message_lines(message) };
+    return { role: ok === true ? "tool" : "error", lines: format_message_lines(message, theme) };
   }
   const roles: Record<Exclude<Message["role"], "tool">, BlockRole> = {
     system: "meta",
     user: "user",
     assistant: "lich",
   };
-  return { role: roles[message.role], lines: format_message_lines(message) };
+  return { role: roles[message.role], lines: format_message_lines(message, theme) };
 }
 
 /** Keep the newest `cap` non-system messages as renderable blocks. */
-export function split_history_blocks(messages: readonly Message[], cap: number): HistoryBlock[] {
+export function split_history_blocks(messages: readonly Message[], cap: number, theme: ThemeSpec): HistoryBlock[] {
   const visible = messages.filter((message) => message.role !== "system");
   const start = Math.max(0, visible.length - cap);
-  return visible.slice(start).map(format_message_block);
+  return visible.slice(start).map((message) => format_message_block(message, theme));
 }
 
-function assistant_result_block(message: AssistantMessage): HistoryBlock | undefined {
+function assistant_result_block(message: AssistantMessage, theme: ThemeSpec): HistoryBlock | undefined {
   if (message.content.length === 0) {
     return undefined;
   }
-  return { role: "lich", lines: [`lich \u203a ${message.content}`] };
+  return { role: "lich", lines: [`${theme.response_label} \u203a ${message.content}`] };
 }
 
 /** Post-run meta blocks: compression notices, budget, errors, final answer. */
-export function run_notice_blocks(result: AgentRunResult): HistoryBlock[] {
+export function run_notice_blocks(result: AgentRunResult, theme: ThemeSpec): HistoryBlock[] {
   const blocks: HistoryBlock[] = [];
   if (result.outcome.stopped_reason === "budget") {
-    blocks.push({ role: "error", lines: ["\u00b7 budget exhausted (turn cap reached)"] });
+    blocks.push({ role: "error", lines: [`\u00b7 ${fill_template(theme.notices.budget_exhausted, {})}`] });
   }
-  const final_block = result.outcome.final === undefined ? undefined : assistant_result_block(result.outcome.final);
+  const final_block = result.outcome.final === undefined ? undefined : assistant_result_block(result.outcome.final, theme);
   if (final_block !== undefined) {
     blocks.push(final_block);
   }
@@ -210,8 +212,9 @@ export function parse_tool_message_content(content: string): { ok: boolean; outp
   return { ok: true, output: content };
 }
 
-export function compress_notice_block(summary_chars: number): HistoryBlock {
-  return { role: "meta", lines: [`\u00b7 context compressed (summary ${summary_chars} chars)`] };
+export function compress_notice_block(summary_chars: number, theme: ThemeSpec): HistoryBlock {
+  const line = fill_template(theme.notices.compressed, { chars: summary_chars });
+  return { role: "meta", lines: [`\u00b7 ${line}`] };
 }
 
 export function error_notice_block(message: string): HistoryBlock {
@@ -250,12 +253,13 @@ export interface SessionEntryInfo {
 }
 
 /** Newest-first session listing, capped at `cap` entries. */
-export function session_list_block(entries: readonly SessionEntryInfo[], cap: number = 10): HistoryBlock {
+export function session_list_block(entries: readonly SessionEntryInfo[], theme: ThemeSpec, cap: number = 10): HistoryBlock {
   const sorted = [...entries].sort((a, b) => b.mtime_ms - a.mtime_ms).slice(0, cap);
   if (sorted.length === 0) {
     return { role: "meta", lines: ["\u00b7 no session files yet"] };
   }
-  const lines: string[] = [`\u00b7 sessions (${sorted.length}):`];
+  const label = fill_template(theme.notices.sessions, { count: sorted.length });
+  const lines: string[] = [`\u00b7 ${label}`];
   for (const entry of sorted) {
     lines.push(`  ${entry.name} (${format_usage(entry.size_bytes)} bytes)`);
   }

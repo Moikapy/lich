@@ -124,7 +124,7 @@ jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content)"' .lich
 | `lich: config not found: <path>` | `--config` was given a path that does not exist. Check the path or drop the flag to use discovery. |
 | Provider error `kind=auth`, http 401/403 | The api key is missing or wrong. Verify the env var named by `LICH_API_KEY_ENV` (default `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`) is exported in the same shell. |
 | `fetch failed` / connection refused | The endpoint is unreachable. For ollama, check `ollama serve` is running on `http://localhost:11434`; for remote APIs, check `LICH_BASE_URL`. |
-| `[lich] budget exhausted after N turns` | The task did not finish within `max_turns` (default 25). Raise it with `--max-turns 50` or in config. |
+| `[lich] budget exhausted after N turns — the ritual is spent` | The task did not finish within `max_turns` (default 25). The `budget exhausted` keyword stays; the flavor suffix comes from the theme. Raise the cap with `--max-turns 50` or in config. |
 | `unknown flag: --foo` | Flag typo, or the flag was placed where a subcommand is expected. Run `lich --help`. |
 
 ## Updating

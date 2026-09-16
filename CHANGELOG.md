@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0
+## 0.6.0 (unreleased)
 
 - document a per-persona orchestrator example: one agent per NPC, the
   webhook `POST /message` shape, and history serialization the game repo
@@ -12,6 +12,7 @@
 - append a `run_end` meta record (`stopped_reason`, `usage`) on every
   completed run so token spend is in the transcript. `budget_exhausted`
   is still written when the stop reason is budget.
+- add a display-only undead theme: frozen `lich` strings, `theme` / `--theme`, and `~/.lich/themes/<name>.json` that falls back to the built-in theme when missing or invalid.
 
 ## 0.5.1
 

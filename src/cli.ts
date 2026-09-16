@@ -14,6 +14,7 @@ import { LICH_VERSION } from "./index.js";
 import { load_config, config_template, existing_config_path, starter_config_object, write_lich_config } from "./cli_config.js";
 import { run_update } from "./cli_update.js";
 import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
+import { load_theme, notice_flavor } from "./util/theme.js";
 
 type ProviderKind = "openai_compat" | "anthropic" | "ollama";
 
@@ -35,6 +36,7 @@ const FLAG_KEYS: Record<string, string> = {
   "--system-prompt": "system_prompt",
   "--session-dir": "session_dir",
   "--log-level": "log_level",
+  "--theme": "theme",
 };
 
 const DEFAULT_BASE_URLS: Record<ProviderKind, string> = {
@@ -51,7 +53,7 @@ const DEFAULT_ENV_API_KEYS: Record<ProviderKind, string | undefined> = {
 
 function usage_text(): string {
   return [
-    "lich — a TypeScript AI agent harness",
+    "lich — the undead agent harness",
     "",
     "Usage:",
     "  lich                   open the TUI (first run: setup wizard, then TUI)",
@@ -76,6 +78,7 @@ function usage_text(): string {
     "  --system-prompt <s>    system prompt override",
     "  --session-dir <path>   session transcript directory",
     "  --log-level <level>    debug | info | warn | error",
+    "  --theme <name>         display theme (default lich; files in ~/.lich/themes)",
   ].join("\n");
 }
 
@@ -196,7 +199,7 @@ function apply_provider_override(config: Record<string, unknown>, overrides: Rec
 }
 
 function apply_overrides(config: Record<string, unknown>, overrides: Record<string, string>): void {
-  for (const key of ["work_dir", "system_prompt", "session_dir", "log_level"]) {
+  for (const key of ["work_dir", "system_prompt", "session_dir", "log_level", "theme"]) {
     if (overrides[key] !== undefined) {
       config[key] = overrides[key];
     }
@@ -261,6 +264,7 @@ function attach_progress(emitter: AgentEmitter): () => void {
 
 export async function run_one_shot(config: unknown, input: string): Promise<number> {
   const agent = await create_agent_with_plugins(config);
+  const theme = load_theme(agent.config.theme);
   const stop_progress = attach_progress(agent.events);
   let result: AgentRunResult;
   try {
@@ -273,7 +277,7 @@ export async function run_one_shot(config: unknown, input: string): Promise<numb
     process.stdout.write(`${final.content}\n`);
   }
   if (result.outcome.stopped_reason === "budget") {
-    process.stderr.write(`[lich] budget exhausted after ${result.outcome.turns_used} turns\n`);
+    process.stderr.write(budget_stderr_line(result.outcome.turns_used, theme.notices.budget_exhausted));
     return 1;
   }
   if (result.outcome.stopped_reason === "aborted") {
@@ -310,8 +314,15 @@ function ask_line(rl: Interface): Promise<string> {
   });
 }
 
+function budget_stderr_line(turns: number, notice: string): string {
+  const flavor = notice_flavor(notice);
+  const suffix = flavor.length === 0 ? "" : ` — ${flavor}`;
+  return `[lich] budget exhausted after ${turns} turns${suffix}\n`;
+}
+
 export async function run_chat(config: unknown): Promise<number> {
   const agent = await create_agent_with_plugins(config);
+  const theme = load_theme(agent.config.theme);
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     for (;;) {
@@ -321,6 +332,7 @@ export async function run_chat(config: unknown): Promise<number> {
       }
       const command = line.trim();
       if (command === "/exit" || command === "/quit") {
+        process.stdout.write(`${theme.glyph} ${theme.goodbye}\n`);
         return 0;
       }
       await run_chat_turn(agent, command);

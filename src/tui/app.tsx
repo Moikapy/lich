@@ -10,6 +10,7 @@ import type { AgentEvent } from "../agent/events.js";
 import type { AgentConfig } from "../agent/config.js";
 import type { Message } from "../providers/types.js";
 import { LICH_VERSION } from "../index.js";
+import type { ThemeSpec } from "../util/lore.js";
 import { readdir, stat } from "node:fs/promises";
 import {
   apply_event,
@@ -44,12 +45,12 @@ type SetUiState = Dispatch<SetStateAction<UiState>>;
 type SetBlocks = Dispatch<SetStateAction<readonly HistoryBlock[]>>;
 
 /** Map one agent event to optional transcript blocks (tool rows, notices). */
-function event_blocks(event: AgentEvent): readonly HistoryBlock[] {
+function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBlock[] {
   if (event.type === "tool_call_end") {
     return [tool_result_block(event.call, event.result.ok === true, event.result.output)];
   }
   if (event.type === "compress_end") {
-    return [compress_notice_block(event.summary_chars)];
+    return [compress_notice_block(event.summary_chars, theme)];
   }
   if (event.type === "error") {
     return [error_notice_block(event.error instanceof Error ? event.error.message : String(event.error))];
@@ -76,7 +77,7 @@ async function run_agent_turn(
 }
 
 /** Async /sessions listing as a meta block (never throws). */
-async function sessions_block(config: AgentConfig): Promise<HistoryBlock> {
+async function sessions_block(config: AgentConfig, theme: ThemeSpec): Promise<HistoryBlock> {
   try {
     const dir_entries = await readdir(config.session_dir, { withFileTypes: true });
     const entries: SessionEntryInfo[] = [];
@@ -87,7 +88,7 @@ async function sessions_block(config: AgentConfig): Promise<HistoryBlock> {
       const info = await stat(`${config.session_dir}/${entry.name}`);
       entries.push({ name: entry.name, size_bytes: info.size, mtime_ms: info.mtimeMs });
     }
-    return session_list_block(entries, SESSION_LIST_CAP);
+    return session_list_block(entries, theme, SESSION_LIST_CAP);
   } catch {
     return { role: "meta", lines: ["· no session files yet"] };
   }
@@ -100,6 +101,7 @@ function run_error_text(error: unknown): string {
 /** Runs one message exchange; owns history continuity and abort wiring. */
 function use_agent_run(
   agent: Agent,
+  theme: ThemeSpec,
   add_blocks: AddBlocks,
   set_state: SetUiState,
   set_blocks: SetBlocks,
@@ -110,18 +112,18 @@ function use_agent_run(
   const finish_run = useCallback((result: AgentRunResult): void => {
     history_ref.current = result.messages;
     set_state((current) => apply_run_result(current, result));
-    add_blocks(run_notice_blocks(result));
-  }, [add_blocks, set_state]);
+    add_blocks(run_notice_blocks(result, theme));
+  }, [add_blocks, set_state, theme]);
 
   const start_message_run = useCallback(
     (text: string): void => {
-      add_blocks([{ role: "user", lines: [`you › ${text}`] }]);
+      add_blocks([{ role: "user", lines: [`${theme.user_label} › ${text}`] }]);
       set_state((current) => ({ ...current, phase: "thinking", active_tool: undefined }));
       const controller = new AbortController();
       controller_ref.current = controller;
       const on_event = (event: AgentEvent): void => {
         set_state((current) => apply_event(current, event));
-        set_blocks((current) => [...current, ...event_blocks(event)].slice(-HISTORY_CAP));
+        set_blocks((current) => [...current, ...event_blocks(event, theme)].slice(-HISTORY_CAP));
       };
       void run_agent_turn(agent, history_ref.current, text, on_event, finish_run, controller.signal)
         .catch((error: unknown) => {
@@ -134,7 +136,7 @@ function use_agent_run(
           }
         });
     },
-    [agent, add_blocks, finish_run, set_blocks, set_state],
+    [agent, add_blocks, finish_run, set_blocks, set_state, theme],
   );
 
   useEffect(() => () => controller_ref.current?.abort(), []);
@@ -143,7 +145,13 @@ function use_agent_run(
 }
 
 /** Slash-command dispatch: pure client-side actions, never hits the agent. */
-function use_slash_commands(agent: Agent, add_blocks: AddBlocks, set_blocks: SetBlocks, total_tokens: number): (parsed: SlashInput) => void {
+function use_slash_commands(
+  agent: Agent,
+  theme: ThemeSpec,
+  add_blocks: AddBlocks,
+  set_blocks: SetBlocks,
+  total_tokens: number,
+): (parsed: SlashInput) => void {
   const handle = useCallback(
     (parsed: SlashInput): void => {
       if (parsed.name === "exit" || parsed.name === "quit" || parsed.name === "q") {
@@ -159,21 +167,22 @@ function use_slash_commands(agent: Agent, add_blocks: AddBlocks, set_blocks: Set
       } else if (parsed.name === "clear") {
         set_blocks([]);
       } else if (parsed.name === "sessions") {
-        void sessions_block(agent.config).then((block) => add_blocks([block]));
+        void sessions_block(agent.config, theme).then((block) => add_blocks([block]));
       } else {
         add_blocks([unknown_command_block(parsed.name)]);
       }
     },
-    [agent, add_blocks, set_blocks, total_tokens],
+    [agent, add_blocks, set_blocks, theme, total_tokens],
   );
   return handle;
 }
 
 interface TuiAppProps {
   readonly agent: Agent;
+  readonly theme: ThemeSpec;
 }
 
-export function TuiApp({ agent }: TuiAppProps): React.JSX.Element {
+export function TuiApp({ agent, theme }: TuiAppProps): React.JSX.Element {
   const [blocks, set_blocks] = useState<readonly HistoryBlock[]>([]);
   const [state, set_state] = useState(INITIAL_UI_STATE);
 
@@ -184,8 +193,8 @@ export function TuiApp({ agent }: TuiAppProps): React.JSX.Element {
     set_blocks((current) => [...current, ...added].slice(-HISTORY_CAP));
   }, []);
 
-  const start_message_run = use_agent_run(agent, add_blocks, set_state, set_blocks);
-  const handle_slash = use_slash_commands(agent, add_blocks, set_blocks, state.usage.total_tokens);
+  const start_message_run = use_agent_run(agent, theme, add_blocks, set_state, set_blocks);
+  const handle_slash = use_slash_commands(agent, theme, add_blocks, set_blocks, state.usage.total_tokens);
 
   const submit = useCallback(
     (text: string): void => {
@@ -204,9 +213,9 @@ export function TuiApp({ agent }: TuiAppProps): React.JSX.Element {
   const provider = agent.config.providers[0];
   return (
     <Box flexDirection="column" minHeight={8}>
-      <Text dimColor>{tui_banner_text(agent.config.agent_name, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown")}</Text>
+      <Text dimColor>{tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown")}</Text>
       <MessageView blocks={blocks} state={state} />
-      <StatusBar state={state} model={provider?.model ?? "unknown"} />
+      <StatusBar state={state} model={provider?.model ?? "unknown"} theme={theme} />
       <CommandBar busy={state.phase !== "idle"} on_submit={submit} />
     </Box>
   );
