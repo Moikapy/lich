@@ -71,6 +71,18 @@ function append_meta(handle: SessionHandle, meta: Record<string, unknown>): Prom
   return handle.append({ ts: new Date().toISOString(), kind: "meta", meta });
 }
 
+function append_run_end(handle: SessionHandle, stopped_reason: string, usage_total: Usage): Promise<void> {
+  return append_meta(handle, {
+    event: "run_end",
+    stopped_reason,
+    usage: {
+      prompt_tokens: usage_total.prompt_tokens,
+      completion_tokens: usage_total.completion_tokens,
+      total_tokens: usage_total.total_tokens,
+    },
+  });
+}
+
 /** Register plugin tools onto the final registry; duplicates warn and skip. */
 function register_plugin_tools(registry: ToolRegistry, plugins: readonly LoadedPlugin[]): void {
   for (const loaded of plugins) {
@@ -165,7 +177,7 @@ export class Agent {
         await this.call_plugin_run_end(outcome);
       }
     }
-    const session_path = await this.persist_session(outcome, options);
+    const session_path = await this.persist_session(outcome, options, usage_total);
     const full_messages: Message[] = [...(options.history ?? []), ...outcome.messages];
     return { outcome, messages: full_messages, usage_total, session_path };
   }
@@ -203,7 +215,11 @@ export class Agent {
   }
 
   /** Best-effort JSONL transcript: never fails the run, returns undefined path on error. */
-  private async persist_session(outcome: LoopOutcome, options: AgentRunOptions): Promise<string | undefined> {
+  private async persist_session(
+    outcome: LoopOutcome,
+    options: AgentRunOptions,
+    usage_total: Usage,
+  ): Promise<string | undefined> {
     try {
       const handle: SessionHandle = await open_session(this.config.session_dir, options.label);
       await append_meta(handle, { event: "run_start", input_chars: options.input.length, history_size: outcome.messages.length });
@@ -213,6 +229,7 @@ export class Agent {
       if (outcome.stopped_reason === "budget") {
         await append_meta(handle, { event: "budget_exhausted" });
       }
+      await append_run_end(handle, outcome.stopped_reason, usage_total);
       return handle.path;
     } catch (error) {
       logger.warn("session persistence failed; continuing without transcript", error);

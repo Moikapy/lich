@@ -34,6 +34,8 @@ mythology lives in display strings only.
 | [TUI guide](docs/user-guide/tui.md) | Launch, slash commands, status bar, memory semantics. |
 | [Gateway guide](docs/user-guide/gateway.md) | Webhook/Telegram/Discord/Twitch setup and the webhook API. |
 | [Library guide](docs/user-guide/library.md) | Embedding: `create_agent`, events, multi-turn history, errors. |
+| [Games guide](docs/user-guide/games.md) | Session JSONL as a combat log, and jq recipes over it. |
+| [Persona example](examples/persona_orchestrator/README.md) | Per-NPC agents the game repo copies. Not a second core. |
 
 ## Quick start (CLI)
 

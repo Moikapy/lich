@@ -2,6 +2,16 @@
 
 ## 0.6.0 (unreleased)
 
+- document a per-persona orchestrator example: one agent per NPC, the
+  webhook `POST /message` shape, and history serialization the game repo
+  copies. lich does not ship the service. see
+  examples/persona_orchestrator.
+- document session JSONL as a combat log, with jq recipes for rationale,
+  ability use, vetoes, rejects, and `run_end` token totals. see
+  docs/user-guide/games.md.
+- append a `run_end` meta record (`stopped_reason`, `usage`) on every
+  completed run so token spend is in the transcript. `budget_exhausted`
+  is still written when the stop reason is budget.
 - add a display-only undead theme: frozen `lich` strings, `theme` / `--theme`, and `~/.lich/themes/<name>.json` that falls back to the built-in theme when missing or invalid.
 
 ## 0.5.1

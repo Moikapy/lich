@@ -1,0 +1,15 @@
+{"ts":"2026-01-01T00:00:01.000Z","kind":"meta","meta":{"event":"run_start","input_chars":20,"history_size":1}}
+{"ts":"2026-01-01T00:00:02.000Z","kind":"message","message":{"role":"system","content":"commander"}}
+{"ts":"2026-01-01T00:00:03.000Z","kind":"message","message":{"role":"user","content":"round 1 digest"}}
+{"ts":"2026-01-01T00:00:04.000Z","kind":"message","message":{"role":"assistant","content":"","tool_calls":[{"id":"t1","name":"enemy_actions","args":{"round":1,"actions":[{"enemy_id":"goblin","action":"attack","target_ref":"hero:hero1"},{"enemy_id":"slime","action":"defend","target_ref":"hero:hero1"}],"rationale":"open with a strike"}}]}}
+{"ts":"2026-01-01T00:00:05.000Z","kind":"message","message":{"role":"tool","tool_call_id":"t1","name":"enemy_actions","content":"appended 2 orders for round 1"}}
+{"ts":"2026-01-01T00:00:06.000Z","kind":"message","message":{"role":"assistant","content":"","tool_calls":[{"id":"t2","name":"enemy_actions","args":{"round":1,"actions":[{"enemy_id":"goblin","action":"meteor","target_ref":"hero:hero1"}],"rationale":"finish it"}}]}}
+{"ts":"2026-01-01T00:00:07.000Z","kind":"message","message":{"role":"tool","tool_call_id":"t2","name":"enemy_actions","content":"{\"ok\":false,\"output\":\"\",\"error\":\"blocked_by_plugin: meteor_gates_closed_until_round_3\"}","is_error":true}}
+{"ts":"2026-01-01T00:00:08.000Z","kind":"message","message":{"role":"assistant","content":"","tool_calls":[{"id":"t3","name":"enemy_actions","args":{"round":1,"actions":[{"enemy_id":"goblin","action":"attack","target_ref":"not-a-ref"}],"rationale":"bad target"}}]}}
+{"ts":"2026-01-01T00:00:09.000Z","kind":"message","message":{"role":"tool","tool_call_id":"t3","name":"enemy_actions","content":"{\"ok\":false,\"output\":\"\",\"error\":\"target_ref_must_be_hero_or_enemy\"}","is_error":true}}
+{"ts":"2026-01-01T00:00:10.000Z","kind":"message","message":{"role":"tool","tool_call_id":"t4","name":"enemy_actions","content":"not-json","is_error":true}}
+{"ts":"2026-01-01T00:00:11.000Z","kind":"message","message":{"role":"assistant","content":"queued"}}
+{"ts":"2026-01-01T00:00:12.000Z","kind":"message","message":{"role":"assistant","content":"","tool_calls":[{"id":"t5","name":"dungeon_memory_write","args":{"note":"the player always heals below half"}}]}}
+{"ts":"2026-01-01T00:00:13.000Z","kind":"message","message":{"role":"tool","tool_call_id":"t5","name":"dungeon_memory_write","content":"appended note"}}
+{"ts":"2026-01-01T00:00:14.000Z","kind":"meta","meta":{"event":"run_end","stopped_reason":"final","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}}
+{"ts":"2026-01-01T00:00:15.000Z","kind":"meta","meta":{"event":"budget_exhausted"}}

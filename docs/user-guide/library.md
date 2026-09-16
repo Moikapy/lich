@@ -145,7 +145,7 @@ Listed providers form a failover chain tried in order: `rate_limit`/`network` er
 
 ## Custom tool filtering
 
-`tools_enabled` accepts `"all"` (default) or an array of builtin tool names to register; everything else stays unregistered and invisible to the model:
+`tools_enabled` accepts `"all"` (default) or an array of builtin tool names to register; everything else stays unregistered and invisible to the model. The filter does not apply to plugin tools: they register afterward, including the gatekeeper's `git_commit`. `[]` strips every builtin and does not throw.
 
 ```ts
 const agent = create_agent({
@@ -182,6 +182,10 @@ try {
 
 When every configured provider fails, the last `ProviderError` is thrown. Tool failures are *not* exceptions: they return `{ ok: false, output, error }` into the loop as tool messages for the model to react to. Cancellation via `signal` ends the run with `stopped_reason: "aborted"` rather than throwing.
 
+## Games
+
+A Godot client does not embed the library. A game backend that does is still one `Agent` per persona, not a second loop. The pattern — factory, history cap, per-conversation queue, `POST /message` → `{reply, usage}` — is [`examples/persona_orchestrator`](../../examples/persona_orchestrator/README.md). The service itself is game-repo work. Session files as a combat log: [games guide](games.md).
+
 ## Session access
 
-Each `run()` appends a transcript line-by-line under `config.session_dir` (default `<work_dir>/.lich/sessions`); `result.session_path` gives the exact file. Records carry `{ts, kind: "message"|"meta", message?, meta?}`; read them with `jq` (or the `read_session_messages(path)` helper if you are working from a source checkout). Persistence is best-effort: a write failure logs a warning, returns `session_path: undefined`, and never fails the run.
+Each `run()` appends a transcript line-by-line under `config.session_dir` (default `<work_dir>/.lich/sessions`); `result.session_path` gives the exact file. Records carry `{ts, kind: "message"|"meta", message?, meta?}`. A completed run (`final`, `budget`, or `aborted` returned by the loop) closes with `{event: "run_end", stopped_reason, usage}` where `usage` equals `usage_total`. A budget stop also writes `{event: "budget_exhausted"}` before that. Provider throws do not persist. Read transcripts with `jq` (see the [games guide](games.md)) or `read_session_messages(path)` from a source checkout — it is not a package export. Persistence is best-effort: a write failure logs a warning, returns `session_path: undefined`, and never fails the run.
