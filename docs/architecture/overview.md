@@ -118,10 +118,11 @@ Walkthrough of a single `Agent.run({ input })` call
    or `aborted`.
 7. **Session persist.** `persist_session()` appends one `meta` record
    (`run_start`), then one `message` record per outcome message, then a
-   `budget_exhausted` meta record if the budget stopped the run, to a JSONL
-   file under `session_dir` (default `<work_dir>/.lich/sessions`). Persistence
-   is best-effort: failures are logged and the run still succeeds with
-   `session_path: undefined`.
+   `budget_exhausted` meta record if the budget stopped the run, then a
+   `run_end` meta record (`stopped_reason`, `usage`) for every completed
+   run, to a JSONL file under `session_dir` (default
+   `<work_dir>/.lich/sessions`). Persistence is best-effort: failures are
+   logged and the run still succeeds with `session_path: undefined`.
 8. **Return.** `AgentRunResult` bundles the outcome, the full transcript
    (prior history plus the new exchange), the collected `usage_total`, and the
    session path.

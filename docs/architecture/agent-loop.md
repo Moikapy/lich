@@ -187,9 +187,11 @@ coarse - see the trade-off note in [overview](./overview.md#design-trade-offs).
 
 What gets persisted, per run (`Agent.persist_session`): a `run_start` meta
 record, one `message` record per outcome message (including the seeded system
-message and tool messages), and a `budget_exhausted` meta record when the run
-stopped on budget. Everything is best-effort: any error logs a warning and
-returns `session_path: undefined` instead of failing the run.
+message and tool messages), a `budget_exhausted` meta record when the run
+stopped on budget, and a `run_end` meta record (`stopped_reason`, `usage`)
+on every completed run. `usage` is the run's `usage_total`. Everything is
+best-effort: any error logs a warning and returns `session_path: undefined`
+instead of failing the run.
 
 `read_session_messages(path)` parses a file back into `Message[]`: per line it
 JSON-parses leniently, accepts only records with a `kind: "message"`-shaped

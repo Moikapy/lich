@@ -1,0 +1,51 @@
+[
+  {
+    "id": "1",
+    "flags": [
+      "-r"
+    ],
+    "filter": "select(.kind==\"message\") | select(.message.role==\"assistant\")\n       | .message.tool_calls[]? | select(.name==\"enemy_actions\")\n       | .args.rationale"
+  },
+  {
+    "id": "2",
+    "flags": [
+      "-s"
+    ],
+    "filter": "[.[] | .message? | select(.role==\"assistant\")\n        | .tool_calls[]? | select(.name==\"enemy_actions\")\n        | .args.actions[]?.action]\n       | group_by(.) | map({action: .[0], uses: length}) | sort_by(-.uses)"
+  },
+  {
+    "id": "3",
+    "flags": [
+      "-r"
+    ],
+    "filter": "select(.kind==\"message\") | select(.message.role==\"tool\")\n       | .message.content | fromjson? | select(.error? // \"\" | startswith(\"blocked_by_plugin\"))\n       | .error"
+  },
+  {
+    "id": "4",
+    "flags": [
+      "-r"
+    ],
+    "filter": "select(.kind==\"message\") | select(.message.role==\"tool\" and .message.is_error==true)\n       | [.ts, .message.name, .message.content] | @tsv"
+  },
+  {
+    "id": "5",
+    "flags": [
+      "-r"
+    ],
+    "filter": "select(.kind==\"message\") | select(.message.role==\"user\" or .message.role==\"assistant\")\n       | [.ts, .message.role] | @tsv"
+  },
+  {
+    "id": "usage",
+    "flags": [
+      "-s"
+    ],
+    "filter": "[.[] | select(.kind==\"meta\" and .meta.event==\"run_end\") | .meta.usage.total_tokens] | add"
+  },
+  {
+    "id": "memory",
+    "flags": [
+      "-r"
+    ],
+    "filter": "select(.kind==\"message\") | select(.message.role==\"assistant\")\n       | .message.tool_calls[]? | select(.name==\"dungeon_memory_write\")\n       | .args.note"
+  }
+]

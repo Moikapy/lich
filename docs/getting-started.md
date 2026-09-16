@@ -164,3 +164,4 @@ bun src/cli.ts --version   # -> 0.3.0
 - Slash commands and the status bar: [TUI guide](user-guide/tui.md).
 - Telegram, Discord, Twitch, and webhook setup: [Gateway guide](user-guide/gateway.md).
 - Embedding the agent in your own TypeScript: [Library guide](user-guide/library.md).
+- Session JSONL as a combat log: [Games guide](user-guide/games.md).
