@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- load `config.plugins` on every CLI entry point and on `run_agent`
+  (`create_agent_with_plugins`). one-shot, chat, tui, and the gateway
+  bus no longer ignore plugin entries. broken plugins still warn and
+  continue. `create_agent` stays plugin-free.
+
 ## 0.4.0
 
 - add a self-improvement loop: `run_tests`, a gatekeeper plugin, and

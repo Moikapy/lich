@@ -112,8 +112,27 @@ Failures are contained at every layer:
 
 ## Runtime notes
 
-- **Bun** runs TypeScript plugin files natively — `.ts` entries just work (`bun src/cli.ts ...` from a clone).
-- **Node** (the built `dist/cli.js`) uses the native ESM loader, which does not compile TS. For node deployments, compile your plugin or ship it as `.mjs`/plain JS and list that file in `plugins`.
+`package.json` `engines.node` is `>=20`. The CLI loads `config.plugins` before the run. A broken entry logs one `plugin load errors` warning and the run continues without that plugin.
+
+`.mjs` and other plain JS (no type syntax) are the form that matches `engines.node` `>=20`. They load on Node and on Bun with no plugin-load warning.
+
+Checked with Node 26.8.2 (`node dist/cli.js`) and Bun 1.3.14 (`bun src/cli.ts`):
+
+- Erasable `.ts` (`import type`, annotations) loads under `node dist/cli.js` only where Node strips types by default (22.18+, 23.6+, 24+, 26). Node 22.18's disable flag is `--no-experimental-strip-types`. Bun 1.3.14 loads that same file with no plugin-load warning. The Node 26.8.2 check type-strips by default and does not bundle. `node --no-strip-types` warns (`Unknown file extension ".ts"`) and continues.
+- On Node 20 and Node 22 before 22.18, a `.ts` entry still warns and the run continues without that plugin.
+- Syntax Node cannot strip (for example `enum`) warns and continues. Bun runs that same file with no plugin-load warning. A syntax error warns on both and the run continues.
+
+Plain JS (matches `engines.node` `>=20`):
+
+```mjs
+// .lich/plugins/my-plugin.mjs
+const my_plugin = {
+  name: "my-plugin",
+  tools: [],
+};
+
+export default my_plugin;
+```
 
 ## Self-improvement loop
 

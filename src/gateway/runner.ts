@@ -2,7 +2,7 @@
  * Gateway runner: wires the shared Agent, the conversation bus, and the
  * requested platform adapters, then stays alive until a signal arrives.
  */
-import { create_agent } from "../agent/agent.js";
+import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
 import { GatewayBus } from "./bus.js";
@@ -11,6 +11,13 @@ import { create_telegram_adapter } from "./telegram.js";
 import { create_twitch_adapter } from "./twitch.js";
 import type { AdapterParams, PlatformAdapter } from "./types.js";
 import { create_webhook_adapter } from "./webhook.js";
+
+/** Preload plugins, then hand that same agent to the bus factory. */
+export async function create_gateway_bus(config: AgentConfig): Promise<{ agent: Agent; bus: GatewayBus }> {
+  const agent = await create_agent_with_plugins(config);
+  const bus = new GatewayBus({ config, agent_factory: () => agent, wire_tool_logging: true });
+  return { agent, bus };
+}
 
 export async function run_gateway(config: AgentConfig, platforms: readonly string[]): Promise<number> {
   const valid: string[] = [];
@@ -25,7 +32,7 @@ export async function run_gateway(config: AgentConfig, platforms: readonly strin
     process.stderr.write("lich: gateway needs at least one valid platform (webhook|telegram|discord|twitch)\n");
     return 1;
   }
-  const bus = new GatewayBus({ config, agent_factory: () => create_agent(config), wire_tool_logging: true });
+  const { bus } = await create_gateway_bus(config);
   const adapters = build_adapters(config, bus, valid);
   install_signal_handlers(bus, adapters);
   logger.info(`gateway starting: platforms=${valid.join(",")}, port=${process.env.LICH_GATEWAY_PORT ?? "8089"}, pid=${process.pid}`);

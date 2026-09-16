@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { createInterface, type Interface } from "node:readline";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { create_agent, type Agent, type AgentRunResult } from "./agent/agent.js";
+import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./agent/agent.js";
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import { AgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
@@ -243,8 +243,8 @@ function attach_progress(emitter: AgentEmitter): () => void {
   });
 }
 
-async function run_one_shot(config: unknown, input: string): Promise<number> {
-  const agent = create_agent(config);
+export async function run_one_shot(config: unknown, input: string): Promise<number> {
+  const agent = await create_agent_with_plugins(config);
   const stop_progress = attach_progress(agent.events);
   let result: AgentRunResult;
   try {
@@ -294,8 +294,8 @@ function ask_line(rl: Interface): Promise<string> {
   });
 }
 
-async function run_chat(config: unknown): Promise<number> {
-  const agent = create_agent(config);
+export async function run_chat(config: unknown): Promise<number> {
+  const agent = await create_agent_with_plugins(config);
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     for (;;) {

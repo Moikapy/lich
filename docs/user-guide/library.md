@@ -34,7 +34,7 @@ console.log(result.outcome.final?.content);
 console.log(`tokens: ${result.usage_total.total_tokens}`);
 ```
 
-The one-liner `run_agent(config, input)` is equivalent when you only need a single run:
+`run_agent(config, input)` loads `config.plugins`, then runs once. `create_agent` does not load plugins.
 
 ```ts
 import { run_agent } from "@moikapy/lich";
