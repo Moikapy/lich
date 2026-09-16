@@ -9,6 +9,7 @@ import type { Agent, AgentRunResult } from "../agent/agent.js";
 import type { AgentEvent } from "../agent/events.js";
 import type { AgentConfig } from "../agent/config.js";
 import type { Message } from "../providers/types.js";
+import { LICH_VERSION } from "../index.js";
 import { readdir, stat } from "node:fs/promises";
 import {
   apply_event,
@@ -202,7 +203,7 @@ export function TuiApp({ agent }: TuiAppProps): React.JSX.Element {
   const provider = agent.config.providers[0];
   return (
     <Box flexDirection="column" minHeight={8}>
-      <Text dimColor>{`lich v0.2.0 — ${provider?.model ?? "unknown"} (${provider?.kind ?? "unknown"})`}</Text>
+      <Text dimColor>{`lich v${LICH_VERSION} — ${provider?.model ?? "unknown"} (${provider?.kind ?? "unknown"})`}</Text>
       <MessageView blocks={blocks} state={state} />
       <StatusBar state={state} model={provider?.model ?? "unknown"} />
       <CommandBar busy={state.phase !== "idle"} on_submit={submit} />

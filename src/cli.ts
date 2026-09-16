@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Thin zero-dependency CLI for lich: one-shot tasks, interactive chat,
  * config files, and environment-based provider resolution.
