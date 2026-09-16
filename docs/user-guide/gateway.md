@@ -19,10 +19,10 @@ flowchart LR
 Platforms: `webhook` (HTTP server), `telegram` (long-poll), `discord` (gateway WebSocket), `twitch` (IRC over WebSocket). Pick any combination:
 
 ```sh
-bun src/cli.ts gateway webhook                 # http only
-bun src/cli.ts gateway webhook telegram        # http + telegram polling
-bun src/cli.ts gateway telegram discord twitch # no webhook server
-bun src/cli.ts gateway                         # defaults to webhook
+lich gateway webhook                 # http only
+lich gateway webhook telegram        # http + telegram polling
+lich gateway telegram discord twitch # no webhook server
+lich gateway                         # defaults to webhook
 ```
 
 The gateway is silent after startup: Telegram/Discord/Twitch respond only in chats, channels, or servers the bot can see or has joined, and the webhook only serves HTTP. Telegram media messages arrive as the placeholder text `media not supported yet`; other non-text events are ignored. Telegram `/start` is answered like a plain "hello".
@@ -32,7 +32,7 @@ The gateway is silent after startup: Telegram/Discord/Twitch respond only in cha
 Zero configuration — the server binds `0.0.0.0:$LICH_GATEWAY_PORT` (default 8089).
 
 ```sh
-bun src/cli.ts gateway webhook
+lich gateway webhook
 ```
 
 ```sh
@@ -47,7 +47,7 @@ curl -s http://localhost:8089/health
 With token auth, every POST must carry the exact `x-lich-token` header; mismatched or missing tokens get `401 {"error":"unauthorized"}`:
 
 ```sh
-LICH_GATEWAY_TOKEN=s3cret bun src/cli.ts gateway webhook
+LICH_GATEWAY_TOKEN=s3cret lich gateway webhook
 curl -s -X POST http://localhost:8089/message \
   -H "x-lich-token: s3cret" -H "content-type: application/json" -d '{"text": "hello"}'
 ```
@@ -61,7 +61,7 @@ Payload fields (all optional except `text`): `platform` (default `"webhook"`), `
 
 ```sh
 export LICH_TELEGRAM_BOT_TOKEN=123456:ABC-your-token
-bun src/cli.ts gateway telegram
+lich gateway telegram
 ```
 
 3. Open your bot in Telegram, send a message, get a reply. Media messages arrive as the text `media not supported yet`; the bot replies from there.
@@ -78,7 +78,7 @@ Telegram uses long polling (no public URL needed). Replies split at 4096 chars.
 ```sh
 export LICH_DISCORD_BOT_TOKEN=your-bot-token
 export LICH_DISCORD_BOT_ID=123456789012345678
-bun src.cli.ts gateway discord
+lich gateway discord
 ```
 
 5. Send the bot a message (DM or any channel it can read — every non-bot message gets a reply); each channel has its own conversation memory (keyed by `channel_id`). Replies split at 2000 chars. Bot-authored messages are ignored (no loops).
@@ -94,7 +94,7 @@ bun src.cli.ts gateway discord
 export LICH_TWITCH_OAUTH_TOKEN=oauth:abc123...
 export LICH_TWITCH_NICK=mylichbot
 export LICH_TWITCH_CHANNELS=channelone,channeltwo
-bun src/cli.ts gateway twitch
+lich gateway twitch
 ```
 
 3. The bot joins `#channelone` and `#channeltwo` and replies in chat (own messages are ignored). Replies split at 512 chars; IRC PING/PONG is answered automatically.
@@ -107,7 +107,7 @@ List the platforms in one command; all configured adapters start together and sh
 
 ```sh
 LICH_TELEGRAM_BOT_TOKEN=... LICH_DISCORD_BOT_TOKEN=... \
-  bun src/cli.ts gateway webhook telegram discord
+  lich gateway webhook telegram discord
 ```
 
 Adapters whose credentials are missing start **idle** (a warning is logged, e.g. `gateway discord adapter idle: LICH_DISCORD_BOT_TOKEN not set`) and the rest keep running — so the same command works on machines with partial credentials. If no platform name is valid, the CLI exits `1` with `gateway needs at least one valid platform`.

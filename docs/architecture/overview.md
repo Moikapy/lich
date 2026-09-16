@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Lich v0.2.0 is a small TypeScript AI agent harness: it drives a chat model in a
+Lich v0.3.0 is a small TypeScript AI agent harness: it drives a chat model in a
 think-act-observe loop, lets the model call tools, compresses history when the
 context budget demands it, and persists transcripts. It runs on Bun, is ESM
 with NodeNext resolution, and its only runtime dependencies are `zod` (config

@@ -4,12 +4,16 @@
 
 ## Install
 
-From a checkout of this repository (or a published tarball):
+```sh
+npm install @moikapy/lich
+```
+
+From source instead (`dist/` is not committed, so build first — see [development install](../getting-started.md#development-install-from-source)):
 
 ```sh
-npm install /path/to/lich-0.2.0.tgz    # after `npm run build` in the lich repo
-# or point package.json at the git repo
-npm install git+ssh://example.com/you/lich.git
+git clone https://github.com/Moikapy/lich.git && cd lich
+bun install && bun run build
+# then, from your project: npm install <path-to>/lich
 ```
 
 The package ships ESM (`dist/index.js`, types at `dist/index.d.ts`, binary at `dist/cli.js`); `main`/`types`/`bin` are wired in `package.json`.
@@ -19,7 +23,7 @@ The package ships ESM (`dist/index.js`, types at `dist/index.d.ts`, binary at `d
 `create_agent(raw_config)` validates the config (zod, defaults applied, frozen result) and returns an `Agent` with a `.run()` loop:
 
 ```ts
-import { create_agent } from "lich";
+import { create_agent } from "@moikapy/lich";
 
 const agent = create_agent({
   providers: [{ kind: "ollama", name: "local", model: "llama3.2:latest" }],
@@ -33,7 +37,7 @@ console.log(`tokens: ${result.usage_total.total_tokens}`);
 The one-liner `run_agent(config, input)` is equivalent when you only need a single run:
 
 ```ts
-import { run_agent } from "lich";
+import { run_agent } from "@moikapy/lich";
 
 const result = await run_agent(
   { providers: [{ kind: "ollama", name: "local", model: "llama3.2:latest" }] },
@@ -162,7 +166,7 @@ Provider failures throw `ProviderError`, an `Error` subclass with `kind`, `provi
 | `unknown` | Non-provider errors (e.g. tool crashes surfaced as strings). | Treated as fatal for the provider. |
 
 ```ts
-import { ProviderError } from "lich";
+import { ProviderError } from "@moikapy/lich";
 
 try {
   await agent.run({ input: "hello" });
@@ -178,4 +182,4 @@ When every configured provider fails, the last `ProviderError` is thrown. Tool f
 
 ## Session access
 
-Each `run()` appends a transcript line-by-line under `config.session_dir` (default `<work_dir>/.lich/sessions`); `result.session_path` gives the exact file. Records carry `{ts, kind: "message"|"meta", message?, meta?}`; read them with `jq` or the exported `read_session_messages(path)` helper from `src/session/store.ts`. Persistence is best-effort: a write failure logs a warning, returns `session_path: undefined`, and never fails the run.
+Each `run()` appends a transcript line-by-line under `config.session_dir` (default `<work_dir>/.lich/sessions`); `result.session_path` gives the exact file. Records carry `{ts, kind: "message"|"meta", message?, meta?}`; read them with `jq` (or the `read_session_messages(path)` helper if you are working from a source checkout). Persistence is best-effort: a write failure logs a warning, returns `session_path: undefined`, and never fails the run.

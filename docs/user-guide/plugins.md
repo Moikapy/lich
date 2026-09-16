@@ -14,7 +14,7 @@ Create the plugin module (defaults to `.lich/plugins/`, but any path works):
 
 ```ts
 // .lich/plugins/my-plugin.ts
-import type { Plugin } from "lich";
+import type { Plugin } from "@moikapy/lich";
 
 const my_plugin: Plugin = {
   name: "my-plugin",
@@ -58,7 +58,7 @@ All hooks are awaited. Hook errors are logged as warnings and skipped — a brok
 Plugin tools implement the same `Tool` interface as builtins: a `name`, a `description` the model reads, a JSON Schema `parameters` object, and an async `execute(args, context)` returning `{ok, output, error?}`:
 
 ```ts
-import type { Plugin, Tool } from "lich";
+import type { Plugin, Tool } from "@moikapy/lich";
 
 const upper_tool: Tool = {
   name: "upper_case",
@@ -112,7 +112,7 @@ Failures are contained at every layer:
 
 ## Runtime notes
 
-- **Bun** runs TypeScript plugin files natively — `.ts` entries just work (`bun src/cli.ts ...`).
+- **Bun** runs TypeScript plugin files natively — `.ts` entries just work (`bun src/cli.ts ...` from a clone).
 - **Node** (the built `dist/cli.js`) uses the native ESM loader, which does not compile TS. For node deployments, compile your plugin or ship it as `.mjs`/plain JS and list that file in `plugins`.
 
 ## Security note

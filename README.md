@@ -19,15 +19,19 @@ tool guardrails, context compression, and JSONL session persistence.
 ## Quick start (CLI)
 
 ```sh
+npm install -g @moikapy/lich
+```
+
+```sh
 # one-shot task
-LICH_MODEL=gpt-4.1-mini LICH_PROVIDER_KIND=openai_compat bun src/cli.ts "summarize this repo"
+LICH_MODEL=gpt-4.1-mini LICH_PROVIDER_KIND=openai_compat lich "summarize this repo"
 
 # interactive chat (commands: /exit, /quit)
-LICH_MODEL=claude-sonnet-4 LICH_PROVIDER_KIND=anthropic bun src/cli.ts chat
+LICH_MODEL=claude-sonnet-4 LICH_PROVIDER_KIND=anthropic lich chat
 
 # local ollama (no api key needed)
 ollama pull llama3.2
-LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 bun src/cli.ts "hello"
+LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich "hello"
 
 # terminal UI
 lich tui
@@ -40,13 +44,13 @@ The CLI has four modes: **one-shot** (`lich "task"`), **chat**
 (`lich chat`), **tui** (`lich tui`), and **gateway**
 (`lich gateway <platform...>`).
 
-Or use a JSON config file: `bun src/cli.ts --config lich.json "task"` (see
+Or use a JSON config file: `lich --config lich.json "task"` (see
 `AgentConfig` in `src/agent/config.ts` for the schema).
 
 ## Library usage
 
 ```ts
-import { run_agent } from "lich";
+import { run_agent } from "@moikapy/lich";
 
 const result = await run_agent(
   {
@@ -103,7 +107,7 @@ observe or veto tool calls. See
 Ollama needs no api key and defaults to `http://localhost:11434`:
 
 ```sh
-LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 bun src/cli.ts "Reply with ok"
+LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich "Reply with ok"
 ```
 
 Notes:

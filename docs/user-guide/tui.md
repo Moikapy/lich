@@ -5,15 +5,15 @@
 ## Launching
 
 ```sh
-bun src/cli.ts tui     # or: lich tui
+lich tui     # or, from a clone: bun src/cli.ts tui
 ```
 
-The TUI needs a TTY and a resolvable provider (same resolution as every mode). On startup it prints a dim header with the version and the first provider's model, e.g. `lich v0.2.0 — llama3.2 (ollama)`. Quit with `/exit`, `/quit`, `/q`, or Ctrl+C.
+The TUI needs a TTY and a resolvable provider (same resolution as every mode). On startup it prints a dim header with the version and the first provider's model, e.g. `lich v0.3.0 — llama3.2 (ollama)`. Quit with `/exit`, `/quit`, `/q`, or Ctrl+C.
 
 ## Anatomy
 
 ```
-lich v0.2.0 — llama3.2 (ollama)        <- header: version, model, provider kind
+lich v0.3.0 — llama3.2 (ollama)        <- header: version, model, provider kind
 you › list the files here              <- your input, echoed into the transcript
 ⏺ list_dir({})                        <- live tool-call row (name + args preview)
   ⏷ list_dir: ok (d src/ d test/ ...)  <- result row (ok/error + output preview)

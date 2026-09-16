@@ -11,7 +11,7 @@ lich tui               # interactive terminal UI (ink)
 lich gateway <plat..>  # messaging gateway (webhook|telegram|discord|twitch)
 lich config            # print a starter config template
 lich --help            # usage text
-lich --version         # print 0.2.0
+lich --version         # print 0.3.0
 ```
 
 - **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr.
@@ -19,7 +19,7 @@ lich --version         # print 0.2.0
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
 - **Gateway** runs platform adapters (defaults to `webhook` when no platform is given). See the [Gateway guide](gateway.md). Unknown platform names are skipped with a warning; if none remain, the CLI exits `1`.
 
-`bun src/cli.ts` and the installed `lich` binary accept identical arguments.
+The installed `lich` binary and `bun src/cli.ts` (from a repository clone) accept identical arguments.
 
 ## Flags
 
@@ -157,14 +157,14 @@ jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content // "(too
 Review a file with a scoped working directory:
 
 ```sh
-bun src/cli.ts --work-dir ./myproject --max-turns 15 \
+lich --work-dir ./myproject --max-turns 15 \
   "Review src/payments/retry.ts for correctness bugs. List each with a line number and a suggested fix."
 ```
 
 Web research (search, then fetch the promising pages):
 
 ```sh
-bun src/cli.ts \
+lich \
   "Find the current LTS version of Node.js using web_search, fetch the release page with fetch_url, and summarize the support schedule."
 ```
 
@@ -177,6 +177,6 @@ Batch one-shots from a script, checking each exit code:
 set -u
 for task in "summarize README.md" "list the largest files with disk_usage" "grep for TODO comments"; do
   echo "== $task"
-  LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 bun src/cli.ts --max-turns 10 "$task" || echo "FAILED ($?)"
+  LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich --max-turns 10 "$task" || echo "FAILED ($?)"
 done
 ```

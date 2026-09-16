@@ -2,8 +2,11 @@
 
 Hands-on recipes for the three extension axes: builtin tools, providers, and
 gateway platforms - plus the TUI internals, the conventions that hold the
-codebase together, and how the test suite is organized. Read
-[tools](./tools.md) and [providers](./providers.md) first for the contracts.
+codebase together, and how the test suite is organized. Everything on this
+page assumes a clone of the repository — the `@moikapy/lich` npm package is
+the artifact this source builds (see
+[development install](../getting-started.md#development-install-from-source)).
+Read [tools](./tools.md) and [providers](./providers.md) first for the contracts.
 
 ## Add a builtin tool
 

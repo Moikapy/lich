@@ -45,24 +45,24 @@ For the internals — the agent loop, provider failover, tool guardrails, and ho
 Requires Node >= 20 (or Bun) and access to one model endpoint (local Ollama, OpenAI, Anthropic, or any OpenAI-compatible API such as OpenRouter).
 
 ```sh
-# from a clone of the repository
-bun install
+# install the CLI globally
+npm install -g @moikapy/lich
 
 # generate a starter config, then edit the model name
-mkdir -p .lich && bun src/cli.ts config > .lich/config.json
+mkdir -p .lich && lich config > .lich/config.json
 
 # chat TUI (exit with /exit or Ctrl+C)
-bun src/cli.ts tui
+lich tui
 
 # or a one-shot task
-bun src/cli.ts "list the files in this repo and summarize it"
+lich "list the files in this repo and summarize it"
 
 # or a messaging gateway on http://localhost:8089
-bun src/cli.ts gateway webhook
+lich gateway webhook
 ```
 
-After `npm install`-ing the built package the same commands work as `lich tui`, `lich "task"`, and `lich gateway webhook`.
+Working from a clone of the repository? `bun install`, then run the same commands as `bun src/cli.ts ...` — see [getting started](getting-started.md#development-install-from-source).
 
 ## Version compatibility
 
-Documented for **v0.3.0**. Requires Node >= 20 (`engines` in `package.json`); Bun is the recommended runtime for development (`bun src/cli.ts ...`) and Node 20+ works for the built `dist/cli.js`. The TUI needs a TTY; the gateway and library run headless on both runtimes.
+Documented for **v0.3.0**. The npm package requires Node >= 20 (`engines` in `package.json`); Bun is the recommended runtime for development from a clone (`bun src/cli.ts ...`). The TUI needs a TTY; the gateway and library run headless on both runtimes.
