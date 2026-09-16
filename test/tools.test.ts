@@ -13,6 +13,7 @@ import {
 import { ToolExecutor } from "../src/tools/executor.js";
 import { default_tool_context, ToolRegistry } from "../src/tools/registry.js";
 import { builtin_toolset, register_builtin_tools } from "../src/tools/builtin/index.js";
+import { terminal_tool } from "../src/tools/builtin/terminal.js";
 import type { Tool, ToolContext, ToolResult } from "../src/tools/types.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
@@ -227,6 +228,25 @@ describe("executor", () => {
     expect(error_json.startsWith("{") === true).toBe(true);
     expect(error_json.includes("bad") === true).toBe(true);
     expect(ToolExecutor.format_result({ ok: true, output: "plain" })).toBe("plain");
+  });
+
+  it("honors a tool-declared timeout_ms over the 30s default", async () => {
+    const registry = new ToolRegistry();
+    const hanging: Tool = {
+      ...make_tool("hanging", () => new Promise<ToolResult>(() => undefined)),
+      timeout_ms: 150,
+    };
+    registry.register(hanging);
+    const executor = make_executor(registry);
+    const started = Date.now();
+    const result = await executor.execute("hanging", {});
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("timeout: tool:hanging exceeded 150ms");
+    expect(Date.now() - started < 2000).toBe(true);
+  });
+
+  it("terminal declares a 300000ms executor timeout", () => {
+    expect(terminal_tool.timeout_ms).toBe(300000);
   });
 });
 

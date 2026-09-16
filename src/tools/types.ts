@@ -16,6 +16,8 @@ export interface Tool {
   name: string;
   description: string;
   parameters: JsonSchemaObject;
+  /** Per-tool executor timeout override in ms; unset tools get the 30s default. */
+  timeout_ms?: number;
   execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
 }
 

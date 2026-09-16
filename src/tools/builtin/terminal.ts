@@ -107,6 +107,7 @@ export const terminal_tool: Tool = {
   name: "terminal",
   description: "Run a shell command with bash -lc and capture combined stdout/stderr plus the exit code.",
   parameters,
+  timeout_ms: MAX_TIMEOUT_MS,
   execute: async (args, context) =>
     capture_errors(async () => {
       const command = require_string_arg(args, "command");
