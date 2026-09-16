@@ -122,6 +122,8 @@ Checked with Node 26.8.2 (`node dist/cli.js`) and Bun 1.3.14 (`bun src/cli.ts`):
 - On Node 20 and Node 22 before 22.18, a `.ts` entry still warns and the run continues without that plugin.
 - Syntax Node cannot strip (for example `enum`) warns and continues. Bun runs that same file with no plugin-load warning. A syntax error warns on both and the run continues.
 
+The combat-commander reference is `examples/game_bridge/game_bridge.plugin.mjs`. Point `config.plugins` at `./examples/game_bridge/game_bridge.plugin.mjs` (relative to `work_dir`). See `examples/game_bridge/README.md`. Embedding it beside a Godot game: [Godot guide](godot.md).
+
 Plain JS (matches `engines.node` `>=20`):
 
 ```mjs

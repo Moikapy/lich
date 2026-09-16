@@ -34,6 +34,7 @@ One package, four ways to drive the same agent: a one-shot CLI, an interactive c
 | [Gateway guide](user-guide/gateway.md) | Wire Telegram, Discord, Twitch, and the HTTP webhook to one agent. |
 | [Library guide](user-guide/library.md) | Embed the agent in TypeScript with events and multi-turn history. |
 | [Plugins guide](user-guide/plugins.md) | Add your own tools and lifecycle hooks, and run the self-improvement loop. |
+| [Godot guide](user-guide/godot.md) | Run lich beside a Godot game and drain `.lich/game/` orders each tick. |
 | [Architecture overview](architecture/overview.md) | Understand how the harness works inside. |
 
 ## How it works

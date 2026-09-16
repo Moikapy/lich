@@ -2,6 +2,10 @@
 
 ## 0.5.0
 
+- add a `game_bridge` example plugin that queues batched enemy actions
+  and durable dungeon memory under `.lich/game/` for a Godot combat tick.
+  a `before_tool_call` hook holds meteor until round 3. node loads the
+  `.mjs` entry from `config.plugins`.
 - load `config.plugins` on every CLI entry point and on `run_agent`
   (`create_agent_with_plugins`). one-shot, chat, tui, and the gateway
   bus no longer ignore plugin entries. broken plugins still warn and
@@ -16,6 +20,9 @@
   @moikapy/lich version` and, when newer, run
   `npm install -g @moikapy/lich@latest`. git clones are told to
   `git pull`; npx cannot persist an update.
+- document embedding that plugin beside a Godot game: one webhook call
+  per combat round, and the `.lich/game/` drain tick. see
+  docs/user-guide/godot.md.
 
 ## 0.4.0
 
