@@ -21,6 +21,7 @@ import {
   INITIAL_UI_STATE,
   model_label_block,
   parse_command,
+  tui_banner_text,
   run_notice_blocks,
   session_list_block,
   tool_result_block,
@@ -203,7 +204,7 @@ export function TuiApp({ agent }: TuiAppProps): React.JSX.Element {
   const provider = agent.config.providers[0];
   return (
     <Box flexDirection="column" minHeight={8}>
-      <Text dimColor>{`lich v${LICH_VERSION} — ${provider?.model ?? "unknown"} (${provider?.kind ?? "unknown"})`}</Text>
+      <Text dimColor>{tui_banner_text(agent.config.agent_name, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown")}</Text>
       <MessageView blocks={blocks} state={state} />
       <StatusBar state={state} model={provider?.model ?? "unknown"} />
       <CommandBar busy={state.phase !== "idle"} on_submit={submit} />

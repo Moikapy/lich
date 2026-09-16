@@ -5,6 +5,7 @@
  */
 import { sleep } from "../util/sleep.js";
 import { logger } from "../util/log.js";
+import { platform_token_env, read_platform_token } from "./token_env.js";
 import type { AdapterParams, PlatformAdapter } from "./types.js";
 import { create_idle_adapter, run_inbound_message } from "./types.js";
 
@@ -22,9 +23,9 @@ interface TelegramUpdate {
 export const TELEGRAM_BACKOFF_MS = [2000, 4000, 8000, 16000, 30000] as const;
 
 export function create_telegram_adapter(params: AdapterParams): PlatformAdapter {
-  const token = process.env.LICH_TELEGRAM_BOT_TOKEN;
-  if (token === undefined || token.length === 0) {
-    return create_idle_adapter("telegram", "LICH_TELEGRAM_BOT_TOKEN not set");
+  const token = read_platform_token(params.config, "telegram");
+  if (token === undefined) {
+    return create_idle_adapter("telegram", `${platform_token_env(params.config, "telegram")} not set`);
   }
   let running = false;
   return {

@@ -42,6 +42,8 @@ lich config > .lich/config.json
 
 `lich config` honors `LICH_PROVIDER_KIND` and `LICH_MODEL` when you have them set, and otherwise prints an ollama-oriented template. The file is picked up automatically from `.lich/config.json` in the working directory (or `~/.config/lich/config.json` as a fallback) — after this, plain `lich "task"` needs no env vars.
 
+`lich init` writes that same starter file for you (it creates `.lich/` and never overwrites an existing `.lich/config.json`). Bare `lich` on a TTY, with no config in that search chain and no `LICH_MODEL`, runs a setup wizard and writes `.lich/config.json` once before opening the TUI. `.lich/` is gitignored.
+
 ### Path C: an explicit config file
 
 ```sh
@@ -70,7 +72,8 @@ Exit code `0` means the model produced a final answer; `1` means the turn budget
 ## Your first TUI session
 
 ```sh
-lich tui
+lich        # TUI; first run on a TTY opens the setup wizard
+lich tui    # same TUI, no wizard
 ```
 
 Type a message and press Enter. The transcript shows your line, live tool-call rows while the agent works, and the reply; the status bar at the bottom tracks turns, tokens, and the session file path. Slash commands: `/help`, `/model`, `/usage`, `/clear`, `/sessions`, `/exit`. Details in [the TUI guide](user-guide/tui.md).
@@ -117,7 +120,7 @@ jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content)"' .lich
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `no model configured: set LICH_MODEL, pass --model, or create .lich/config.json` | No provider was resolvable. Set `LICH_MODEL`, pass `--model`, or save a config file (`lich config`). |
+| `no model configured: set LICH_MODEL, pass --model, or create .lich/config.json` | No provider was resolvable. Set `LICH_MODEL`, pass `--model`, or save a config file (`lich init` or `lich config`). |
 | `lich: config not found: <path>` | `--config` was given a path that does not exist. Check the path or drop the flag to use discovery. |
 | Provider error `kind=auth`, http 401/403 | The api key is missing or wrong. Verify the env var named by `LICH_API_KEY_ENV` (default `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`) is exported in the same shell. |
 | `fetch failed` / connection refused | The endpoint is unreachable. For ollama, check `ollama serve` is running on `http://localhost:11434`; for remote APIs, check `LICH_BASE_URL`. |

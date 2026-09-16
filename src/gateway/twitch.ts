@@ -3,7 +3,9 @@
  * CAP/JOIN setup, tag-prefixed PRIVMSG parsing, PING/PONG, and 512-char
  * message splitting. Absent config degrades to an idle adapter.
  */
+import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
+import { platform_token_env, read_platform_token } from "./token_env.js";
 import type { AdapterParams, PlatformAdapter, RawSocket } from "./types.js";
 import { create_idle_adapter, open_socket, run_inbound_message } from "./types.js";
 
@@ -24,9 +26,11 @@ interface ParsedLine {
 }
 
 export function create_twitch_adapter(params: AdapterParams): PlatformAdapter {
-  const twitch = read_twitch_env();
+  const twitch = read_twitch_env(params.config);
   if (twitch === undefined) {
-    return create_idle_adapter("twitch", "LICH_TWITCH_OAUTH_TOKEN / NICK not set");
+    const token_env = platform_token_env(params.config, "twitch");
+    const reason = token_env === "LICH_TWITCH_OAUTH_TOKEN" ? "LICH_TWITCH_OAUTH_TOKEN / NICK not set" : `${token_env} / LICH_TWITCH_NICK not set`;
+    return create_idle_adapter("twitch", reason);
   }
   let running = false;
   let socket: RawSocket | undefined;
@@ -46,8 +50,8 @@ export function create_twitch_adapter(params: AdapterParams): PlatformAdapter {
   };
 }
 
-function read_twitch_env(): TwitchConfig | undefined {
-  const raw_token = process.env.LICH_TWITCH_OAUTH_TOKEN;
+function read_twitch_env(config: AgentConfig): TwitchConfig | undefined {
+  const raw_token = read_platform_token(config, "twitch");
   const nick = process.env.LICH_TWITCH_NICK;
   const channels_env = process.env.LICH_TWITCH_CHANNELS;
   if (raw_token === undefined || raw_token.length === 0 || nick === undefined || nick.length === 0) {

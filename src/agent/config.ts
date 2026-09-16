@@ -3,8 +3,17 @@
  * derived session_dir, deep-freezes the result, and syncs the logger level.
  */
 import { z } from "zod";
+import { ENV_VAR_NAME } from "../gateway/token_env.js";
 import type { ProviderConfig } from "../providers/types.js";
 import { set_log_level } from "../util/log.js";
+
+const gateway_schema = z
+  .object({
+    platforms: z.array(z.enum(["webhook", "telegram", "discord", "twitch"])).default([]),
+    /** Env-var names that hold tokens. Never store the secrets themselves. */
+    token_envs: z.record(z.string(), z.string().regex(ENV_VAR_NAME, "invalid env var name")).default({}),
+  })
+  .optional();
 
 const provider_schema = z
   .object({
@@ -22,6 +31,8 @@ const provider_schema = z
 
 const agent_config_schema = z
   .object({
+    /** Display name used by the TUI banner. */
+    agent_name: z.string().min(1).default("lich"),
     system_prompt: z.string().optional(),
     max_turns: z.number().int().min(1).default(25),
     providers: z.array(provider_schema).min(1),
@@ -35,6 +46,7 @@ const agent_config_schema = z
     terminal_timeout_ms: z.number().int().positive().default(60000),
     /** Plugin entry module specifiers, relative to work_dir or absolute. */
     plugins: z.array(z.string()).default([]),
+    gateway: gateway_schema,
     log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
   .transform((config) => {
@@ -54,6 +66,11 @@ function freeze_config(config: AgentConfig): AgentConfig {
   Object.freeze(config.providers);
   for (const provider of config.providers) {
     Object.freeze(provider);
+  }
+  if (config.gateway !== undefined) {
+    Object.freeze(config.gateway.platforms);
+    Object.freeze(config.gateway.token_envs);
+    Object.freeze(config.gateway);
   }
   return config;
 }

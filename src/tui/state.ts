@@ -107,6 +107,11 @@ export function parse_command(raw_input: string): ParsedInput {
   return { kind: "slash", name: body.slice(0, space_index), args: body.slice(space_index + 1).trim() };
 }
 
+/** Dim header line: agent name, version, model, provider kind. */
+export function tui_banner_text(agent_name: string, version: string, model: string, kind: string): string {
+  return `${agent_name} v${version} — ${model} (${kind})`;
+}
+
 /** 1234567 -> "1,234,567" (US grouping, matching the status bar style). */
 export function format_usage(total_tokens: number): string {
   return total_tokens.toLocaleString("en-US");
