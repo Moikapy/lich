@@ -21,6 +21,13 @@ export interface PluginLoadError {
 
 const MODULE_QUERY = /(\.mjs|\.js|\.ts|\.mts|\.cts|\.jsx|\.tsx)$/;
 
+/** Builtin plugin names; config plugins may never collide (A5 hard-reject). */
+export const BUILTIN_PLUGIN_NAMES: readonly string[] = Object.freeze(["gatekeeper"]);
+
+function is_builtin_collision(name: string): boolean {
+  return BUILTIN_PLUGIN_NAMES.includes(name) === true;
+}
+
 function describe_error(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -90,6 +97,10 @@ export async function load_plugins(
     }
     try {
       const loaded = await load_one_entry(entry, base_dir);
+      if (is_builtin_collision(loaded.plugin.name) === true) {
+        errors.push({ entry, error_message: `builtin_plugin_name_collision: ${loaded.plugin.name}` });
+        continue;
+      }
       if (seen.has(loaded.plugin.name) === true) {
         errors.push({ entry, error_message: `duplicate_plugin_name: ${loaded.plugin.name}` });
         continue;

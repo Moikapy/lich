@@ -28,7 +28,7 @@ flowchart TB
     CLIENTS["openai_compat / anthropic / ollama<br/>HTTP clients"]
     EXEC["ToolExecutor<br/>(src/tools/executor.ts)"]
     REG["ToolRegistry<br/>(src/tools/registry.ts)"]
-    BUILTIN["12 builtin tools<br/>(src/tools/builtin/*)"]
+        BUILTIN["builtin tools<br/>(src/tools/builtin/*)"]
     COMP["ContextCompressor<br/>(src/context/compressor.ts)"]
     SESSION["SessionStore<br/>(src/session/store.ts)"]
 
@@ -59,18 +59,20 @@ structural interfaces ([`src/agent/loop.ts`](../../src/agent/loop.ts)):
 
 - `ChatFn` - `(messages, tools, options?) => Promise<ChatResult>` (declared in
   `src/context/compressor.ts`, since compression needs the same shape).
-- `ToolRunner` - `{ execute(name, args) => Promise<ToolResult> }`.
+- `ToolRunner` - `{ execute(name, args, context?) => Promise<ToolResult> }`.
 
 `run_conversation` receives a `LoopDeps` object holding a `ChatFn`, a
-`ToolRunner`, a `definitions()` callback for tool schemas, and an optional
-emitter. The `Agent` class (`src/agent/agent.ts`) is the composition root: its
-`loop_deps()` method wires the real implementations -
+`ToolRunner`, a `definitions()` callback for tool schemas, an optional
+emitter, and an optional per-run `tool_context` threaded to every tool
+execution. The `Agent` class (`src/agent/agent.ts`) is the composition root:
+its `loop_deps()` method wires the real implementations -
 
 ```ts
 chat: (messages, tools, chat_options) => this.router.chat_with_failover(messages, tools, chat_options),
 tools: this.executor,
 definitions: () => this.registry.definitions(),
 emitter: this.events,
+tool_context,
 ```
 
 (src/agent/agent.ts, `loop_deps()`)
@@ -166,7 +168,7 @@ Walkthrough of a single `Agent.run({ input })` call
 | `src/tools/guard.ts` | Path confinement, timeouts, clamping, arg coercion. |
 | `src/tools/registry.ts` | Name-keyed tool registry; duplicate rejection. |
 | `src/tools/executor.ts` | Never-throw execution with timeout and abort. |
-| `src/tools/builtin/*` | The 12 builtin tools (see [tools](./tools.md)). |
+| `src/tools/builtin/*` | Builtin tools, including `run_tests` (see [tools](./tools.md)). |
 | `src/gateway/bus.ts` | Conversation-keyed runner over one shared `Agent`. |
 | `src/gateway/runner.ts` | Adapter construction, signal handling, process lifetime. |
 | `src/gateway/{telegram,discord,twitch,webhook}.ts` | Platform adapters. |

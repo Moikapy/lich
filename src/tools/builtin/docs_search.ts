@@ -1,7 +1,7 @@
 import type { JsonSchemaObject } from "../../util/json_schema.js";
 import { capture_errors, clamp_output, optional_number_arg, require_string_arg } from "../guard.js";
-import { DOCS_UNAVAILABLE, list_doc_files, require_docs_root } from "./docs_read.js";
-import { readFileSync } from "node:fs";
+import { DOCS_UNAVAILABLE, list_doc_files, require_docs_root, walk_doc_files } from "./docs_read.js";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { Tool, ToolContext } from "../types.js";
 
@@ -163,9 +163,15 @@ function flatten_results(query: string, sections: DocSection[], max_results: num
   return lines.join("\n");
 }
 
+/** Skills dir under work_dir; existence-only check, no index.md gate. */
+function skills_root(context: ToolContext): string | undefined {
+  const candidate = path.join(context.work_dir, ".lich", "skills");
+  return existsSync(candidate) === true ? path.resolve(candidate) : undefined;
+}
+
 export const docs_search_tool: Tool = {
   name: "docs_search",
-  description: "Search across all bundled lich docs; returns scored section matches with short excerpts.",
+  description: "Search across all bundled lich docs and .lich/skills; returns scored section matches with short excerpts.",
   parameters,
   execute: async (args, context) =>
     capture_errors(async () => {
@@ -175,7 +181,14 @@ export const docs_search_tool: Tool = {
         MAX_RESULTS_CAP,
         Math.max(1, Math.trunc(optional_number_arg(args, "max_results", DEFAULT_MAX_RESULTS))),
       );
-      const output = flatten_results(query, load_sections(root, list_doc_files(root)), max_results);
+      // Package docs stay memoized; skills are a fresh copy so user-writable
+      // sections never land in that cache (fresh walk, every call).
+      const sections = [...load_sections(root, list_doc_files(root))];
+      const skills = skills_root(context);
+      if (skills !== undefined) {
+        sections.push(...build_section_index(skills, walk_doc_files(skills)));
+      }
+      const output = flatten_results(query, sections, max_results);
       return { ok: true, output: clamp_output(output, MAX_DOC_OUTPUT_CHARS) };
     }),
 };

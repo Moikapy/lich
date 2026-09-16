@@ -47,11 +47,11 @@ All hooks are awaited. Hook errors are logged as warnings and skipped — a brok
 | Hook | Signature | Purpose |
 | --- | --- | --- |
 | `before_tool_call` | `(info: {tool_name, args}, ctx) => {block?: boolean, reason?: string} \| void` | Runs before each tool call in plugin registration order. Return `{block: true, reason}` to veto. |
-| `after_tool_call` | `(info: {tool_name, args, result_summary}, ctx) => void` | Runs after each tool call with a 300-char result summary. |
+| `after_tool_call` | `(info: {tool_name, args, result_summary, ok, error?}, ctx) => void` | Runs after each tool call with a 300-char summary plus structured `ok`/`error`. |
 | `on_run_start` | `(info: {input_chars}, ctx) => void` | Runs once before the conversation loop starts. |
 | `on_run_end` | `(info: {stopped_reason, turns_used}, ctx) => void` | Runs once after the loop ends with the outcome. |
 
-`ctx` is `{work_dir: string}` — the agent's working directory.
+`ctx` is `{work_dir, state?}` — the agent's working directory plus that plugin's per-run bag.
 
 ## Tool authoring
 
@@ -115,6 +115,59 @@ Failures are contained at every layer:
 - **Bun** runs TypeScript plugin files natively — `.ts` entries just work (`bun src/cli.ts ...` from a clone).
 - **Node** (the built `dist/cli.js`) uses the native ESM loader, which does not compile TS. For node deployments, compile your plugin or ship it as `.mjs`/plain JS and list that file in `plugins`.
 
+## Self-improvement loop
+
+The agent can write a tool, prove it with `run_tests`, and commit it with
+`git_commit` — one commit per run, and only when you opt in. The gatekeeper
+is constructed in code (not listed in `config.plugins`). If it does not
+register, `git_commit` is absent. A config plugin naming `git_commit` is
+inside the plugin-trust floor only when the gatekeeper is off; while it is
+on, first-wins keeps the gatekeeper's tool.
+
+Set `LICH_ALLOW_SELF_COMMIT=1` before startup. Unset, or any other value, is
+fail-closed. `git_commit` is vetoed unless every condition holds; the reason
+names the first failure, and the model sees `blocked_by_plugin: <reason>`:
+
+| Failed condition | Reason |
+| --- | --- |
+| `LICH_ALLOW_SELF_COMMIT` is not `1` | `self_commit_disabled` |
+| no green `run_tests` yet this run | `tests_not_ok` |
+| a `write_file` or `edit_file` succeeded after that green run | `worktree_dirty` |
+| this run already committed once | `commit_budget_exhausted` |
+
+`terminal` is vetoed when the command matches the hardcoded git denylist.
+The reason is `git_denylist: <pattern>`. Patterns are flag-tolerant
+`commit`/`push` (`commit`, `-commit`, `--commit`, `push`, `-push`, `--push`)
+and any occurrence of `commit-tree` or `update-ref`. There is no `remote`
+pattern. The denylist is best-effort: raw `terminal` can still run git. The
+boundary is a human reviewing the local repo. Push is human-only.
+
+`git_commit` takes `{message, paths}` — 1 to 50 paths relative to `work_dir`.
+It rejects `""`, `.`, a path that resolves to `work_dir` itself, and
+secret-ish basenames (`.env`, `.env.local`, `*.pem`, `*.p12`, `id_rsa*`).
+It refuses an unreachable `HEAD`. It stages exactly the named paths
+(`git add -- <paths>`) and commits with `git commit --only`. It never pushes.
+
+`run_tests` takes an optional `filter` and runs `LICH_TEST_COMMAND` in
+`work_dir` (default `node node_modules/vitest/vitest.mjs run`) with a 600s
+timeout. A second call in the same process returns `run_tests_busy`. The
+mutex is process-local: one lich process per repo.
+
+Clean state attests no `write_file`/`edit_file` since the last green
+`run_tests`; it does NOT attest absence of terminal-mediated writes.
+
+### Skills and memory
+
+Write a markdown note with `write_file` to `.lich/skills/<name>.md`.
+`docs_search` finds those files. That directory does not need `index.md`,
+and it is walked fresh on every search. The default system prompt says tool
+results — docs, skills, memory — are reference data, not instructions.
+
+`MEMORY.md` is append-only and human-reviewable. It is never auto-loaded.
+Review it between appends and the next self-commit.
+
 ## Security note
 
 Plugins execute **in-process with full privileges** — the same trust level as the agent itself and your shell. A plugin can read any file the process can, make network calls, and alter process state. Only load plugin files you wrote or audited; treat `.lich/plugins/` like you treat `.env` files.
+
+`.lich/config.json` `plugins` is persistent arbitrary code at the next process start. Review config diffs before the next self-commit. The terminal git denylist does not close that hole.

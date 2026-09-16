@@ -23,7 +23,7 @@ flowchart LR
     K -- yes --> M["LoadedPlugin collected"]
     M --> N["Agent constructor"]
     N --> O["registry merge:\nplugin tools appended\n(dup tool name → warn+skip)"]
-    N --> P["hook concat:\nPluginHooks[] in config order"]
+    N --> P["hooked plugins kept\nwhole (per-plugin state channel)"]
     P --> Q["HookedToolRunner wraps\nToolExecutor when hooks exist"]
     E --> R["warn + continue"]
     H --> R
@@ -53,13 +53,65 @@ sequenceDiagram
     else no blocker
         H->>E: execute(name, args, context?)
         E-->>H: ToolResult
-        H->>A: await hook({...info, result_summary}, ctx)
-        note over A: summary = 300 chars of output/error
+        H->>A: await hook({...info, result_summary, ok, error?}, ctx)
+        note over A: summary = 300 chars of output/error; ok/error are structured
         H-->>L: ToolResult unchanged
     end
 ```
 
 Lifecycle fan-outs live on the same wrapper: `Agent.run` calls `call_run_start({input_chars})` before `run_conversation` and `call_run_end({stopped_reason, turns_used})` after it (including the abort/throw path, via `finally`). Both are best-effort: hook throws are logged at `warn` and the run proceeds.
+
+## Builtin gatekeeper
+
+`Agent` constructs `gatekeeper_plugin` in code, before config plugins, and
+pushes it as a synthetic `LoadedPlugin` through tool registration and the
+hook runner. The config loader never sees it. Construction failure means
+`git_commit` is not in the registry at all. "No gatekeeper → no `git_commit`"
+is that trusted path: with the gatekeeper off, a config plugin may still name
+a tool `git_commit` (the documented plugin-trust floor). While the gatekeeper
+is registered, first-wins keeps its tool.
+
+`LICH_ALLOW_SELF_COMMIT` is read from process env at construction. The spec
+value is `1`. Unset or any other value is fail-closed.
+
+Per-run state starts `tests_ok=false`, `dirty=true`, `commits=0` (swapped at
+`call_run_start`). `after_tool_call` updates only on structured `ok`:
+
+- `write_file` / `edit_file` success → `dirty=true`
+- `run_tests` success → `tests_ok=true`, `dirty=false`
+- `git_commit` success → `commits++`
+
+`before_tool_call` vetoes `git_commit` unless
+`allow_self_commit && tests_ok && !dirty && commits < 1`. The reason names
+the failed condition: `self_commit_disabled`, `tests_not_ok`,
+`worktree_dirty`, `commit_budget_exhausted`. The model sees
+`blocked_by_plugin: <reason>`.
+
+`terminal` is vetoed on a hardcoded denylist match; the reason is
+`git_denylist: <pattern>`. Patterns: flag-tolerant `commit` and `push`
+(`commit`, `-commit`, `--commit`, `push`, `-push`, `--push`) plus
+any-occurrence `commit-tree` and `update-ref`. No `remote` pattern. One
+commit per run, hardcoded.
+
+`git_commit` args are `{message, paths}` with 1–50 paths relative to
+`work_dir`. It rejects `""`, `.`, anything resolving to `work_dir`, and
+secret-ish basenames (`.env`, `.env.local`, `*.pem`, `*.p12`, `id_rsa*`).
+Unreachable `HEAD` is fail-closed. Recipe: scoped `git add -- <paths>`, then
+`git commit --only` with explicit identity `-c` flags. `timeout_ms` is 60000.
+It never pushes.
+
+**Attestation:** clean state attests no `write_file`/`edit_file` since the
+last green `run_tests`; it does NOT attest absence of terminal-mediated
+writes — that sits with the documented terminal floor.
+
+Floors, stated not closed:
+
+- Terminal floor: raw `terminal` can run arbitrary git; the denylist is
+  best-effort. The boundary is human review of the local repo; push is
+  human-only.
+- Plugin-trust floor: `.lich/config.json` `plugins` is persistent arbitrary
+  code at next process start. Review config diffs.
+- One lich process per repo (the `run_tests` mutex is process-local).
 
 ## Design decisions
 
@@ -74,7 +126,8 @@ Lifecycle fan-outs live on the same wrapper: `Agent.run` calls `call_run_start({
 | --- | --- | --- |
 | `Plugin` | type | `{name, version?, tools?, hooks?}` — what a plugin module exports. |
 | `PluginHooks` | type | The four optional lifecycle hooks with their signatures. |
-| `HookContext` | type | `{work_dir}` passed to every hook. |
+| `HookContext` | type | `{work_dir, state?}` passed to every hook; `state` is the invoking plugin's own per-run bag. |
+| `AfterToolCallInfo` | type | Tool name/args plus the 300-char `result_summary` and structured `ok`/`error` fields. |
 | `LoadedPlugin` | type | `{plugin, entry}` — a loaded plugin and its source path. |
 | `load_plugins` | function | `(entries, base_dir) => {plugins, errors}` — dynamic import + shape validation. |
 | `plugin_errors_summary` | function | Joins error entries into one warn-able string. |

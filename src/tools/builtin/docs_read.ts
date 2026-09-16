@@ -147,7 +147,7 @@ function collect_doc_entries(
 }
 
 /** Iterative (stack-based) walk of the docs tree; skips .vitepress, depth cap 4. */
-function walk_doc_files(root: string): string[] {
+export function walk_doc_files(root: string): string[] {
   const files: string[] = [];
   const stack: Array<{ dir: string; depth: number }> = [{ dir: path.resolve(root), depth: 0 }];
   while (stack.length > 0) {

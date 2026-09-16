@@ -9,6 +9,7 @@ import { http_request_tool } from "./http_request.js";
 import { list_dir_tool } from "./list_dir.js";
 import { process_list_tool } from "./process_list.js";
 import { read_file_tool } from "./read_file.js";
+import { run_tests_tool } from "./run_tests.js";
 import { terminal_tool } from "./terminal.js";
 import { web_search_tool } from "./web_search.js";
 import { write_file_tool } from "./write_file.js";
@@ -29,6 +30,7 @@ const core_tools: Tool[] = [
   process_list_tool,
   disk_usage_tool,
   env_get_tool,
+  run_tests_tool,
 ];
 
 /** Docs tools register only when a docs root is resolvable for this process. */

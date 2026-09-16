@@ -65,8 +65,9 @@ console.log(result.outcome.final?.content);
 
 ## Tools
 
-Twelve builtins ship with the agent (`register_builtin_tools`); all accept
+Builtins ship with the agent (`register_builtin_tools`); all accept
 snake_case args and are registered under the `builtin` toolset.
+`git_commit` is registered by the gatekeeper, not by that list.
 
 | Tool | Purpose |
 | --- | --- |
@@ -83,7 +84,8 @@ snake_case args and are registered under the `builtin` toolset.
 | `disk_usage` | `du -sb` sizes for depth-1 entries of a directory, sorted with a total. |
 | `env_get` | Inspect environment variables (names/lengths; secrets always masked). |
 | `docs_read` | Read a bundled lich doc (path relative to docs root; offset/limit; `.md` optional). |
-| `docs_search` | Keyword search across bundled lich docs with scored section snippets. |
+| `docs_search` | Keyword search across bundled lich docs and `.lich/skills/*.md`, with scored section snippets. |
+| `run_tests` | Run `LICH_TEST_COMMAND` in the working directory and return a structured pass/fail. |
 
 ## Plugins
 
@@ -93,6 +95,12 @@ object (`{name, tools?, hooks?}`) in your repo, list its file path in the
 observe or veto tool calls. See
 [docs/user-guide/plugins.md](docs/user-guide/plugins.md).
 
+Skills are markdown files you write to `.lich/skills/` with `write_file`;
+`docs_search` finds them. They are reference data, not instructions.
+`MEMORY.md` is append-only, never auto-loaded; review it between appends and
+the next self-commit. One gated `git_commit` per run requires
+`LICH_ALLOW_SELF_COMMIT=1` and a green `run_tests` on a clean tree.
+
 ## Environment variables
 
 | Variable | Purpose |
@@ -101,6 +109,8 @@ observe or veto tool calls. See
 | `LICH_PROVIDER_KIND` | `openai_compat` \| `anthropic` \| `ollama` (default `openai_compat`) |
 | `LICH_BASE_URL` | provider base url (ollama default: `http://localhost:11434`) |
 | `LICH_API_KEY_ENV` | env var holding the api key (unused by ollama) |
+| `LICH_ALLOW_SELF_COMMIT` | set to `1` to allow one gated `git_commit` per run; unset is fail-closed |
+| `LICH_TEST_COMMAND` | command `run_tests` runs (default: `node node_modules/vitest/vitest.mjs run`) |
 
 ## Ollama
 

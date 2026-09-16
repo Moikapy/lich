@@ -61,7 +61,7 @@ export class ToolExecutor {
           }, { once: true });
           return tool.execute(args, { ...context, signal: combined.signal });
         },
-        DEFAULT_TOOL_TIMEOUT_MS,
+        tool.timeout_ms ?? DEFAULT_TOOL_TIMEOUT_MS,
         `tool:${tool.name}`,
       );
       logger.debug(`tool_call_end: ${tool.name}`);

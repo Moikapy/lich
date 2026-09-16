@@ -129,6 +129,19 @@ Minimal per-provider examples:
 
 Listed providers form a failover chain: the router walks them in order, retrying `rate_limit`/`network` errors (bounded backoff) on the current provider before moving on, and failing over immediately on `auth`, `overflow`, and `bad_request`.
 
+## Self-improvement environment
+
+These are process-env knobs, not config fields. They are assembled in code and
+never accepted as a config passthrough.
+
+| Variable | Meaning |
+| --- | --- |
+| `LICH_ALLOW_SELF_COMMIT` | Set to `1` to allow one gated `git_commit` per run. Unset or any other value is fail-closed. Read at agent construction. |
+| `LICH_TEST_COMMAND` | Command `run_tests` runs in `work_dir` (default `node node_modules/vitest/vitest.mjs run`). An optional `filter` argument is appended. |
+
+Veto reasons, the terminal git denylist, skills, and `MEMORY.md` are in the
+[plugins guide](plugins.md#self-improvement-loop).
+
 ## Session files
 
 Each run writes `.lich/sessions/<timestamp36>-<counter>[-label].jsonl` where the label is the run origin: `-tui`, or `-gw-<platform>-<chat_id>` for gateway conversations. One-shot and chat runs get no label. Records are JSON lines of two kinds: `{"ts","kind":"meta","meta":{...}}` (run start, budget exhaustion) and `{"ts","kind":"message","message":{...}}` for each system/user/assistant/tool message.
