@@ -13,6 +13,7 @@ lich tui               # interactive terminal UI (ink)
 lich gateway <plat..>  # messaging gateway (webhook|telegram|discord|twitch)
 lich config            # print a starter config template
 lich update            # install a newer npm release, if one exists
+lich mcp list          # list servers in this work dir's .lich/config.json
 lich --help            # usage text
 lich --version         # print 0.3.0
 ```
@@ -24,6 +25,7 @@ lich --version         # print 0.3.0
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
 - **Gateway** runs platform adapters (defaults to `webhook` when no platform is given). See the [Gateway guide](gateway.md). Unknown platform names are skipped with a warning; if none remain, the CLI exits `1`.
 - **Update** compares the installed version to the npm registry and, when a newer release exists, runs `npm install -g @moikapy/lich@latest`. Exit any running TUI or gateway first; npm cannot replace the package while those processes are running. A git clone is told to `git pull`. See [Updating](../getting-started.md#updating).
+- **MCP** edits only `mcp_servers` in `<work-dir>/.lich/config.json` through the same writer as `lich init`. A missing file lists as empty. `add` is disabled until `enable`. Catalog names use `optional-mcps/`; otherwise pass `--command` and repeatable `--arg`, or `--url` (loopback only). Redot still needs `--project-path` for the catalog args, and the command basename must be `redot`. No prompts. See the [Redot guide](redot.md).
 
 The installed `lich` binary and `bun src/cli.ts` (from a repository clone) accept identical arguments.
 
@@ -44,6 +46,10 @@ Flags work before or after the subcommand. Every value flag can also be set via 
 | `--session-dir <path>` | Transcript directory. | `<work_dir>/.lich/sessions` |
 | `--log-level <level>` | `debug` \| `info` \| `warn` \| `error`. | `info` |
 | `--theme <name>` | Display theme loaded once at startup. `lich` is built-in; other names read `~/.lich/themes/<name>.json`. | `lich` |
+| `--command <bin>` | `lich mcp add` only: local stdio binary. | – |
+| `--arg <value>` | `lich mcp add` only: repeatable stdio arg. | – |
+| `--url <url>` | `lich mcp add` only: loopback HTTP MCP URL. | – |
+| `--project-path <path>` | `lich mcp add` only: catalog `${project_path}` substitute. | – |
 
 Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a positive integer`. Unknown flags fail with `unknown flag: --foo`. A flag missing its value fails with `<flag> requires a value`.
 
@@ -116,10 +122,11 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `agent_name` | string | `lich` | Wizard label. The TUI banner uses the active theme welcome string, not this field. |
 | `theme` | string | `lich` | Display theme name. See [Themes](../../README.md#themes). |
 | `gateway` | object | omitted | Optional. `platforms` (`webhook` \| `telegram` \| `discord` \| `twitch`) and `token_envs` (platform → env-var name). Secrets stay in the environment. |
+| `mcp_servers` | object | omitted | Optional. Closed record of named servers. Each entry is stdio `{command, args, env?}` or loopback http `{url}`. `enabled` defaults to false. See the [Redot guide](redot.md). |
 | `system_prompt` | string | built-in | Replaces the default system prompt. |
 | `max_turns` | int >= 1 | `25` | Turn budget per run. |
 | `work_dir` | string | cwd | Root for all file tools; paths outside are rejected. |
-| `tools_enabled` | `"all"` or name array | `"all"` | Restrict the registry to these builtin tools. |
+| `tools_enabled` | `"all"` or name array | `"all"` | Restrict the registry to these names. `[]` excludes builtins and MCP tools. Plugin tools still register afterward. |
 | `temperature` | 0–2 | – | Sampling temperature. |
 | `max_tokens` | positive int | – | Completion cap. |
 | `context_budget_tokens` | positive int | `100000` | Estimated budget before compression triggers. |

@@ -19,6 +19,7 @@ export { Agent, create_agent, run_agent, create_agent_with_plugins } from "./age
 export type { AgentRunOptions, AgentRunResult } from "./agent/agent.js";
 export type { AgentConfig } from "./agent/config.js";
 export { parse_agent_config } from "./agent/config.js";
+export { catalog_client_entry } from "./mcp/mcp_catalog_entry.js";
 export { AgentEmitter } from "./agent/events.js";
 export type { AgentEvent, AgentEventHandler, AgentEvents } from "./agent/events.js";
 export type { LoopOutcome, LoopParams } from "./agent/loop.js";

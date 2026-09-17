@@ -66,3 +66,5 @@ A round that does not match `state.json` is still appended. The tool output then
 ## Failures
 
 Tools return `{ok: false, error}` and do not throw. Reads skip malformed JSONL lines. The first call creates `.lich/game/` if it is missing. `memory.jsonl` grows forever; only the read is capped.
+
+Editor MCP builds the project. This plugin is the opposite direction: the game connects to lich. NPC and game-master play still drain `.lich/game/orders.jsonl` and the webhook. A game master is another persona, not an editor tool. See the [Redot guide](../../docs/user-guide/redot.md).

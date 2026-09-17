@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 (unreleased)
+
+- add a general MCP client. `mcp_servers` is a closed record of named
+  stdio or loopback-http entries, default off. tool names are
+  `mcp_<server>_<tool>`. `tools_enabled: []` drops them. the commander
+  persona does not copy `mcp_servers`. redot is a catalog entry (local
+  `redot` binary, `--headless --mcp-server --path <project>`, five
+  upstream controllers, no execute). godot has no official server; lich
+  does not download a community addon. play stays the webhook and
+  game_bridge, the opposite direction. see docs/user-guide/redot.md.
+- add `lich mcp` to list, add, enable, disable, and remove servers.
+  add uses the catalog or `--command`/`--url`, stays disabled, and
+  updates `.lich/config.json` through the existing writer without
+  dropping other keys.
+
 ## 0.6.0 (unreleased)
 
 - document a per-persona orchestrator example: one agent per NPC, the

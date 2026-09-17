@@ -12,6 +12,8 @@ import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import { AgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
 import { load_config, config_template, existing_config_path, starter_config_object, write_lich_config } from "./cli_config.js";
+import { run_mcp } from "./cli_mcp.js";
+import { empty_mcp_flags, take_mcp_flag, type McpCliFlags } from "./cli_mcp_flags.js";
 import { run_update } from "./cli_update.js";
 import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
 import { load_theme, notice_flavor } from "./util/theme.js";
@@ -24,6 +26,7 @@ interface CliOptions {
   version?: boolean;
   overrides: Record<string, string>;
   positionals: string[];
+  mcp_flags: McpCliFlags;
 }
 
 const FLAG_KEYS: Record<string, string> = {
@@ -64,6 +67,9 @@ function usage_text(): string {
     "  lich gateway <plat..>  messaging gateway (webhook|telegram|discord|twitch)",
     "  lich config            print a starter config template (save as .lich/config.json)",
     "  lich update            install a newer @moikapy/lich from npm, if one exists",
+    "  lich mcp list          list mcp servers in .lich/config.json",
+    "  lich mcp add <name>    add a catalog or --command/--url server (disabled)",
+    "  lich mcp enable <name> / disable <name> / remove <name>",
     "  lich --help            show this help",
     "  lich --version         print version",
     "",
@@ -79,6 +85,10 @@ function usage_text(): string {
     "  --session-dir <path>   session transcript directory",
     "  --log-level <level>    debug | info | warn | error",
     "  --theme <name>         display theme (default lich; files in ~/.lich/themes)",
+    "  --command <bin>        mcp add: local stdio binary",
+    "  --arg <value>          mcp add: repeatable stdio arg (may start with --)",
+    "  --url <url>            mcp add: loopback http url",
+    "  --project-path <path>  mcp add: catalog ${project_path} substitute",
   ].join("\n");
 }
 
@@ -101,7 +111,8 @@ function error_for_mode(mode: string, base_message: string): string {
 }
 
 function parse_args(argv: string[]): CliOptions {
-  const options: CliOptions = { overrides: {}, positionals: [] };
+  const options: CliOptions = { overrides: {}, positionals: [], mcp_flags: empty_mcp_flags() };
+  const mcp = argv.includes("mcp");
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) {
@@ -123,6 +134,13 @@ function parse_args(argv: string[]): CliOptions {
       options.config_path = value;
       index += 1;
       continue;
+    }
+    if (mcp === true) {
+      const consumed = take_mcp_flag(argv, index, options.mcp_flags);
+      if (consumed !== undefined) {
+        index = consumed;
+        continue;
+      }
     }
     const override_key = FLAG_KEYS[arg];
     if (override_key === undefined) {
@@ -511,6 +529,9 @@ export async function run_cli(argv: string[]): Promise<number> {
   if (first === "config") {
     process.stdout.write(`${config_template()}\n`);
     return 0;
+  }
+  if (first === "mcp") {
+    return run_mcp(work_dir_of(options), options.positionals, options.mcp_flags);
   }
   if (first === "update") {
     if (options.positionals.length > 1) {
