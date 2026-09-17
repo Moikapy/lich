@@ -19,7 +19,7 @@ There is no basic-attack fallback and no tunable veto table. The meteor gate is 
 
 Copy `personas.ts`, `history_queue.ts`, `reply.ts`, and `orchestrator.ts`. In the game repo, load agents with `create_agent_with_plugins` from `@moikapy/lich` (this checkout's `run.ts` imports `../../src/index.js`).
 
-- **Factory.** `persona_config` merges a shared provider list with one persona's `system_prompt`, `tools_enabled`, `max_turns`, `max_tokens`, `context_budget_tokens`, and `plugins`. One `create_agent_with_plugins` call per persona, cached by `persona_id`. `tools_enabled` filters builtins only. Plugin tools register after the filter, so they are not stripped. An empty `tools_enabled` with zero plugins does not throw — the model just replies, plus the gatekeeper's `git_commit` (always registered, fail-closed unless `LICH_ALLOW_SELF_COMMIT=1`). Duplicate tool names warn and skip; first wins.
+- **Factory.** `persona_config` merges a shared provider list with one persona's `system_prompt`, `tools_enabled`, `max_turns`, `max_tokens`, `context_budget_tokens`, and `plugins`. It does not copy `mcp_servers`. One `create_agent_with_plugins` call per persona, cached by `persona_id`. `tools_enabled` filters builtins and editor MCP tools. Plugin tools register after the filter, so they are not stripped. An empty `tools_enabled` drops MCP tools even when a server is enabled, and does not throw — the model just replies, plus the gatekeeper's `git_commit` (always registered, fail-closed unless `LICH_ALLOW_SELF_COMMIT=1`). Duplicate tool names warn and skip; first wins.
 - **Serialization.** `enqueue` is the GatewayBus promise chain, keyed by `chat_id`. Concurrent posts to one conversation cannot interleave history. Different `chat_id`s run concurrently. The plugin itself still makes no concurrency guarantee; one bridge per `chat_id` is the intended pattern.
 - **History cap.** `cap_history` keeps the newest N messages (default 40). Oldest conversations drop at 200. The loop re-seeds `system_prompt` on every run, so losing a stored system line is safe. A cap of N does not keep the whole battle: the oldest overflow is dropped. Restate facts the digest still needs, or write them with `dungeon_memory_write`.
 - **Budgets.** Each persona has its own `max_turns`, `max_tokens`, and `context_budget_tokens`. Budget exhaustion returns `stopped_reason: "budget"` and `round_fate` is `game_repo_decides`. The HTTP body is still `{reply, usage}`. This example does not write an order line on that path.
@@ -30,12 +30,12 @@ Copy `personas.ts`, `history_queue.ts`, `reply.ts`, and `orchestrator.ts`. In th
 
 | `persona_id` | `tools_enabled` | Plugins | What the model sees |
 | --- | --- | --- | --- |
-| `commander` | `[]` | `game_bridge.plugin.mjs` | No builtin file/terminal tools. Plugin tools `enemy_actions`, `dungeon_memory_read`, `dungeon_memory_write`, plus `git_commit`. |
+| `commander` | `[]` | `game_bridge.plugin.mjs` | No builtin file/terminal tools. No `mcp_*` editor tools. Plugin tools `enemy_actions`, `dungeon_memory_read`, `dungeon_memory_write`, plus `git_commit`. |
 | `chronicler` | `["read_file"]` | none | Builtin `read_file` only (plus `git_commit`). No game-bridge tools. |
 
 `config.plugins` is loaded only by `create_agent_with_plugins`. `create_agent` does not load plugins. Paths are relative to `work_dir`. If `work_dir` is the game repo, copy `examples/game_bridge/` there and point `plugins` at that copy. Restart to reload; there is no hot reload.
 
-Tool shapes and the meteor gate: [`examples/game_bridge/README.md`](../game_bridge/README.md). Godot drain: [Godot guide](../../docs/user-guide/godot.md). Session replay: [games guide](../../docs/user-guide/games.md).
+Tool shapes and the meteor gate: [`examples/game_bridge/README.md`](../game_bridge/README.md). Godot drain: [Godot guide](../../docs/user-guide/godot.md). Editor MCP is the opposite direction and is not this persona: [Redot guide](../../docs/user-guide/redot.md). A game master is another persona, not an editor tool. Session replay: [games guide](../../docs/user-guide/games.md).
 
 ## HTTP
 

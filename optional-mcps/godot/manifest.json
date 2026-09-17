@@ -1,0 +1,6 @@
+{
+  "name": "godot",
+  "description": "Godot has no official MCP server. Do not download a community addon.",
+  "transport": "none",
+  "note": "Godot has no official MCP server. lich does not spawn a community addon. Play stays the webhook and examples/game_bridge: the game connects to lich. That is the opposite direction from editor MCP."
+}

@@ -18,6 +18,19 @@ interface BunSpawned {
   exited: Promise<number>;
 }
 
+interface BunPipeSpawned {
+  stdin: { write(data: string): number; flush(): void | Promise<void> };
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  exited: Promise<number>;
+  kill(): void;
+}
+
+interface BunSpawn {
+  (cmd: string[], options: { stdin: "ignore"; stdout: "pipe"; stderr: "pipe" }): BunSpawned;
+  (cmd: string[], options: { stdin: "pipe"; stdout: "pipe"; stderr: "pipe"; env?: Record<string, string> }): BunPipeSpawned;
+}
+
 declare const Bun: {
-  spawn(cmd: string[], options: { stdin: "ignore"; stdout: "pipe"; stderr: "pipe" }): BunSpawned;
+  spawn: BunSpawn;
 };

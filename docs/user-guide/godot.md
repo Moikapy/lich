@@ -4,6 +4,8 @@
 
 lich is the AI brain in a separate process. Godot speaks HTTP. This page is the recipe; the file contract and tool list live in [`examples/game_bridge/README.md`](https://github.com/Moikapy/lich/blob/main/examples/game_bridge/README.md). Plugin authoring is the [plugins guide](plugins.md). Platform setup beyond the webhook is the [gateway guide](gateway.md). A TypeScript game backend that embeds the library uses the [library guide](library.md) — Godot itself does not.
 
+Editor MCP and this page are opposite directions. An editor MCP is lich connecting to the editor to build the project — the [Redot guide](redot.md). This page is the game connecting to lich. Godot has no official MCP server. lich does not download a community addon and does not spawn one. A game master is another persona, not an editor tool. Play for both editors is still one `POST /message` per round, then drain `.lich/game/orders.jsonl`. Do not call lich per frame.
+
 ## Architecture
 
 Two tiers:

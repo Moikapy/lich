@@ -4,6 +4,7 @@
  */
 import type { ChatFn } from "../context/compressor.js";
 import { register_builtin_tools } from "../tools/builtin/index.js";
+import { attach_enabled_mcp_tools, type McpRuntime } from "../mcp/mcp_tools.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { HookedToolRunner } from "../plugins/hooks.js";
@@ -123,9 +124,12 @@ export class Agent {
   private readonly registry: ToolRegistry;
   private readonly executor: ToolExecutor | HookedToolRunner;
   private readonly hook_runner: HookedToolRunner | undefined;
+  private readonly mcp_runtime: McpRuntime | undefined;
+  private mcp_attached = false;
 
-  constructor(config: AgentConfig, plugins: readonly LoadedPlugin[] = []) {
+  constructor(config: AgentConfig, plugins: readonly LoadedPlugin[] = [], runtime?: { mcp?: McpRuntime }) {
     this.config = config;
+    this.mcp_runtime = runtime?.mcp;
     this.events = new AgentEmitter();
     this.router = new ProviderRouter(config.providers);
     const base_registry = new ToolRegistry();
@@ -154,6 +158,7 @@ export class Agent {
   }
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
+    await this.attach_mcp_once();
     const usage_total: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     const stop_collecting = this.events.on(collect_usage(usage_total));
     await this.call_plugin_run_start(options.input);
@@ -180,6 +185,15 @@ export class Agent {
     const session_path = await this.persist_session(outcome, options, usage_total);
     const full_messages: Message[] = [...(options.history ?? []), ...outcome.messages];
     return { outcome, messages: full_messages, usage_total, session_path };
+  }
+
+  /** tools/list once, before the model sees definitions. Empty allowlists never connect. */
+  private async attach_mcp_once(): Promise<void> {
+    if (this.mcp_attached === true) {
+      return;
+    }
+    this.mcp_attached = true;
+    await attach_enabled_mcp_tools(this.registry, this.config, this.mcp_runtime);
   }
 
   /** Per-run deps: the built-once ToolContext threads through every tool execution. */

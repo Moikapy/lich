@@ -29,7 +29,8 @@ export default defineConfig({
           { text: 'TUI guide', link: '/user-guide/tui' },
           { text: 'Gateway guide', link: '/user-guide/gateway' },
           { text: 'Library guide', link: '/user-guide/library' },
-          { text: 'Games guide', link: '/user-guide/games' }
+          { text: 'Games guide', link: '/user-guide/games' },
+          { text: 'Redot guide', link: '/user-guide/redot' }
         ]
       },
       {

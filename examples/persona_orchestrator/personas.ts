@@ -52,7 +52,7 @@ export function parse_persona_chat_id(chat_id: string): { persona_id: string; ru
   return { persona_id: rest.slice(0, split_at), run_id: rest.slice(split_at + 1) };
 }
 
-/** One config object for create_agent_with_plugins. Shared providers, persona knobs. */
+/** Shared providers and persona knobs only. Editor MCP is not copied onto this persona. */
 export function persona_config(shared: SharedAgentDefaults, persona: PersonaEntry): Record<string, unknown> {
   return {
     providers: shared.providers,

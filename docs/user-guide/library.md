@@ -145,7 +145,7 @@ Listed providers form a failover chain tried in order: `rate_limit`/`network` er
 
 ## Custom tool filtering
 
-`tools_enabled` accepts `"all"` (default) or an array of builtin tool names to register; everything else stays unregistered and invisible to the model. The filter does not apply to plugin tools: they register afterward, including the gatekeeper's `git_commit`. `[]` strips every builtin and does not throw.
+`tools_enabled` accepts `"all"` (default) or an array of tool names to register; everything else stays unregistered and invisible to the model. MCP tools, when a named server is `enabled`, use the same allowlist and stay off when the list is `[]`. The filter does not apply to plugin tools: they register afterward, including the gatekeeper's `git_commit`. `[]` strips every builtin and every MCP tool and does not throw.
 
 ```ts
 const agent = create_agent({

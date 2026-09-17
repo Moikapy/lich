@@ -96,24 +96,33 @@ export function starter_config_object(): Record<string, unknown> {
 }
 
 /**
- * Create `.lich/` and write `config.json` once. The only writer of that file.
- * Existing files are left untouched.
+ * The only writer of `.lich/config.json`. Create leaves an existing file
+ * untouched. `update` replaces that file with the object the caller built,
+ * so a caller must keep unrelated keys itself.
  */
-export function write_lich_config(work_dir: string, config: Record<string, unknown>): LichConfigWriteResult {
+export function write_lich_config(
+  work_dir: string,
+  config: Record<string, unknown>,
+  update = false,
+): LichConfigWriteResult {
   ensure_lich_config_dir(work_dir);
   const file = project_config_path(work_dir);
-  if (existsSync(file) === true) {
+  if (existsSync(file) === true && update !== true) {
     return already_exists(file);
   }
   try {
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: update === true ? "w" : "wx",
+    });
   } catch (error) {
-    if (is_eexist(error) === true) {
+    if (update !== true && is_eexist(error) === true) {
       return already_exists(file);
     }
     throw error;
   }
-  return { path: file, written: true, message: `wrote ${file}` };
+  const verb = update === true ? "updated" : "wrote";
+  return { path: file, written: true, message: `${verb} ${file}` };
 }
 
 function already_exists(file: string): LichConfigWriteResult {
