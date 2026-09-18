@@ -14,20 +14,24 @@ lich gateway <plat..>  # messaging gateway (webhook|telegram|discord|twitch)
 lich config            # print a starter config template
 lich update            # install a newer npm release, if one exists
 lich mcp list          # list servers in this work dir's .lich/config.json
+lich mcp add <name>    # catalog or --command/--url; stays disabled
+lich mcp enable <name> # set enabled true
+lich mcp disable <name>
+lich mcp remove <name>
 lich --help            # usage text
-lich --version         # print 0.3.0
+lich --version         # package.json version (published package and this tree: 0.6.0)
 ```
 
-- **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if neither `.lich/config.json` nor `~/.config/lich/config.json` exists and `LICH_MODEL` / `--model` is unset, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. An existing `.lich/config.json` skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
+- **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if neither `.lich/config.json` nor `~/.config/lich/config.json` exists, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. An existing config in that chain skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
 - **`lich init`** writes that starter file without prompts, using the same writer as the wizard. Existing flags such as `--model` are written into the file and win over `LICH_MODEL`. It never overwrites an existing `.lich/config.json`. `.lich/` is gitignored.
 - **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr.
 - **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer.
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
 - **Gateway** runs platform adapters (defaults to `webhook` when no platform is given). See the [Gateway guide](gateway.md). Unknown platform names are skipped with a warning; if none remain, the CLI exits `1`.
 - **Update** compares the installed version to the npm registry and, when a newer release exists, runs `npm install -g @moikapy/lich@latest`. Exit any running TUI or gateway first; npm cannot replace the package while those processes are running. A git clone is told to `git pull`. See [Updating](../getting-started.md#updating).
-- **MCP** edits only `mcp_servers` in `<work-dir>/.lich/config.json` through the same writer as `lich init`. A missing file lists as empty. `add` is disabled until `enable`. Catalog names use `optional-mcps/`; otherwise pass `--command` and repeatable `--arg`, or `--url` (loopback only). Redot still needs `--project-path` for the catalog args, and the command basename must be `redot`. No prompts. See the [Redot guide](redot.md).
+- **MCP** is in this source (changelog 0.7.0, unreleased). The published 0.6.0 npm package does not include `lich mcp`. It edits only `mcp_servers` in `<work-dir>/.lich/config.json` through the same writer as `lich init` (`update` mode, so other keys stay). A missing file lists as empty; `add` creates the file if needed. New entries stay disabled until `enable`. Names must match `^[a-z][a-z0-9_]*$`. Catalog names use `optional-mcps/`; otherwise pass `--command` and repeatable `--arg`, or `--url` (loopback only), not both. Redot still needs `--project-path` for the catalog args, and the command basename must be `redot`. No prompts. See the [Redot guide](redot.md).
 
-The installed `lich` binary and `bun src/cli.ts` (from a repository clone) accept identical arguments.
+A repository clone's `bun src/cli.ts` matches that checkout. The published 0.6.0 binary does not include `lich mcp`.
 
 ## Flags
 
@@ -47,7 +51,7 @@ Flags work before or after the subcommand. Every value flag can also be set via 
 | `--log-level <level>` | `debug` \| `info` \| `warn` \| `error`. | `info` |
 | `--theme <name>` | Display theme loaded once at startup. `lich` is built-in; other names read `~/.lich/themes/<name>.json`. | `lich` |
 | `--command <bin>` | `lich mcp add` only: local stdio binary. | – |
-| `--arg <value>` | `lich mcp add` only: repeatable stdio arg. | – |
+| `--arg <value>` | `lich mcp add` only: repeatable stdio arg. May start with `--`. | – |
 | `--url <url>` | `lich mcp add` only: loopback HTTP MCP URL. | – |
 | `--project-path <path>` | `lich mcp add` only: catalog `${project_path}` substitute. | – |
 
@@ -57,7 +61,7 @@ Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a posit
 
 The effective provider for a run is decided in this order:
 
-1. If `--config <path>` was passed, that file is the whole configuration (it must exist, or the CLI fails with `config not found`).
+1. If `--config <path>` was passed, that file is the whole configuration (it must exist and be a JSON object, or the CLI fails with `cannot use config file <path>: ...`).
 2. Otherwise the discovery chain is walked: `./.lich/config.json`, then `~/.config/lich/config.json`. The first file found becomes the config. `LICH_*` env vars are *not* merged into a discovered file.
 3. If no config file exists, one is built from the environment: `--provider-kind` / `LICH_PROVIDER_KIND` (default `openai_compat`), `--model` / `LICH_MODEL` (required — without it the CLI fails with `no model configured`), `--base-url` / `LICH_BASE_URL`, and `--api-key-env` / `LICH_API_KEY_ENV`, each falling back to the per-kind defaults below.
 4. Provider override flags (`--model`, `--provider-kind`, `--base-url`, `--api-key-env`) always win over the chosen source: with a config file present they patch `providers[0]` in place; without one they seed a fresh provider from the environment.
@@ -72,7 +76,7 @@ Per-kind defaults:
 
 ## Config file reference
 
-Validated by zod (top-level unknown keys are silently stripped; extra keys inside a `providers[]` entry are passed through). Full example with every field:
+Validated by zod (top-level unknown keys are silently stripped; extra keys inside a `providers[]` entry are passed through; each `mcp_servers` entry is strict). Example:
 
 ```json
 {
@@ -120,13 +124,14 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `providers[].think` | boolean | – | Ollama only: request thinking mode. |
 | `providers[].keep_alive` | string | – | Ollama only: model residency (e.g. `"10m"`). |
 | `agent_name` | string | `lich` | Wizard label. The TUI banner uses the active theme welcome string, not this field. |
-| `theme` | string | `lich` | Display theme name. See [Themes](../../README.md#themes). |
+| `theme` | string | `lich` | Display theme name. See [Themes](https://github.com/Moikapy/lich/blob/main/README.md#themes). |
 | `gateway` | object | omitted | Optional. `platforms` (`webhook` \| `telegram` \| `discord` \| `twitch`) and `token_envs` (platform → env-var name). Secrets stay in the environment. |
-| `mcp_servers` | object | omitted | Optional. Closed record of named servers. Each entry is stdio `{command, args, env?}` or loopback http `{url}`. `enabled` defaults to false. See the [Redot guide](redot.md). |
+| `plugins` | string array | `[]` | Module paths relative to `work_dir` or absolute. Bare `lich`, one-shot, chat, tui, and gateway load them through `create_agent_with_plugins`. `run_agent` does too. `create_agent` does not. See the [plugins guide](plugins.md). |
+| `mcp_servers` | object | omitted | Optional. Closed record of named servers. Each entry is stdio `{command, args, env?}` or loopback http `{url}`. `enabled` defaults to false. Unknown keys are rejected. In this source only (0.7.0 unreleased; not in the published 0.6.0 package). See the [Redot guide](redot.md). |
 | `system_prompt` | string | built-in | Replaces the default system prompt. |
 | `max_turns` | int >= 1 | `25` | Turn budget per run. |
 | `work_dir` | string | cwd | Root for all file tools; paths outside are rejected. |
-| `tools_enabled` | `"all"` or name array | `"all"` | Restrict the registry to these names. `[]` excludes builtins and MCP tools. Plugin tools still register afterward. |
+| `tools_enabled` | `"all"` or name array | `"all"` | Restrict the builtin registry to these names. `[]` drops builtins and MCP tools and does not connect to MCP servers. Plugin tools still register afterward, including the gatekeeper's `git_commit`. |
 | `temperature` | 0–2 | – | Sampling temperature. |
 | `max_tokens` | positive int | – | Completion cap. |
 | `context_budget_tokens` | positive int | `100000` | Estimated budget before compression triggers. |
@@ -176,7 +181,7 @@ jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content // "(too
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success: final answer produced (also `--help`, `--version`, `config`, `init`, and a TUI that exits cleanly). |
+| `0` | Success: final answer produced (also `--help`, `--version`, `config`, `init`, a successful `mcp` action, `update` when nothing newer is installed or the install succeeds, and a TUI that exits cleanly). |
 | `1` | Any failure: unknown flag, missing model, unreadable config, provider error after failover, aborted run, budget exhaustion, non-TTY bare `lich`, or a cancelled setup wizard. |
 
 ## Log levels

@@ -8,7 +8,7 @@ outline: [2, 3]
 
 Lich is a TypeScript AI agent harness: a library and a CLI that run a chat model inside a Think-Act-Observe loop. A chat wrapper forwards one prompt and prints one completion. A harness keeps going: the model plans (think), calls tools such as `read_file` or `terminal` (act), reads the tool results (observe), and repeats until it can produce a final answer. Lich wraps that loop with the machinery real deployments need: provider failover with bounded retries, path confinement and output clamps on every tool, context compression when the transcript grows past a token budget, and append-only JSONL session transcripts.
 
-One package, four ways to drive the same agent: a one-shot CLI, an interactive chat REPL, an ink-based terminal UI, and a long-running messaging gateway that bridges Telegram, Discord, Twitch, and a zero-config HTTP webhook. All four share the same builtin tools, the same provider configuration, and the same session store.
+One package, four ways to drive the same agent: a one-shot CLI, an interactive chat REPL, an ink-based terminal UI, and a long-running messaging gateway that bridges Telegram, Discord, Twitch, and a zero-config HTTP webhook. All four share the same builtin tools, the same provider configuration, and the same session store. `lich init`, `lich config`, `lich update`, and `lich mcp` do not start that loop.
 
 ## Feature overview
 
@@ -18,7 +18,7 @@ One package, four ways to drive the same agent: a one-shot CLI, an interactive c
 | Tools | Builtins (file read/write/edit, directory listing, shell, grep, HTTP fetch/request, web search, process list, disk usage, env inspection, `run_tests`), all confined to the working directory. `git_commit` is the gatekeeper's tool, not a config plugin. |
 | Context compression | Transcript summarized in place when estimated tokens cross `compress_threshold` of `context_budget_tokens`; the 8 most recent turns always stay verbatim. |
 | Sessions | Every run persists a `.jsonl` transcript under `.lich/sessions/`, labeled by origin (`tui`, `gw:<platform>:<chat>`). |
-| CLI | One-shot tasks, chat REPL, TUI, gateway, and a `config` template command, all with flag/env/config-file configuration. |
+| CLI | One-shot tasks, chat REPL, TUI, gateway, `init`, `update`, `config`, and (in this source) `lich mcp`. Flag, env, and config-file configuration. |
 | TUI | Live ink transcript with tool-call rows, status bar (model, turns, tokens, session path), and slash commands. |
 | Gateway | One shared agent behind webhook/Telegram/Discord/Twitch with per-conversation memory (40-message history cap) and per-platform message splitting. |
 | Library | `create_agent` / `run_agent` with typed events (`AgentEmitter`), multi-turn history, and `ProviderError` kinds for error handling. |
@@ -29,7 +29,7 @@ One package, four ways to drive the same agent: a one-shot CLI, an interactive c
 | Page | Read it to |
 | --- | --- |
 | [Getting started](getting-started.md) | Install, configure a provider, and get your first reply in any mode. |
-| [CLI reference](user-guide/cli.md) | Master all four modes, flags, provider resolution, and config files. |
+| [CLI reference](user-guide/cli.md) | Modes, flags, provider resolution, config files, and `lich mcp`. |
 | [TUI guide](user-guide/tui.md) | Run the terminal UI and use slash commands and the status bar. |
 | [Gateway guide](user-guide/gateway.md) | Wire Telegram, Discord, Twitch, and the HTTP webhook to one agent. |
 | [Library guide](user-guide/library.md) | Embed the agent in TypeScript with events and multi-turn history. |
@@ -68,4 +68,4 @@ Working from a clone of the repository? `bun install`, then run the same command
 
 ## Version compatibility
 
-Documented for **v0.3.0**. The npm package requires Node >= 20 (`engines` in `package.json`); Bun is the recommended runtime for development from a clone (`bun src/cli.ts ...`). The TUI needs a TTY; the gateway and library run headless on both runtimes.
+The published npm package is **0.6.0**. `lich --version` reads `package.json`, so this tree also prints `0.6.0`. Editor MCP (`mcp_servers`, `lich mcp`) is in this source under changelog **0.7.0 (unreleased)** and is not in the published package. Node >= 20 (`engines` in `package.json`); Bun is the recommended runtime for development from a clone (`bun src/cli.ts ...`). The TUI needs a TTY; the gateway and library run headless on both runtimes.

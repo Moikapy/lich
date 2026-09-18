@@ -10,12 +10,12 @@
 
 ```sh
 npm install -g @moikapy/lich
-lich --version   # -> 0.3.0
+lich --version   # -> 0.6.0 (reads package.json)
 ```
 
 ## Choose a configuration path
 
-Lich needs exactly one thing before it runs: a model. You can provide it three ways, and they can be mixed (flags override env vars, and both override the config file).
+Lich needs exactly one thing before it runs: a model. You can provide it three ways. Flags override a config file and override `LICH_*` env vars. Those env vars apply only when no config file is found; they are not merged into a discovered file.
 
 ### Path A: environment variables only
 
@@ -42,7 +42,7 @@ lich config > .lich/config.json
 
 `lich config` honors `LICH_PROVIDER_KIND` and `LICH_MODEL` when you have them set, and otherwise prints an ollama-oriented template. The file is picked up automatically from `.lich/config.json` in the working directory (or `~/.config/lich/config.json` as a fallback) — after this, plain `lich "task"` needs no env vars.
 
-`lich init` writes that same starter file for you (it creates `.lich/` and never overwrites an existing `.lich/config.json`). Bare `lich` on a TTY, with no config in that search chain and no `LICH_MODEL`, runs a setup wizard and writes `.lich/config.json` once before opening the TUI. `.lich/` is gitignored.
+`lich init` writes that same starter file for you (it creates `.lich/` and never overwrites an existing `.lich/config.json`). Bare `lich` on a TTY, with no config in that search chain, runs a setup wizard and writes `.lich/config.json` once before opening the TUI. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. Non-TTY stdin skips the wizard. `.lich/` is gitignored.
 
 ### Path C: an explicit config file
 
@@ -121,7 +121,7 @@ jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content)"' .lich
 | Symptom | Cause and fix |
 | --- | --- |
 | `no model configured: set LICH_MODEL, pass --model, or create .lich/config.json` | No provider was resolvable. Set `LICH_MODEL`, pass `--model`, or save a config file (`lich init` or `lich config`). |
-| `lich: config not found: <path>` | `--config` was given a path that does not exist. Check the path or drop the flag to use discovery. |
+| `lich: cannot use config file <path>: ...` | `--config` was given a path that does not exist or is not readable JSON. Check the path or drop the flag to use discovery. |
 | Provider error `kind=auth`, http 401/403 | The api key is missing or wrong. Verify the env var named by `LICH_API_KEY_ENV` (default `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`) is exported in the same shell. |
 | `fetch failed` / connection refused | The endpoint is unreachable. For ollama, check `ollama serve` is running on `http://localhost:11434`; for remote APIs, check `LICH_BASE_URL`. |
 | `[lich] budget exhausted after N turns — the ritual is spent` | The task did not finish within `max_turns` (default 25). The `budget exhausted` keyword stays; the flavor suffix comes from the theme. Raise the cap with `--max-turns 50` or in config. |
@@ -153,7 +153,7 @@ To hack on Lich itself, run the CLI straight from a clone instead of the npm pac
 ```sh
 git clone https://github.com/Moikapy/lich.git && cd lich
 bun install
-bun src/cli.ts --version   # -> 0.3.0
+bun src/cli.ts --version   # -> 0.6.0 (package.json; MCP in this tree is unreleased)
 ```
 
 `bun src/cli.ts` accepts the same arguments as the installed `lich` binary, so every command on this page works unchanged.
@@ -165,3 +165,4 @@ bun src/cli.ts --version   # -> 0.3.0
 - Telegram, Discord, Twitch, and webhook setup: [Gateway guide](user-guide/gateway.md).
 - Embedding the agent in your own TypeScript: [Library guide](user-guide/library.md).
 - Session JSONL as a combat log: [Games guide](user-guide/games.md).
+- Editor MCP (`lich mcp`, unreleased in the published 0.6.0 package): [Redot guide](user-guide/redot.md). Play is still the [Godot guide](user-guide/godot.md).

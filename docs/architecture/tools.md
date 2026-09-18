@@ -39,7 +39,9 @@ result either way.
 **`ToolContext`** gives each execution a working directory (`work_dir`, the
 confinement root), a process environment map (the agent injects
 `LICH_TERMINAL_TIMEOUT_MS`), and an abort `signal` that fires on caller abort
-**or** the executor's own 30 s deadline.
+**or** the executor deadline (`tool.timeout_ms`, else
+`DEFAULT_TOOL_TIMEOUT_MS` = 30000). `terminal` sets 300000, `run_tests` sets
+600000, and registered MCP tools set 120000.
 
 **Parameter schemas.** `parameters` is a `JsonSchemaObject`
 (`src/util/json_schema.ts`) passed through verbatim into provider requests.
@@ -187,6 +189,9 @@ instructions. See the [plugins guide](../user-guide/plugins.md#skills-and-memory
 - **Enabling a subset** is done by rebuilding a fresh registry: `Agent`'s
   `filter_registry` (src/agent/agent.ts) iterates `base.list()` and registers
   only allowed names onto a new `ToolRegistry` when `tools_enabled` is a list
-  (`"all"` returns the base registry untouched).
+  (`"all"` returns the base registry untouched). Plugin tools, including the
+  gatekeeper's `git_commit`, register after that filter, so `tools_enabled: []`
+  still leaves `git_commit`. MCP tools register later, on first `run()`, and
+  only when the allowlist is `"all"` or names an `mcp_` tool.
 
 For building your own tool, see [extending](./extending.md#add-a-builtin-tool).

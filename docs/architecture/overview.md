@@ -1,21 +1,24 @@
 # Architecture Overview
 
-Lich v0.3.0 is a small TypeScript AI agent harness: it drives a chat model in a
+Lich is a small TypeScript AI agent harness: it drives a chat model in a
 think-act-observe loop, lets the model call tools, compresses history when the
-context budget demands it, and persists transcripts. It runs on Bun, is ESM
-with NodeNext resolution, and its only runtime dependencies are `zod` (config
-validation) and `ink` (the TUI). Everything else is Node/Bun built-ins.
+context budget demands it, and persists transcripts. The published npm package
+is 0.6.0. This tree also includes unreleased editor MCP (changelog 0.7.0);
+`package.json` is still 0.6.0, so `lich --version` prints `0.6.0`. It runs on
+Node >= 20 and on Bun, is ESM with NodeNext resolution, and its runtime
+dependencies are `zod` (config validation), `ink`, and `react` (the TUI).
+Everything else is Node/Bun built-ins.
 
 This page is the map. The follow-up pages go deep on each area:
 [agent loop](./agent-loop.md), [providers](./providers.md),
-[tools](./tools.md), and [extending](./extending.md).
+[tools](./tools.md), [plugins](./plugins.md), and [extending](./extending.md).
 
 ## Layer diagram
 
 ```mermaid
 flowchart TB
     subgraph entry["Entry surfaces"]
-        CLI["src/cli.ts<br/>one-shot and chat"]
+        CLI["src/cli.ts<br/>one-shot, chat, tui,<br/>gateway, mcp"]
         TUI["src/tui/app.tsx<br/>ink TUI"]
         GW["src/gateway/runner.ts<br/>webhook, telegram,<br/>discord, twitch"]
         LIB["src/index.ts<br/>library exports"]
@@ -94,36 +97,42 @@ Why this matters:
 Walkthrough of a single `Agent.run({ input })` call
 ([`src/agent/agent.ts`](../../src/agent/agent.ts)):
 
-1. **Usage collector attached.** `run()` subscribes a `collect_usage` handler
+1. **MCP attach, once.** Before the first model call, enabled `mcp_servers`
+   are connected (`initialize`, `notifications/initialized`, then `tools/list`)
+   and registered as `mcp_<server>_<tool>`. An empty `tools_enabled` never
+   connects. Disabled servers are skipped. A connect failure logs a warning
+   and the run continues. This client is in this source only (0.7.0 unreleased).
+2. **Usage collector attached.** `run()` subscribes a `collect_usage` handler
    on `agent.events`; every `llm_end` event adds the call's token usage into a
    per-run `Usage` total. The subscription is removed in a `finally` block.
-2. **Seed messages.** The caller's `history` (if any) is copied into a fresh
+3. **Seed messages.** The caller's `history` (if any) is copied into a fresh
    array and the new user message is appended. The caller's array is never
    mutated.
-3. **Loop starts.** `run_conversation(deps, seed, params)` first applies the
+4. **Loop starts.** `run_conversation(deps, seed, params)` first applies the
    system prompt via `seed_system_prompt` (prepend, or replace an existing
    system message if its content differs) and then enters the turn loop
    described in [agent loop](./agent-loop.md).
-4. **Each turn.** Abort check at the top of the turn, optional compression
+5. **Each turn.** Abort check at the top of the turn, optional compression
    check, then one LLM call through the router (`chat_with_failover`, which
    walks providers with bounded in-place retries). The assistant message is
    pushed onto the history.
-5. **Tools.** If the assistant message carries `tool_calls`, each call runs
-   through the `ToolExecutor` (30 s timeout, abort linking, output clamping)
-   and a `tool` message is appended per call. The loop then starts the next
+6. **Tools.** If the assistant message carries `tool_calls`, each call runs
+   through the `ToolExecutor` (per-tool `timeout_ms`, else 30 s; abort linking,
+   output clamping) and a `tool` message is appended per call. `terminal` sets
+   300000 ms; `run_tests` sets 600000. The loop then starts the next
    turn. A turn with no tool calls is the final turn.
-6. **Outcome.** The loop returns a `LoopOutcome`: the full `messages` array,
+7. **Outcome.** The loop returns a `LoopOutcome`: the full `messages` array,
    the final assistant message (or the last one seen), the last `ChatResult`
    on a real final, `turns_used`, and a `stopped_reason` of `final`, `budget`,
    or `aborted`.
-7. **Session persist.** `persist_session()` appends one `meta` record
+8. **Session persist.** `persist_session()` appends one `meta` record
    (`run_start`), then one `message` record per outcome message, then a
    `budget_exhausted` meta record if the budget stopped the run, then a
    `run_end` meta record (`stopped_reason`, `usage`) for every completed
    run, to a JSONL file under `session_dir` (default
    `<work_dir>/.lich/sessions`). Persistence is best-effort: failures are
    logged and the run still succeeds with `session_path: undefined`.
-8. **Return.** `AgentRunResult` bundles the outcome, the full transcript
+9. **Return.** `AgentRunResult` bundles the outcome, the full transcript
    (prior history plus the new exchange), the collected `usage_total`, and the
    session path.
 
@@ -150,8 +159,11 @@ Walkthrough of a single `Agent.run({ input })` call
 | Path | Responsibility |
 | --- | --- |
 | `src/index.ts` | Public library surface; pure re-exports plus `LICH_VERSION`. |
-| `src/cli.ts` | Zero-dependency CLI: one-shot, `chat`, `tui`, `gateway`, `config`. |
-| `src/cli_config.ts` | Config file discovery, loading, flag overrides, template. |
+| `src/cli.ts` | CLI: one-shot, `chat`, `tui`, `gateway`, `init`, `config`, `update`, `mcp`. |
+| `src/cli_config.ts` | Config file discovery, loading, flag overrides, template, writer. |
+| `src/cli_update.ts` | `lich update`: npm view, then `npm install -g` when newer. Git clones are told to `git pull`. |
+| `src/cli_mcp.ts` | `lich mcp` list/add/enable/disable/remove against work-dir config. |
+| `src/mcp/*` | MCP client: catalog, stdio/loopback HTTP, tool registration. |
 | `src/agent/agent.ts` | `Agent`: wires router, registry, executor; sessions; usage. |
 | `src/agent/loop.ts` | `run_conversation`: the think-act-observe loop. |
 | `src/agent/config.ts` | Zod config schema, defaults, derived `session_dir`, freeze. |
@@ -170,6 +182,7 @@ Walkthrough of a single `Agent.run({ input })` call
 | `src/tools/registry.ts` | Name-keyed tool registry; duplicate rejection. |
 | `src/tools/executor.ts` | Never-throw execution with timeout and abort. |
 | `src/tools/builtin/*` | Builtin tools, including `run_tests` (see [tools](./tools.md)). |
+| `src/plugins/*` | Plugin loader and hooks. Gatekeeper registers `git_commit` in code. |
 | `src/gateway/bus.ts` | Conversation-keyed runner over one shared `Agent`. |
 | `src/gateway/runner.ts` | Adapter construction, signal handling, process lifetime. |
 | `src/gateway/{telegram,discord,twitch,webhook}.ts` | Platform adapters. |

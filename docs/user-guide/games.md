@@ -4,7 +4,7 @@
 
 lich does not replay combat from RNG seeds. The commander's choices are sampled. The JSONL transcript is the replay. Godot still drains `.lich/game/`; these recipes read `.lich/sessions/`, not the order file.
 
-Tool shapes live in [`examples/game_bridge/README.md`](https://github.com/Moikapy/lich/blob/main/examples/game_bridge/README.md). This page does not repeat them. The plugin entry is `examples/game_bridge/game_bridge.plugin.mjs`, loaded through `config.plugins` and `create_agent_with_plugins`. A per-persona HTTP front for that plugin is the [orchestrator example](../../examples/persona_orchestrator/README.md) — a pattern the game repo copies, not a second agent core.
+Tool shapes live in [`examples/game_bridge/README.md`](https://github.com/Moikapy/lich/blob/main/examples/game_bridge/README.md). This page does not repeat them. The plugin entry is `examples/game_bridge/game_bridge.plugin.mjs`, loaded through `config.plugins` and `create_agent_with_plugins`. A per-persona HTTP front for that plugin is the [orchestrator example](https://github.com/Moikapy/lich/blob/main/examples/persona_orchestrator/README.md) — a pattern the game repo copies, not a second agent core.
 
 ## Session files as combat logs
 

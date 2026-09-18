@@ -22,11 +22,13 @@ The client is general, the same shape as Hermes and Claude: a named list you ext
 }
 ```
 
-stdio is a local binary you named, plus `args`, plus optional `env`. The process is spawned with those argv, never a shell. `npx`, `uvx`, `curl`, a URL, and shell metacharacters are refused. lich does not run `npx -y` or fetch an addon. Values in `env` are passed to the process and are never logged.
+stdio is a local binary you named, plus `args`, plus optional `env`. The process is spawned with those argv, never a shell. `npx`, `npm`, `bunx`, `uvx`, `curl`, `wget`, a URL, and shell metacharacters are refused. lich does not run `npx -y` or fetch an addon. Values in `env` are passed to the process and are never logged. `lich mcp add` has no flag for `env`; set that key in the file if you need it.
 
 HTTP is `{ "url": "http://127.0.0.1:9/mcp" }`. The host must be `127.0.0.1` or `localhost`. `0.0.0.0` and any other host are refused. There is no remote MCP in v1.
 
-On connect the client sends `initialize`, then `tools/list`, then `tools/call`. Registered names are `mcp_<server>_<tool>`, so two servers cannot collide. They appear only when that server is `enabled` and `tools_enabled` is `"all"` or lists the prefixed name. `tools_enabled: []` drops them even when the server is enabled, and does not connect. The commander persona keeps `tools_enabled: []` and the `game_bridge` plugin only — `persona_config` does not copy `mcp_servers`.
+On connect the client sends `initialize`, then `notifications/initialized`, then `tools/list`. `tools/call` runs only when the model invokes a registered tool. Registered names are `mcp_<server>_<tool>`, so two servers cannot collide. They appear only when that server is `enabled` and `tools_enabled` is `"all"` or lists the prefixed name. `tools_enabled: []` drops them even when the server is enabled, and does not connect. Plugin tools still register, including the gatekeeper's `git_commit`. The commander persona keeps `tools_enabled: []` and the `game_bridge` plugin only — `persona_config` does not copy `mcp_servers`.
+
+This client is in this source (changelog 0.7.0, unreleased). The published npm package is 0.6.0 and does not include `lich mcp` or `mcp_servers`. From a clone, use `bun src/cli.ts mcp ...`. `lich --version` still prints `0.6.0`.
 
 ## Add a server
 
@@ -39,6 +41,8 @@ lich mcp list
 lich mcp disable redot
 lich mcp remove redot
 ```
+
+`lich mcp add redot --project-path /home/me/game` writes a disabled entry whose `command` is `redot` and whose args are `--headless --mcp-server --path` plus that directory. PATH lookup happens at connect, not at add.
 
 `lich mcp add notes --command /usr/local/bin/notes-mcp --arg --stdio` is a custom stdio server. `--url` must be loopback. The command writes through the existing config writer and leaves providers, plugins, and gateway untouched. `lich mcp list` reads this work dir's `.lich/config.json`. A missing `mcp_servers` prints nothing and exits 0.
 
@@ -72,7 +76,7 @@ Basename must be `redot`. A missing binary tells you to install official Redot 2
 }
 ```
 
-`tools/list` discovers the five upstream controllers. There is no `execute` tool. Existing `.gd` files stay normal file edits (`edit_file` / `write_file`). Scene edits go through the scene tool. Do not rewrite `.tscn` as text.
+`tools/list` is what registers. The official server lists five controllers. The client drops a listed tool named `execute` (`exclude_tools`). It does not hard-allowlist those five names: any other listed tool is registered. Existing `.gd` files stay normal file edits (`edit_file` / `write_file`). Scene edits go through the scene tool. Do not rewrite `.tscn` as text.
 
 | Registered name | Use it for |
 | --- | --- |
