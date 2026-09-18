@@ -112,7 +112,7 @@ Failures are contained at every layer:
 
 ## Runtime notes
 
-`package.json` `engines.node` is `>=20`. The CLI loads `config.plugins` before the run. A broken entry logs one `plugin load errors` warning and the run continues without that plugin.
+`package.json` `engines.node` is `>=20`. Bare `lich`, one-shot, chat, tui, and gateway load `config.plugins` through `create_agent_with_plugins` before the run. `lich init`, `lich config`, `lich update`, and `lich mcp` do not start an agent. `create_agent` stays plugin-free; `run_agent` loads plugins. A broken entry logs one `plugin load errors` warning and the run continues without that plugin.
 
 `.mjs` and other plain JS (no type syntax) are the form that matches `engines.node` `>=20`. They load on Node and on Bun with no plugin-load warning.
 
@@ -122,7 +122,7 @@ Checked with Node 26.8.2 (`node dist/cli.js`) and Bun 1.3.14 (`bun src/cli.ts`):
 - On Node 20 and Node 22 before 22.18, a `.ts` entry still warns and the run continues without that plugin.
 - Syntax Node cannot strip (for example `enum`) warns and continues. Bun runs that same file with no plugin-load warning. A syntax error warns on both and the run continues.
 
-The combat-commander reference is `examples/game_bridge/game_bridge.plugin.mjs`. Point `config.plugins` at `./examples/game_bridge/game_bridge.plugin.mjs` (relative to `work_dir`). See `examples/game_bridge/README.md`. Embedding it beside a Godot game: [Godot guide](godot.md).
+The combat-commander reference is `examples/game_bridge/game_bridge.plugin.mjs`. Point `config.plugins` at `./examples/game_bridge/game_bridge.plugin.mjs` (relative to `work_dir`). See [`examples/game_bridge/README.md`](https://github.com/Moikapy/lich/blob/main/examples/game_bridge/README.md). Embedding it beside a Godot game: [Godot guide](godot.md).
 
 Plain JS (matches `engines.node` `>=20`):
 

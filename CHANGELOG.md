@@ -14,8 +14,12 @@
   add uses the catalog or `--command`/`--url`, stays disabled, and
   updates `.lich/config.json` through the existing writer without
   dropping other keys.
+- sync user docs with this tree. the published package is 0.6.0
+  (`lich --version` reads package.json). MCP commands are not in that
+  package. CLI, config, plugin load, and sidebar links match the code.
+  0.7.0 is not released.
 
-## 0.6.0 (unreleased)
+## 0.6.0
 
 - document a per-persona orchestrator example: one agent per NPC, the
   webhook `POST /message` shape, and history serialization the game repo

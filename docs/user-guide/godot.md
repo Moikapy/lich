@@ -26,7 +26,7 @@ flowchart LR
     G --> H[resolve the round]
 ```
 
-A game backend may instead call `run_agent`, which loads `config.plugins`. `create_agent` does not. Godot still reaches that backend over HTTP; it does not import the package. Several personas means several agents behind that HTTP process — the pattern is [`examples/persona_orchestrator`](../../examples/persona_orchestrator/README.md), and the service is the game's. Session replay is the [games guide](games.md).
+A game backend may instead call `run_agent`, which loads `config.plugins`. `create_agent` does not. Godot still reaches that backend over HTTP; it does not import the package. Several personas means several agents behind that HTTP process — the pattern is [`examples/persona_orchestrator`](https://github.com/Moikapy/lich/blob/main/examples/persona_orchestrator/README.md), and the service is the game's. Session replay is the [games guide](games.md).
 
 ## Gateway contract
 

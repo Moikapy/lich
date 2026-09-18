@@ -29,8 +29,10 @@ export default defineConfig({
           { text: 'TUI guide', link: '/user-guide/tui' },
           { text: 'Gateway guide', link: '/user-guide/gateway' },
           { text: 'Library guide', link: '/user-guide/library' },
-          { text: 'Games guide', link: '/user-guide/games' },
-          { text: 'Redot guide', link: '/user-guide/redot' }
+          { text: 'Plugins guide', link: '/user-guide/plugins' },
+          { text: 'Godot guide', link: '/user-guide/godot' },
+          { text: 'Redot guide', link: '/user-guide/redot' },
+          { text: 'Games guide', link: '/user-guide/games' }
         ]
       },
       {
@@ -40,6 +42,7 @@ export default defineConfig({
           { text: 'Agent loop', link: '/architecture/agent-loop' },
           { text: 'Providers', link: '/architecture/providers' },
           { text: 'Tools', link: '/architecture/tools' },
+          { text: 'Plugins', link: '/architecture/plugins' },
           { text: 'Extending', link: '/architecture/extending' }
         ]
       }

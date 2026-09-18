@@ -30,10 +30,13 @@ mythology lives in display strings only.
 | --- | --- |
 | [Docs home](docs/index.md) | Overview, feature map, and a 60-second quickstart. |
 | [Getting started](docs/getting-started.md) | Zero-to-first-reply: install, config paths, one-shot, TUI, gateway. |
-| [CLI reference](docs/user-guide/cli.md) | All four modes, flags, provider resolution, config schema, recipes. |
+| [CLI reference](docs/user-guide/cli.md) | Modes, flags, provider resolution, config schema, `lich mcp`, recipes. |
 | [TUI guide](docs/user-guide/tui.md) | Launch, slash commands, status bar, memory semantics. |
 | [Gateway guide](docs/user-guide/gateway.md) | Webhook/Telegram/Discord/Twitch setup and the webhook API. |
 | [Library guide](docs/user-guide/library.md) | Embedding: `create_agent`, events, multi-turn history, errors. |
+| [Plugins guide](docs/user-guide/plugins.md) | User tools and hooks, and the self-improvement loop. |
+| [Godot guide](docs/user-guide/godot.md) | The game connects to lich (webhook + `game_bridge`). |
+| [Redot guide](docs/user-guide/redot.md) | lich connects to editor MCP servers. Redot is a catalog entry. |
 | [Games guide](docs/user-guide/games.md) | Session JSONL as a combat log, and jq recipes over it. |
 | [Persona example](examples/persona_orchestrator/README.md) | Per-NPC agents the game repo copies. Not a second core. |
 
@@ -63,7 +66,8 @@ lich gateway webhook
 
 The CLI has four modes: **one-shot** (`lich "task"`), **chat**
 (`lich chat`), **tui** (`lich tui`), and **gateway**
-(`lich gateway <platform...>`).
+(`lich gateway <platform...>`). Other commands do not start an agent:
+`lich init`, `lich config`, `lich update`, and `lich mcp`.
 
 Or use a JSON config file: `lich --config lich.json "task"` (see
 `AgentConfig` in `src/agent/config.ts` for the schema).
@@ -113,7 +117,9 @@ snake_case args and are registered under the `builtin` toolset.
 Customize lich with your own tools and lifecycle hooks: keep a `Plugin`
 object (`{name, tools?, hooks?}`) in your repo, list its file path in the
 `plugins` config array, and the agent merges your tools and lets your hooks
-observe or veto tool calls. See
+observe or veto tool calls. Bare `lich`, one-shot, chat, tui, and gateway
+all load `config.plugins` (`create_agent_with_plugins`). `create_agent` does
+not. See
 [docs/user-guide/plugins.md](docs/user-guide/plugins.md).
 
 Skills are markdown files you write to `.lich/skills/` with `write_file`;
@@ -240,6 +246,23 @@ compression notices still start with `context compressed`.
 
 `welcome` substitutes `{version}`, `{model}`, and `{kind}`. `notices.compressed`
 substitutes `{chars}`; `notices.sessions` substitutes `{count}`.
+
+## Editor MCP
+
+Two directions. lich connects **to** an editor MCP server (stdio local
+command, or loopback HTTP). The game connects **to** lich through the webhook
+and [`examples/game_bridge`](examples/game_bridge/README.md). Default is off.
+`mcp_servers` is a closed record. Names are `mcp_<server>_<tool>`. `npx`,
+`npm`, `bunx`, `uvx`, `curl`, `wget`, remote URLs, and shell metacharacters
+are refused.
+
+This source has `lich mcp list|add|enable|disable|remove` (changelog 0.7.0,
+unreleased). The published npm package is 0.6.0 and does not include those
+commands; `lich --version` still prints `0.6.0` because it reads
+`package.json`. From a clone: `bun src/cli.ts mcp list`. Redot is a catalog
+entry (`redot --headless --mcp-server`), not a fork inside lich. Godot has
+no official MCP server; lich does not download a community addon. See
+[docs/user-guide/redot.md](docs/user-guide/redot.md).
 
 ## Development
 

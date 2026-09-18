@@ -145,7 +145,9 @@ Listed providers form a failover chain tried in order: `rate_limit`/`network` er
 
 ## Custom tool filtering
 
-`tools_enabled` accepts `"all"` (default) or an array of tool names to register; everything else stays unregistered and invisible to the model. MCP tools, when a named server is `enabled`, use the same allowlist and stay off when the list is `[]`. The filter does not apply to plugin tools: they register afterward, including the gatekeeper's `git_commit`. `[]` strips every builtin and every MCP tool and does not throw.
+`tools_enabled` accepts `"all"` (default) or an array of tool names to register; everything else stays unregistered and invisible to the model. MCP tools, when a named server is `enabled`, use the same allowlist and stay off when the list is `[]` (that empty list does not connect). The filter does not apply to plugin tools: they register afterward, including the gatekeeper's `git_commit` (fail-closed unless `LICH_ALLOW_SELF_COMMIT=1`). `[]` strips every builtin and every MCP tool and does not throw.
+
+`mcp_servers` and `catalog_client_entry` are in this source (changelog 0.7.0, unreleased). The published 0.6.0 package does not include them. See the [Redot guide](redot.md).
 
 ```ts
 const agent = create_agent({
@@ -184,7 +186,7 @@ When every configured provider fails, the last `ProviderError` is thrown. Tool f
 
 ## Games
 
-A Godot client does not embed the library. A game backend that does is still one `Agent` per persona, not a second loop. The pattern — factory, history cap, per-conversation queue, `POST /message` → `{reply, usage}` — is [`examples/persona_orchestrator`](../../examples/persona_orchestrator/README.md). The service itself is game-repo work. Session files as a combat log: [games guide](games.md).
+A Godot client does not embed the library. A game backend that does is still one `Agent` per persona, not a second loop. The pattern — factory, history cap, per-conversation queue, `POST /message` → `{reply, usage}` — is [`examples/persona_orchestrator`](https://github.com/Moikapy/lich/blob/main/examples/persona_orchestrator/README.md). The service itself is game-repo work. Session files as a combat log: [games guide](games.md).
 
 ## Session access
 

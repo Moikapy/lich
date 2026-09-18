@@ -59,7 +59,7 @@ sequenceDiagram
     end
 ```
 
-Lifecycle fan-outs live on the same wrapper: `Agent.run` calls `call_run_start({input_chars})` before `run_conversation` and `call_run_end({stopped_reason, turns_used})` after it (including the abort/throw path, via `finally`). Both are best-effort: hook throws are logged at `warn` and the run proceeds.
+Lifecycle fan-outs live on the same wrapper: `Agent.run` calls `call_run_start({input_chars})` before `run_conversation` and `call_run_end({stopped_reason, turns_used})` in `finally` only when the loop returned an outcome (`final`, `budget`, or `aborted`). A provider throw leaves `outcome` undefined, so `on_run_end` is skipped and no `run_end` session record is written. Both fan-outs are best-effort: hook throws are logged at `warn` and the run proceeds.
 
 ## Builtin gatekeeper
 
