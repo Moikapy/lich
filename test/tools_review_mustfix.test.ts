@@ -72,6 +72,13 @@ describe("S-2 SSRF helpers", () => {
     }
     await expect(resolve_public_ip("localhost")).rejects.toThrow(/blocked_url/);
   });
+
+  it("rejects bracketed IPv6 loopback hostnames from URL.hostname", async () => {
+    if (private_urls_allowed() === true) {
+      return;
+    }
+    await expect(resolve_public_ip("[::1]")).rejects.toThrow(/blocked_url/);
+  });
 });
 
 describe("S-4 terminal env scrub", () => {
