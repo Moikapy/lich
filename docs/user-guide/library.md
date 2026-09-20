@@ -147,7 +147,7 @@ Listed providers form a failover chain tried in order: `rate_limit`/`network` er
 
 `tools_enabled` accepts `"all"` (default) or an array of tool names to register; everything else stays unregistered and invisible to the model. MCP tools, when a named server is `enabled`, use the same allowlist and stay off when the list is `[]` (that empty list does not connect). The filter does not apply to plugin tools: they register afterward, including the gatekeeper's `git_commit` (fail-closed unless `LICH_ALLOW_SELF_COMMIT=1`). `[]` strips every builtin and every MCP tool and does not throw.
 
-`mcp_servers` and `catalog_client_entry` are in this source (changelog 0.7.0, unreleased). The published 0.6.0 package does not include them. See the [Redot guide](redot.md).
+`mcp_servers` and `catalog_client_entry` ship in 0.7.0. See the [Redot guide](redot.md).
 
 ```ts
 const agent = create_agent({

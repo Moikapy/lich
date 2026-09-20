@@ -68,4 +68,4 @@ Working from a clone of the repository? `bun install`, then run the same command
 
 ## Version compatibility
 
-The published npm package is **0.6.0**. `lich --version` reads `package.json`, so this tree also prints `0.6.0`. Editor MCP (`mcp_servers`, `lich mcp`) is in this source under changelog **0.7.0 (unreleased)** and is not in the published package. Node >= 20 (`engines` in `package.json`); Bun is the recommended runtime for development from a clone (`bun src/cli.ts ...`). The TUI needs a TTY; the gateway and library run headless on both runtimes.
+The published npm package is **0.7.0**. `lich --version` reads `package.json`. Editor MCP (`mcp_servers`, `lich mcp`) ships in 0.7.0. Node >= 20 (`engines` in `package.json`); Bun is the recommended runtime for development from a clone (`bun src/cli.ts ...`). The TUI needs a TTY; the gateway and library run headless on both runtimes.
