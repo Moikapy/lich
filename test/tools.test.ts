@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, unlink, rmdir, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
@@ -13,7 +14,7 @@ import {
 import { ToolExecutor } from "../src/tools/executor.js";
 import { default_tool_context, ToolRegistry } from "../src/tools/registry.js";
 import { builtin_toolset, register_builtin_tools } from "../src/tools/builtin/index.js";
-import { terminal_tool } from "../src/tools/builtin/terminal.js";
+import { scrub_spawn_env, terminal_tool } from "../src/tools/builtin/terminal.js";
 import type { Tool, ToolContext, ToolResult } from "../src/tools/types.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
@@ -342,6 +343,26 @@ describe("terminal", () => {
     expect(result.output.includes("[exit 0]")).toBe(true);
   });
 
+  it("scrubs secret-ish env names from the spawned shell", async () => {
+    const prev = process.env.FAKE_API_KEY;
+    process.env.FAKE_API_KEY = "should-not-leak";
+    try {
+      expect(scrub_spawn_env(process.env, {}).FAKE_API_KEY).toBeUndefined();
+      const registry = new ToolRegistry();
+      register_builtin_tools(registry);
+      const executor = make_executor(registry);
+      const result = await executor.execute("terminal", { command: "printenv FAKE_API_KEY || true" });
+      expect(result.ok).toBe(true);
+      expect(result.output.includes("should-not-leak")).toBe(false);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.FAKE_API_KEY;
+      } else {
+        process.env.FAKE_API_KEY = prev;
+      }
+    }
+  });
+
   it("propagates non-zero exit codes", async () => {
     const registry = new ToolRegistry();
     register_builtin_tools(registry);
@@ -361,6 +382,69 @@ describe("terminal", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe("timeout");
     expect(Date.now() - started < 5000).toBe(true);
+  });
+});
+
+
+describe("symlink confinement", () => {
+  it("rejects file-tool paths that symlink outside work_dir", async () => {
+    const outside = await mkdtemp(path.join(TMP_BASE, "outside-"));
+    await writeFile(path.join(outside, "secret.txt"), "leak\n", "utf8");
+    symlinkSync(outside, path.join(tmp_root, "escape_link"));
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const read = await executor.execute("read_file", { path: "escape_link/secret.txt" });
+    expect(read.ok).toBe(false);
+    expect(read.error?.startsWith("path_escape")).toBe(true);
+    const written = await executor.execute("write_file", { path: "escape_link/planted.txt", content: "nope" });
+    expect(written.ok).toBe(false);
+    expect(written.error?.startsWith("path_escape")).toBe(true);
+    const listed = await executor.execute("list_dir", { path: "escape_link" });
+    expect(listed.ok).toBe(false);
+    expect(listed.error?.startsWith("path_escape")).toBe(true);
+  });
+
+  it("rejects writing through a symlink leaf that points outside", async () => {
+    const outside = await mkdtemp(path.join(TMP_BASE, "outside-leaf-"));
+    const outside_file = path.join(outside, "target.txt");
+    await writeFile(outside_file, "before\n", "utf8");
+    symlinkSync(outside_file, path.join(tmp_root, "leaf_link.txt"));
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const written = await executor.execute("write_file", { path: "leaf_link.txt", content: "after\n" });
+    expect(written.ok).toBe(false);
+    expect(written.error?.startsWith("path_escape")).toBe(true);
+    expect(await readFile(outside_file, "utf8")).toBe("before\n");
+  });
+});
+
+describe("forbidden file paths", () => {
+  it("denies .lich/config.json to read/write/edit", async () => {
+    await mkdir(path.join(tmp_root, ".lich"), { recursive: true });
+    await writeFile(path.join(tmp_root, ".lich", "config.json"), '{"ok":true}\n', "utf8");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const read = await executor.execute("read_file", { path: ".lich/config.json" });
+    expect(read.error?.startsWith("forbidden_path")).toBe(true);
+    const write = await executor.execute("write_file", { path: ".lich/config.json", content: "{}\n" });
+    expect(write.error?.startsWith("forbidden_path")).toBe(true);
+  });
+
+  it("allows writes under .lich/skills and denies other .lich writes and .env*", async () => {
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const skill = await executor.execute("write_file", { path: ".lich/skills/demo.md", content: "# demo\n" });
+    expect(skill.ok).toBe(true);
+    const plugin = await executor.execute("write_file", { path: ".lich/plugins/evil.ts", content: "export default {}\n" });
+    expect(plugin.error?.startsWith("forbidden_path")).toBe(true);
+    const env_file = await executor.execute("write_file", { path: ".env", content: "X=1\n" });
+    expect(env_file.error?.startsWith("forbidden_path")).toBe(true);
+    const env_local = await executor.execute("write_file", { path: ".env.local", content: "X=1\n" });
+    expect(env_local.error?.startsWith("forbidden_path")).toBe(true);
   });
 });
 
