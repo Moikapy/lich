@@ -10,7 +10,7 @@
 
 ```sh
 npm install -g @moikapy/lich
-lich --version   # -> 0.6.0 (reads package.json)
+lich --version   # -> 0.7.0 (reads package.json)
 ```
 
 ## Choose a configuration path
@@ -153,7 +153,7 @@ To hack on Lich itself, run the CLI straight from a clone instead of the npm pac
 ```sh
 git clone https://github.com/Moikapy/lich.git && cd lich
 bun install
-bun src/cli.ts --version   # -> 0.6.0 (package.json; MCP in this tree is unreleased)
+bun src/cli.ts --version   # -> 0.7.0 (package.json)
 ```
 
 `bun src/cli.ts` accepts the same arguments as the installed `lich` binary, so every command on this page works unchanged.
@@ -165,4 +165,4 @@ bun src/cli.ts --version   # -> 0.6.0 (package.json; MCP in this tree is unrelea
 - Telegram, Discord, Twitch, and webhook setup: [Gateway guide](user-guide/gateway.md).
 - Embedding the agent in your own TypeScript: [Library guide](user-guide/library.md).
 - Session JSONL as a combat log: [Games guide](user-guide/games.md).
-- Editor MCP (`lich mcp`, unreleased in the published 0.6.0 package): [Redot guide](user-guide/redot.md). Play is still the [Godot guide](user-guide/godot.md).
+- Editor MCP (`lich mcp`): [Redot guide](user-guide/redot.md). Play is still the [Godot guide](user-guide/godot.md).

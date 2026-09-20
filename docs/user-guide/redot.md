@@ -28,7 +28,7 @@ HTTP is `{ "url": "http://127.0.0.1:9/mcp" }`. The host must be `127.0.0.1` or `
 
 On connect the client sends `initialize`, then `notifications/initialized`, then `tools/list`. `tools/call` runs only when the model invokes a registered tool. Registered names are `mcp_<server>_<tool>`, so two servers cannot collide. They appear only when that server is `enabled` and `tools_enabled` is `"all"` or lists the prefixed name. `tools_enabled: []` drops them even when the server is enabled, and does not connect. Plugin tools still register, including the gatekeeper's `git_commit`. The commander persona keeps `tools_enabled: []` and the `game_bridge` plugin only — `persona_config` does not copy `mcp_servers`.
 
-This client is in this source (changelog 0.7.0, unreleased). The published npm package is 0.6.0 and does not include `lich mcp` or `mcp_servers`. From a clone, use `bun src/cli.ts mcp ...`. `lich --version` still prints `0.6.0`.
+This client ships in 0.7.0 (`lich mcp`, `mcp_servers`). From a clone, use `bun src/cli.ts mcp ...`.
 
 ## Add a server
 

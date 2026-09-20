@@ -30,7 +30,7 @@ function replacement_for(content: string, old_string: string, new_string: string
   if (replace_all === true) {
     return content.split(old_string).join(new_string);
   }
-  return content.replace(old_string, new_string);
+  return content.replace(old_string, () => new_string);
 }
 
 async function apply_edit(
@@ -72,9 +72,12 @@ export const edit_file_tool: Tool = {
     capture_errors(async () => {
       const target = require_string_arg(args, "path");
       const old_string = require_string_arg(args, "old_string");
-      const new_string = require_string_arg(args, "new_string");
+      const new_raw = args["new_string"];
+      if (typeof new_raw !== "string") {
+        throw new Error("missing_arg: new_string");
+      }
       const replace_all = optional_boolean_arg(args, "replace_all", false);
-      const result = await apply_edit(context.work_dir, target, old_string, new_string, replace_all);
+      const result = await apply_edit(context.work_dir, target, old_string, new_raw, replace_all);
       return { ok: true, output: result.output };
     }),
 };
