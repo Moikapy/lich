@@ -9,6 +9,7 @@ import type { Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import type { Message } from "../providers/types.js";
 import { logger } from "../util/log.js";
+import { check_gateway_sender } from "./access.js";
 import { sanitize_agent_error } from "./types.js";
 
 export interface GatewayBusOptions {
@@ -48,6 +49,9 @@ export class GatewayBus {
 
   /** Serializes runs per conversation and resolves to the reply text. */
   async handle(platform: string, chat_id: string, user_id: string, text: string): Promise<string | undefined> {
+    if (check_gateway_sender(this.config, platform, chat_id, user_id) === false) {
+      return undefined;
+    }
     const key = conversation_key(platform, chat_id);
     const previous = this.chains.get(key) ?? Promise.resolve();
     const run = previous.then(() => this.run_once(key, platform, chat_id, user_id, text));

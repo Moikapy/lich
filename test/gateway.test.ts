@@ -5,25 +5,31 @@
  * port (0) on loopback only.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parse_agent_config } from "../src/agent/config.js";
-import { create_webhook_adapter } from "../src/gateway/webhook.js";
+import {
+  DEFAULT_GATEWAY_TOOLS_ENABLED,
+  gateway_tools_enabled,
+  is_gateway_sender_allowed,
+} from "../src/gateway/access.js";
+import { assert_bind_allowed, create_webhook_adapter } from "../src/gateway/webhook.js";
 import { format_agent_reply, split_text } from "../src/gateway/format.js";
 import { create_telegram_adapter } from "../src/gateway/telegram.js";
 import { parse_irc_line } from "../src/gateway/twitch.js";
 import { GatewayBus } from "../src/gateway/bus.js";
 import type { Agent, AgentRunResult } from "../src/agent/agent.js";
 import type { Message, Usage } from "../src/providers/types.js";
+import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const usage_zero: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 const usage_small: Usage = { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 };
 
-function config_for(work_dir: string) {
+function config_for(work_dir: string, gateway?: Record<string, unknown>) {
   return parse_agent_config({
     providers: [{ kind: "openai_compat", name: "main", model: "mock-model" }],
     work_dir,
+    ...(gateway === undefined ? {} : { gateway }),
   });
 }
 
@@ -38,15 +44,6 @@ function recording_agent(records: RunRecord[]): Agent {
     run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
       const runs = records.push({ input: options.input, history: options.history ?? [] });
       return reply_result(`reply-${runs}`, options.history ?? [], options.input);
-    },
-  } as unknown as Agent;
-}
-
-/** Agent whose runs return `count` filler messages regardless of history. */
-function flooding_agent(count: number): Agent {
-  return {
-    run: async (): Promise<AgentRunResult> => {
-      return flooding_result(count);
     },
   } as unknown as Agent;
 }
@@ -82,9 +79,14 @@ function reply_result(reply: string, history: readonly Message[], input: string)
   };
 }
 
+function temp_work_dir(): string {
+  mkdirSync(TMP_BASE, { recursive: true });
+  return mkdtempSync(join(TMP_BASE, "lich-gw-"));
+}
+
 describe("gateway bus", () => {
   it("keeps conversation continuity across handle() calls", async () => {
-    const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
+    const work_dir = temp_work_dir();
     try {
       const records: RunRecord[] = [];
       const bus = new GatewayBus({
@@ -105,10 +107,8 @@ describe("gateway bus", () => {
   });
 
   it("caps stored history at history_cap, dropping the oldest", async () => {
-    const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
+    const work_dir = temp_work_dir();
     try {
-      // A single agent floods 60 messages on run 1 (no final content), then
-      // records the history it receives on run 2.
       const records: RunRecord[] = [];
       let runs = 0;
       const probe_factory = (): Agent =>
@@ -134,7 +134,7 @@ describe("gateway bus", () => {
   });
 
   it("returns a sanitized error reply and survives an agent throw", async () => {
-    const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
+    const work_dir = temp_work_dir();
     try {
       const bus = new GatewayBus({
         config: config_for(work_dir),
@@ -154,10 +154,64 @@ describe("gateway bus", () => {
       rmSync(work_dir, { recursive: true, force: true });
     }
   });
+
+  it("default-denies public platforms until allowlists are set", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const denied = new GatewayBus({
+        config: config_for(work_dir, {}),
+        agent_factory: () => recording_agent(records),
+      });
+      expect(await denied.handle("telegram", "chat-1", "user-1", "hi")).toBeUndefined();
+      expect(records).toHaveLength(0);
+
+      const allowed = new GatewayBus({
+        config: config_for(work_dir, { allowed_users: { telegram: ["user-1"] } }),
+        agent_factory: () => recording_agent(records),
+      });
+      expect(await allowed.handle("telegram", "chat-1", "user-1", "hi")).toBe("reply-1");
+      expect(await allowed.handle("telegram", "chat-1", "other", "nope")).toBeUndefined();
+      expect(records).toHaveLength(1);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("gateway access", () => {
+  it("allows webhook without allowlists and requires lists on public platforms", () => {
+    const work_dir = temp_work_dir();
+    try {
+      const bare = config_for(work_dir);
+      expect(is_gateway_sender_allowed(bare, "webhook", "c", "u")).toBe(true);
+      expect(is_gateway_sender_allowed(bare, "discord", "c", "u")).toBe(false);
+      const with_chat = config_for(work_dir, { allowed_chats: { discord: ["c"] } });
+      expect(is_gateway_sender_allowed(with_chat, "discord", "c", "anyone")).toBe(true);
+      expect(is_gateway_sender_allowed(with_chat, "discord", "other", "anyone")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("defaults gateway tools to the safe read-only subset", () => {
+    const work_dir = temp_work_dir();
+    try {
+      expect(gateway_tools_enabled(config_for(work_dir))).toEqual([...DEFAULT_GATEWAY_TOOLS_ENABLED]);
+      expect(DEFAULT_GATEWAY_TOOLS_ENABLED.includes("terminal")).toBe(false);
+      expect(DEFAULT_GATEWAY_TOOLS_ENABLED.includes("write_file")).toBe(false);
+      const open = config_for(work_dir, { tools_enabled: "all" });
+      expect(gateway_tools_enabled(open)).toBe("all");
+      expect(open.gateway?.tools_enabled).toBe("all");
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("webhook adapter", () => {
   const env_token = process.env.LICH_GATEWAY_TOKEN;
+  const env_host = process.env.LICH_GATEWAY_HOST;
 
   afterEach(() => {
     if (env_token === undefined) {
@@ -165,23 +219,41 @@ describe("webhook adapter", () => {
     } else {
       process.env.LICH_GATEWAY_TOKEN = env_token;
     }
+    if (env_host === undefined) {
+      delete process.env.LICH_GATEWAY_HOST;
+    } else {
+      process.env.LICH_GATEWAY_HOST = env_host;
+    }
   });
 
-  function make_adapter(work_dir: string, reply: string, on_listening: (port: number) => void) {
+  function make_adapter(
+    work_dir: string,
+    reply: string,
+    on_listening: (port: number) => void,
+    handle?: (
+      platform: string,
+      chat_id: string,
+      user_id: string,
+      text: string,
+    ) => Promise<string | undefined>,
+  ) {
     return create_webhook_adapter({
       config: config_for(work_dir),
-      handle_message: async (_platform, _chat, _user, text) => `${reply}:${text}`,
+      handle_message:
+        handle ??
+        (async (_platform, _chat, _user, text) => `${reply}:${text}`),
       get_agent: () => {
         throw new Error("not used");
       },
       reply_router: () => undefined,
       port: 0,
+      host: "127.0.0.1",
       on_listening,
     });
   }
 
   it("serves POST /message, GET /health, and 404 for other paths", async () => {
-    const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
+    const work_dir = temp_work_dir();
     let port: number | undefined;
     const adapter = make_adapter(work_dir, "echo", (seen) => {
       port = seen;
@@ -211,7 +283,7 @@ describe("webhook adapter", () => {
   });
 
   it("requires the x-lich-token header when LICH_GATEWAY_TOKEN is set", async () => {
-    const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
+    const work_dir = temp_work_dir();
     process.env.LICH_GATEWAY_TOKEN = "sekrit";
     let port: number | undefined;
     const adapter = make_adapter(work_dir, "echo", (seen) => {
@@ -241,7 +313,7 @@ describe("webhook adapter", () => {
   });
 
   it("rejects a message body without text and closes cleanly on stop()", async () => {
-    const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
+    const work_dir = temp_work_dir();
     let port: number | undefined;
     const adapter = make_adapter(work_dir, "echo", (seen) => {
       port = seen;
@@ -267,6 +339,46 @@ describe("webhook adapter", () => {
       await adapter.stop();
       rmSync(work_dir, { recursive: true, force: true });
     }
+  });
+
+  it("forces platform=webhook even when the body claims another platform", async () => {
+    const work_dir = temp_work_dir();
+    let port: number | undefined;
+    const seen: string[] = [];
+    const adapter = make_adapter(work_dir, "echo", (bound) => {
+      port = bound;
+    }, async (platform, chat_id, user_id, text) => {
+      seen.push(`${platform}:${chat_id}:${user_id}:${text}`);
+      return "ok";
+    });
+    try {
+      await adapter.start();
+      if (port === undefined) {
+        throw new Error("webhook did not report a listening port");
+      }
+      const response = await fetch(`http://127.0.0.1:${port}/message`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          platform: "telegram",
+          chat_id: "stolen",
+          user_id: "attacker",
+          text: "leak",
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(seen).toEqual(["webhook:stolen:attacker:leak"]);
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a non-loopback bind when no token is set", () => {
+    expect(() => assert_bind_allowed("0.0.0.0", undefined)).toThrow(/refuses non-loopback/);
+    expect(() => assert_bind_allowed("0.0.0.0", "")).toThrow(/refuses non-loopback/);
+    expect(() => assert_bind_allowed("127.0.0.1", undefined)).not.toThrow();
+    expect(() => assert_bind_allowed("0.0.0.0", "sekrit")).not.toThrow();
   });
 });
 

@@ -120,18 +120,25 @@ function identify_body(token: string): Record<string, unknown> {
 }
 
 async function on_message_create(params: AdapterParams, data: Record<string, unknown> | undefined): Promise<void> {
-  const message = normalize_message(data);
-  if (message === undefined) {
-    return;
+  try {
+    const message = normalize_message(data);
+    if (message === undefined) {
+      return;
+    }
+    const reply = await run_inbound_message(
+      params.handle_message,
+      "discord",
+      message.channel_id,
+      message.author_id,
+      message.content,
+    );
+    if (reply.length === 0) {
+      return;
+    }
+    await rest_send_message(params, message.channel_id, reply);
+  } catch (error) {
+    logger.warn("gateway discord deliver failed", error);
   }
-  const reply = await run_inbound_message(
-    params.handle_message,
-    "discord",
-    message.channel_id,
-    message.author_id,
-    message.content,
-  );
-  await rest_send_message(params, message.channel_id, reply);
 }
 
 async function rest_send_message(params: AdapterParams, channel_id: string, text: string): Promise<void> {

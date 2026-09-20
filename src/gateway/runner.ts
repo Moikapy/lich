@@ -5,6 +5,7 @@
 import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
+import { gateway_tools_enabled } from "./access.js";
 import { GatewayBus } from "./bus.js";
 import { create_discord_adapter } from "./discord.js";
 import { create_telegram_adapter } from "./telegram.js";
@@ -14,7 +15,8 @@ import { create_webhook_adapter } from "./webhook.js";
 
 /** Preload plugins, then hand that same agent to the bus factory. */
 export async function create_gateway_bus(config: AgentConfig): Promise<{ agent: Agent; bus: GatewayBus }> {
-  const agent = await create_agent_with_plugins(config);
+  const agent_config = { ...config, tools_enabled: gateway_tools_enabled(config) };
+  const agent = await create_agent_with_plugins(agent_config);
   const bus = new GatewayBus({ config, agent_factory: () => agent, wire_tool_logging: true });
   return { agent, bus };
 }
@@ -66,7 +68,7 @@ function build_adapters(config: AgentConfig, bus: GatewayBus, platforms: readonl
 function create_platform_adapter(params: AdapterParams, platform: string): PlatformAdapter | undefined {
   switch (platform) {
     case "webhook":
-      return create_webhook_adapter({ ...params, port: read_webhook_port() });
+      return create_webhook_adapter({ ...params, port: read_webhook_port(), host: read_webhook_host() });
     case "telegram":
       return create_telegram_adapter(params);
     case "discord":
@@ -85,6 +87,14 @@ function read_webhook_port(): number | undefined {
   }
   const port = Number(raw);
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+}
+
+function read_webhook_host(): string | undefined {
+  const raw = process.env.LICH_GATEWAY_HOST;
+  if (raw === undefined || raw.trim().length === 0) {
+    return undefined;
+  }
+  return raw.trim();
 }
 
 /** Adapter start failures log and are skipped; the rest keep running. */

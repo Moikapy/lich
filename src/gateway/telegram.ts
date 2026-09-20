@@ -70,23 +70,30 @@ async function fetch_updates(token: string, offset: number): Promise<TelegramUpd
 }
 
 async function deliver_update(params: AdapterParams, token: string, update: TelegramUpdate): Promise<void> {
-  const message = update.message;
-  if (message === undefined || message.from?.is_bot === true) {
-    return;
+  try {
+    const message = update.message;
+    if (message === undefined || message.from?.is_bot === true) {
+      return;
+    }
+    const chat_id = message.chat?.id;
+    if (chat_id === undefined) {
+      return;
+    }
+    const text = message.text ?? "media not supported yet";
+    const reply = await run_inbound_message(
+      params.handle_message,
+      "telegram",
+      String(chat_id),
+      String(message.from?.id ?? "unknown"),
+      text,
+    );
+    if (reply.length === 0) {
+      return;
+    }
+    await send_reply(token, String(chat_id), reply);
+  } catch (error) {
+    logger.warn("gateway telegram deliver failed", error);
   }
-  const chat_id = message.chat?.id;
-  if (chat_id === undefined) {
-    return;
-  }
-  const text = message.text ?? "media not supported yet";
-  const reply = await run_inbound_message(
-    params.handle_message,
-    "telegram",
-    String(chat_id),
-    String(message.from?.id ?? "unknown"),
-    text,
-  );
-  await send_reply(token, String(chat_id), reply);
 }
 
 async function send_reply(token: string, chat_id: string, text: string): Promise<void> {

@@ -3,16 +3,25 @@
  * derived session_dir, deep-freezes the result, and syncs the logger level.
  */
 import { z } from "zod";
+import { DEFAULT_GATEWAY_TOOLS_ENABLED } from "../gateway/access.js";
 import { ENV_VAR_NAME } from "../gateway/token_env.js";
 import { refuse_mcp_entry } from "../mcp/mcp_pin.js";
 import type { ProviderConfig } from "../providers/types.js";
 import { set_log_level } from "../util/log.js";
+
+const gateway_allowlist = z.record(z.string(), z.array(z.string())).default({});
 
 const gateway_schema = z
   .object({
     platforms: z.array(z.enum(["webhook", "telegram", "discord", "twitch"])).default([]),
     /** Env-var names that hold tokens. Never store the secrets themselves. */
     token_envs: z.record(z.string(), z.string().regex(ENV_VAR_NAME, "invalid env var name")).default({}),
+    /** Per-platform user ids allowed to talk to the bot (default-deny on public platforms). */
+    allowed_users: gateway_allowlist,
+    /** Per-platform chat/channel ids allowed (default-deny on public platforms). */
+    allowed_chats: gateway_allowlist,
+    /** Tool allowlist for the gateway agent; defaults to a read-only safe subset. */
+    tools_enabled: z.union([z.literal("all"), z.array(z.string())]).default([...DEFAULT_GATEWAY_TOOLS_ENABLED]),
   })
   .optional();
 
@@ -113,6 +122,11 @@ function freeze_config(config: AgentConfig): AgentConfig {
   if (config.gateway !== undefined) {
     Object.freeze(config.gateway.platforms);
     Object.freeze(config.gateway.token_envs);
+    Object.freeze(config.gateway.allowed_users);
+    Object.freeze(config.gateway.allowed_chats);
+    if (Array.isArray(config.gateway.tools_enabled) === true) {
+      Object.freeze(config.gateway.tools_enabled);
+    }
     Object.freeze(config.gateway);
   }
   if (config.mcp_servers !== undefined) {
