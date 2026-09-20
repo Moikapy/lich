@@ -104,8 +104,18 @@ export function parse_http_url(raw: string): URL {
   return parsed;
 }
 
+/** Strip IPv6 brackets Node may leave on URL.hostname. */
+function normalize_hostname(hostname: string): string {
+  if (hostname.startsWith("[") === true && hostname.endsWith("]") === true) {
+    return hostname.slice(1, -1);
+  }
+  return hostname;
+}
+
 /** Resolve hostname to a public IP, or throw blocked_url. */
-export async function resolve_public_ip(hostname: string): Promise<string> {
+export async function resolve_public_ip(raw_hostname: string): Promise<string> {
+  const hostname = normalize_hostname(raw_hostname);
+
   if (private_urls_allowed() === true) {
     if (net.isIP(hostname) !== 0) {
       return hostname;
