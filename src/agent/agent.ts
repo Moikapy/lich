@@ -127,7 +127,7 @@ export class Agent {
   private readonly hook_runner: HookedToolRunner | undefined;
   private readonly mcp_runtime: McpRuntime | undefined;
   private mcp_sessions: McpSession[] = [];
-  private mcp_attached = false;
+  private mcp_attach: Promise<void> | undefined;
 
   constructor(config: AgentConfig, plugins: readonly LoadedPlugin[] = [], runtime?: { mcp?: McpRuntime }) {
     this.config = config;
@@ -162,7 +162,9 @@ export class Agent {
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
     await this.attach_mcp_once();
     const usage_total: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-    const stop_collecting = this.events.on(collect_usage(usage_total));
+    const run_events = new AgentEmitter();
+    const stop_forwarding = run_events.on((event) => this.events.emit(event));
+    const stop_collecting = run_events.on(collect_usage(usage_total));
     await this.call_plugin_run_start(options.input);
     let outcome: LoopOutcome | undefined;
     try {
@@ -173,7 +175,7 @@ export class Agent {
         env: tool_env(this.config),
         signal: options.signal,
       };
-      outcome = await run_conversation(this.loop_deps(tool_context), seed_messages, {
+      outcome = await run_conversation(this.loop_deps(tool_context, run_events), seed_messages, {
         system_prompt: this.config.system_prompt ?? DEFAULT_AGENT_SYSTEM_PROMPT,
         max_turns: this.config.max_turns,
         temperature: this.config.temperature,
@@ -184,6 +186,7 @@ export class Agent {
       });
     } finally {
       stop_collecting();
+      stop_forwarding();
       if (outcome !== undefined) {
         await this.call_plugin_run_end(outcome);
       }
@@ -202,20 +205,21 @@ export class Agent {
 
   /** tools/list once, before the model sees definitions. Empty allowlists never connect. */
   private async attach_mcp_once(): Promise<void> {
-    if (this.mcp_attached === true) {
-      return;
-    }
-    this.mcp_attached = true;
+    this.mcp_attach ??= this.do_attach_mcp();
+    await this.mcp_attach;
+  }
+
+  private async do_attach_mcp(): Promise<void> {
     this.mcp_sessions = await attach_enabled_mcp_tools(this.registry, this.config, this.mcp_runtime);
   }
 
   /** Per-run deps: the built-once ToolContext threads through every tool execution. */
-  private loop_deps(tool_context: ToolContext): LoopDeps {
+  private loop_deps(tool_context: ToolContext, emitter: AgentEmitter = this.events): LoopDeps {
     return {
       chat: (messages, tools, chat_options) => this.router.chat_with_failover(messages, tools, chat_options),
       tools: this.executor,
       definitions: () => this.registry.definitions(),
-      emitter: this.events,
+      emitter,
       tool_context,
     };
   }
