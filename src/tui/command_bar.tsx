@@ -24,6 +24,9 @@ export function CommandBar({ busy, on_submit }: CommandBarProps): React.JSX.Elem
   const [recall_index, set_recall_index] = useState<number | undefined>(undefined);
 
   const submit_buffer = (): void => {
+    if (busy === true) {
+      return;
+    }
     const text = buffer.trim();
     set_buffer("");
     set_recall_index(undefined);
@@ -33,8 +36,17 @@ export function CommandBar({ busy, on_submit }: CommandBarProps): React.JSX.Elem
     }
   };
 
+  /** Newest-first ring: Up walks toward older (higher index), Down toward newer. */
   const walk_recall = (direction: 1 | -1): void => {
     if (recall_ring.length === 0) {
+      return;
+    }
+    if (direction === -1 && recall_index === 0) {
+      set_recall_index(undefined);
+      set_buffer("");
+      return;
+    }
+    if (direction === -1 && recall_index === undefined) {
       return;
     }
     const current = recall_index ?? -direction;
@@ -49,11 +61,11 @@ export function CommandBar({ busy, on_submit }: CommandBarProps): React.JSX.Elem
       return;
     }
     if (key.upArrow === true) {
-      walk_recall(-1);
+      walk_recall(1);
       return;
     }
     if (key.downArrow === true) {
-      walk_recall(1);
+      walk_recall(-1);
       return;
     }
     if (key.backspace === true || key.delete === true) {
