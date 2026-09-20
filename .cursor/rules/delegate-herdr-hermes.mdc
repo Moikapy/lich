@@ -1,0 +1,131 @@
+---
+description: Route Cursor Tasks (impl/test), Herdr→Claude (review), Hermes (docs) for lich
+alwaysApply: true
+---
+
+# Delegate: Cursor + Herdr→Claude + Hermes
+
+Lich-scoped coordinator routing. Do not apply this loop to other repos.
+
+**Sources:** `herdr --skill` / [herdr v0.9.1 SKILL.md](https://raw.githubusercontent.com/herdrdev/herdr/v0.9.1/skills/herdr/SKILL.md); plan `.cursor/plans/delegate_herdr_hermes.plan.md`.
+
+## Roles
+
+| Role | Tool | Owns |
+|------|------|------|
+| Parent coordinator | This chat | Routing, worktrees, accepting verdicts, PRs when asked |
+| Implement / investigate / test | Cursor `Task` workers (+ shells in worktrees) | Code, tests, repro, CI diagnosis |
+| Review (diff/PR/council) | **Existing** Herdr Claude agent | Actionable findings + PASS/FAIL; not primary impl |
+| Documentation | **Existing** Herdr Hermes agent, else `hermes` CLI | Docs/README/changelog staging only |
+| Optional cheap review | Bugbot / Security Review skills | Local-diff review without Herdr |
+
+**Assumptions:** Herdr, Claude, and Hermes are already running. Do **not** `herdr integration install`, start/stop Herdr, or kill panes unless the user asks.
+
+## Decision (short)
+
+- Spec unclear / multi-file design → Cursor Task (investigate) or ask user — **not** Hermes
+- Implementation → Cursor Task
+- Tests red → fix first; **do not** call Claude review yet
+- Impl + tests green + user wants Claude review → Herdr→Claude (existing agent)
+- Review FAIL → Cursor Task fix → re-test
+- Review PASS / skip + docs lag → Hermes docs
+- Docs-only ask → Hermes directly
+- Security-sensitive → Security Review and/or Claude; never Hermes as security reviewer
+- Typo / one-line → prefer Cursor alone; skip Claude
+- Publish / merge / release → human only
+
+## Hard gate: `HERDR_ENV=1`
+
+Before any `herdr agent|pane|workspace|tab|…` control:
+
+```bash
+test "${HERDR_ENV:-}" = 1
+```
+
+If that fails: you are **not** inside Herdr. **Stop** Herdr control. Do not inspect or drive the focused Herdr session from Cursor.
+
+Outside Herdr:
+
+- Hand the review/docs prompt to a Herdr-resident agent or the user (list → prompt → read recipe below), **or**
+- Use Cursor Task / Hermes CLI for work that does not need Herdr control.
+
+Prefer unique agent name, explicit pane ID, or `--current`. Never rely on another client's focused pane. Never put tokens/API keys in prompts or this rule.
+
+## Herdr recipe (existing agents only)
+
+Discover — parse JSON; never invent IDs (`w1`, `w1:t1`, `w1:p1`) or agent names:
+
+```bash
+herdr workspace list
+herdr tab list --workspace "$HERDR_WORKSPACE_ID"
+herdr pane current --current
+herdr pane list --workspace "$HERDR_WORKSPACE_ID"
+herdr agent list
+```
+
+Targets are unique live agent names (`[a-z][a-z0-9_-]{0,31}`) or pane IDs hosting agents — not terminal IDs or bare kinds (`claude`/`hermes`).
+
+### Claude review
+
+```bash
+herdr agent prompt <CLAUDE_AGENT> "$(cat <<'EOF'
+Review GitHub PR #<PR> in this repo. Use gh if available.
+Focus on correctness, regressions, and missing tests.
+Output: VERDICT PASS|FAIL, then actionable findings only (file:line + why + fix hint).
+Do not implement unless a finding is a one-line obvious fix and you state it.
+EOF
+)" --wait --timeout 120000
+
+herdr agent get <CLAUDE_AGENT>
+herdr agent read <CLAUDE_AGENT> --source recent-unwrapped --lines 120
+```
+
+Diff/branch (no PR): prompt with `git fetch origin main && git diff origin/main...HEAD` and the same VERDICT format.
+
+Council lens: security | simplicity | architecture — match `docs/design/council/`; VERDICT + findings only; no merge.
+
+On `blocked` / timeout / `agent_prompt_stalled`: `get`/`read` before re-prompt; ask user before answering approval UI. Fallback only if scrollback fails: ask agent to write Markdown under a temp dir and reply with the path.
+
+Paste captured review into `REVIEW.md` or `docs/design/council/<topic>-review.md`. Do **not** delete `REVIEW.md`. Do **not** auto-create or auto-close issues from reviews unless the user asks.
+
+### Hermes docs (Herdr preferred)
+
+```bash
+herdr agent prompt <HERMES_AGENT> "$(cat <<'EOF'
+Docs-only task for this repo.
+Update user-facing docs to match the changed behavior below.
+Do not change runtime source except docs/, changelog staging, or README.
+Do not commit or push. Summarize files you would change.
+Context: PR #<PR> or branch <BRANCH>; behavior bullets: ...
+EOF
+)" --wait --timeout 120000
+
+herdr agent read <HERMES_AGENT> --source recent-unwrapped --lines 120
+```
+
+### Hermes CLI fallback (outside Herdr or no Hermes pane)
+
+```bash
+hermes -z "$(cat <<'EOF'
+Docs-only task for this repo.
+Update user-facing docs to match the changed behavior described below.
+Do not change runtime source except docs/, changelog staging, or README.
+Do not commit or push. Summarize files you would change.
+Context: PR #<PR> or branch <BRANCH>; bullets: ...
+EOF
+)" --in "$PWD" --safe-mode
+```
+
+Quiet: `hermes chat -q "Docs-only: …" --oneshot -Q --in "$PWD" --safe-mode`.
+
+## Forbidden
+
+- Auto-merge, auto-publish, force-push, auto-open releases
+- Auto-create/close GitHub issues from review text without user ask
+- Driving Herdr when `HERDR_ENV≠1`
+- `herdr server stop`, killing the main Herdr process, `workspace close --group` as a shortcut
+- Closing topology you did not create unless the user asked
+- Requiring `herdr integration install claude` for this loop
+- Putting secrets in agent prompts; pasting `.env` / tokens
+- Hermes as implementer or security reviewer; Claude as primary builder (unless user asks)
+- Bare `herdr` for CLI discovery (attaches TUI); use `herdr --help` then group help (`herdr agent`, …)
