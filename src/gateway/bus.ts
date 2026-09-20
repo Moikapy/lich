@@ -127,7 +127,11 @@ function cap_history(messages: Message[], cap: number): Message[] {
   if (overflow <= 0) {
     return messages;
   }
-  return messages.slice(overflow);
+  let sliced = messages.slice(overflow);
+  while (sliced.length > 0 && sliced[0]?.role !== "user") {
+    sliced = sliced.slice(1);
+  }
+  return sliced;
 }
 
 function final_reply_text(content: string | undefined): string | undefined {

@@ -112,6 +112,9 @@ export async function chat_with_failover(
     if (result.ok === true) {
       return result.value;
     }
+    if (is_abort_failure(result.error, options?.signal) === true) {
+      throw result.error;
+    }
     last_error = result.error;
     log_fail_over(result.error);
   }
@@ -155,8 +158,18 @@ async function attempt_provider(
       }),
     };
   } catch (error) {
+    if (is_abort_failure(error, options?.signal) === true) {
+      throw error;
+    }
     return { ok: false, error: to_provider_error(error, provider.name) };
   }
+}
+
+function is_abort_failure(error: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted === true) {
+    return true;
+  }
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function to_provider_error(error: unknown, fallback_name: string): ProviderError {

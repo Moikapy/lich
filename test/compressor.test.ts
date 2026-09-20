@@ -101,4 +101,28 @@ describe("compress_messages", () => {
     expect(outcome.messages).toEqual(input);
     expect(outcome.summary_chars).toBe(0);
   });
+
+  it("moves the keep-recent cut back so recent never starts on a tool message", async () => {
+    const chat: ChatFn = async () => fixed_chat_result("SUMMARY");
+    const input: Message[] = [
+      system_message("sys"),
+      user_message("u0"),
+      user_message("u1"),
+      { role: "assistant", content: "", tool_calls: [{ id: "c1", name: "read_file", args: { path: "a" } }] },
+      { role: "tool", tool_call_id: "c1", name: "read_file", content: "file-a" },
+      user_message("u2"),
+      user_message("u3"),
+    ];
+    // keep_recent=3 would otherwise start on the orphan tool result.
+    const outcome = await compress_messages({ chat }, input, { budget_tokens: 1000, keep_recent: 3 });
+    const recent = outcome.messages.filter((message) => message.role !== "system");
+    const summary = recent[0];
+    expect(summary?.role).toBe("user");
+    if (summary?.role === "user") {
+      expect(summary.content).toContain("SUMMARY");
+    }
+    expect(recent[1]?.role).toBe("assistant");
+    expect(recent[2]?.role).toBe("tool");
+    expect(recent.slice(1).map((message) => message.role)).toEqual(["assistant", "tool", "user", "user"]);
+  });
 });

@@ -124,7 +124,7 @@ describe("run_conversation", () => {
       controller.abort();
       return result("", [{ id: "t1", name: "read_file", args: { path: "a.txt" } }]);
     };
-    const { runner } = make_tool_runner("ok");
+    const { runner, calls } = make_tool_runner("ok");
     const deps: LoopDeps = { chat, tools: runner, definitions: () => [], emitter };
 
     const outcome = await run_conversation(deps, [{ role: "user", content: "go" }], {
@@ -134,9 +134,80 @@ describe("run_conversation", () => {
 
     expect(outcome.stopped_reason).toBe("aborted");
     expect(chat_calls).toBe(1);
+    expect(calls).toHaveLength(0);
     expect(outcome.turns_used).toBe(1);
+    const cancelled = outcome.messages.find((message) => message.role === "tool");
+    expect(cancelled?.role).toBe("tool");
+    if (cancelled?.role === "tool") {
+      expect(cancelled.content).toContain("cancelled");
+      expect(cancelled.is_error).toBe(true);
+    }
     expect(events.some((event) => event.type === "error")).toBe(true);
     expect(event_types(events).at(-1)).toBe("error");
+  });
+
+  it("returns aborted when chat throws after the signal aborts mid-call", async () => {
+    const controller = new AbortController();
+    const emitter = new AgentEmitter();
+    const events: AgentEvent[] = [];
+    emitter.on((event) => events.push(event));
+    const chat: ChatFn = async () => {
+      controller.abort();
+      const error = new Error("fetch aborted");
+      error.name = "AbortError";
+      throw error;
+    };
+    const { runner } = make_tool_runner("ok");
+    const deps: LoopDeps = { chat, tools: runner, definitions: () => [], emitter };
+
+    const outcome = await run_conversation(deps, [{ role: "user", content: "go" }], {
+      max_turns: 3,
+      signal: controller.signal,
+    });
+
+    expect(outcome.stopped_reason).toBe("aborted");
+    expect(outcome.turns_used).toBe(0);
+    expect(outcome.messages).toHaveLength(1);
+    expect(events.some((event) => event.type === "error")).toBe(true);
+  });
+
+  it("skips remaining tool calls when the signal aborts between them", async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    const runner: ToolRunner = {
+      execute: async (name) => {
+        calls.push(name);
+        controller.abort();
+        return { ok: true, output: "done" };
+      },
+    };
+    const chat = make_chat_queue([
+      result("", [
+        { id: "t1", name: "first", args: {} },
+        { id: "t2", name: "second", args: {} },
+      ]),
+    ]);
+    const deps: LoopDeps = {
+      chat,
+      tools: runner,
+      definitions: () => [],
+      tool_context: { work_dir: ".", env: {}, signal: controller.signal },
+    };
+
+    const outcome = await run_conversation(deps, [{ role: "user", content: "go" }], {
+      max_turns: 3,
+      signal: controller.signal,
+    });
+
+    expect(outcome.stopped_reason).toBe("aborted");
+    expect(calls).toEqual(["first"]);
+    const tool_messages = outcome.messages.filter((message) => message.role === "tool");
+    expect(tool_messages).toHaveLength(2);
+    expect(tool_messages[1]?.role).toBe("tool");
+    if (tool_messages[1]?.role === "tool") {
+      expect(tool_messages[1].content).toContain("cancelled");
+      expect(tool_messages[1].tool_call_id).toBe("t2");
+    }
   });
 
   it("scenario D: compresses history when the context budget is exceeded", async () => {

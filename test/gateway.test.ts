@@ -133,6 +133,46 @@ describe("gateway bus", () => {
     }
   });
 
+  it("drops leading non-user messages after a history cap slice (G-7)", async () => {
+    const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
+    try {
+      const records: RunRecord[] = [];
+      let runs = 0;
+      const orphaned: Message[] = [
+        { role: "user", content: "old" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c1", name: "read_file", args: {} }] },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "data" },
+        { role: "user", content: "keep-me" },
+        { role: "assistant", content: "reply" },
+      ];
+      const probe_factory = (): Agent =>
+        ({
+          run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+            runs += 1;
+            if (runs === 1) {
+              return {
+                outcome: { messages: orphaned, final: undefined, result: undefined, turns_used: 1, stopped_reason: "final" },
+                messages: orphaned,
+                usage_total: usage_zero,
+                session_path: undefined,
+              };
+            }
+            records.push({ input: options.input, history: options.history ?? [] });
+            return reply_result("ok", options.history ?? [], options.input);
+          },
+        }) as unknown as Agent;
+      const bus = new GatewayBus({ config: config_for(work_dir), agent_factory: probe_factory }, { history_cap: 3 });
+      await bus.handle("webhook", "orphan", "u1", "go");
+      await bus.handle("webhook", "orphan", "u1", "again");
+      const seen = records[0]?.history ?? [];
+      expect(seen[0]?.role).toBe("user");
+      expect(seen[0]?.content).toBe("keep-me");
+      expect(seen.some((message) => message.role === "tool")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns a sanitized error reply and survives an agent throw", async () => {
     const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
     try {

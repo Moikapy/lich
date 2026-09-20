@@ -71,6 +71,18 @@ function log_compression_failure(error: unknown): void {
   logger.warn("context compression failed", error);
 }
 
+/** Keep-recent cut that never starts on an orphan tool result. */
+function split_keep_recent(
+  non_system: readonly Message[],
+  keep_recent: number,
+): { recent: Message[]; older: Message[] } {
+  let cut = Math.max(0, non_system.length - keep_recent);
+  while (cut > 0 && non_system[cut]?.role === "tool") {
+    cut -= 1;
+  }
+  return { recent: non_system.slice(cut), older: non_system.slice(0, cut) };
+}
+
 export async function compress_messages(
   deps: CompressDeps,
   messages: readonly Message[],
@@ -79,8 +91,7 @@ export async function compress_messages(
   const system_messages = messages.filter((message) => message.role === "system");
   const non_system = messages.filter((message) => message.role !== "system");
   const keep_recent = Math.max(0, params.keep_recent);
-  const recent = non_system.slice(-keep_recent);
-  const older = non_system.slice(0, Math.max(0, non_system.length - recent.length));
+  const { recent, older } = split_keep_recent(non_system, keep_recent);
   if (older.length === 0) {
     return { messages: [...messages], summary_chars: 0 };
   }
