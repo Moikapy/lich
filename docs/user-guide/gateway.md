@@ -27,37 +27,54 @@ lich gateway                         # defaults to webhook
 
 The gateway is silent after startup: Telegram/Discord/Twitch respond only in chats, channels, or servers the bot can see or has joined, and the webhook only serves HTTP. Telegram media messages arrive as the placeholder text `media not supported yet`; other non-text events are ignored. Telegram `/start` is answered like a plain "hello".
 
+**Security defaults:** the webhook binds loopback only; Telegram/Discord/Twitch default-deny until you configure allowlists; the gateway agent uses a read-only tool subset (no `terminal`, no file writes) unless you override `gateway.tools_enabled`.
+
 ## Setup: webhook
 
-Zero configuration — the server binds `0.0.0.0:$LICH_GATEWAY_PORT` (default 8089).
+Zero configuration for local use — the server binds `127.0.0.1:$LICH_GATEWAY_PORT` (default 8089). Set `LICH_GATEWAY_HOST` only when you intentionally expose the port.
 
 ```sh
 lich gateway webhook
 ```
 
 ```sh
-curl -s -X POST http://localhost:8089/message \
+curl -s -X POST http://127.0.0.1:8089/message \
   -H "content-type: application/json" -d '{"text": "hello"}'
 # -> {"reply":"...","usage":null}
 
-curl -s http://localhost:8089/health
+curl -s http://127.0.0.1:8089/health
 # -> {"status":"ok"}
+```
+
+To bind a non-loopback address you **must** set a token; otherwise the adapter refuses to start:
+
+```sh
+LICH_GATEWAY_HOST=0.0.0.0 LICH_GATEWAY_TOKEN=s3cret lich gateway webhook
 ```
 
 With token auth, every POST must carry the exact `x-lich-token` header; mismatched or missing tokens get `401 {"error":"unauthorized"}`:
 
 ```sh
 LICH_GATEWAY_TOKEN=s3cret lich gateway webhook
-curl -s -X POST http://localhost:8089/message \
+curl -s -X POST http://127.0.0.1:8089/message \
   -H "x-lich-token: s3cret" -H "content-type: application/json" -d '{"text": "hello"}'
 ```
 
-Payload fields (all optional except `text`): `platform` (default `"webhook"`), `chat_id` (default `"default"`), `user_id` (default `"anonymous"`), `text` (required; missing `text` is a `400`). Use distinct `chat_id` values to keep independent conversation memories.
+Payload fields (all optional except `text`): `chat_id` (default `"default"`), `user_id` (default `"anonymous"`), `text` (required; missing `text` is a `400`). A `platform` field in the body is **ignored** — conversations are always keyed as `webhook:<chat_id>`. Use distinct `chat_id` values to keep independent conversation memories.
 
 ## Setup: Telegram
 
 1. Message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token.
-2. Export it and run:
+2. Allow your user (and optionally chat) ids in config, export the bot token, and run:
+
+```json
+{
+  "gateway": {
+    "allowed_users": { "telegram": ["123456789"] },
+    "allowed_chats": { "telegram": ["123456789"] }
+  }
+}
+```
 
 ```sh
 export LICH_TELEGRAM_BOT_TOKEN=123456:ABC-your-token
@@ -66,14 +83,22 @@ lich gateway telegram
 
 3. Open your bot in Telegram, send a message, get a reply. Media messages arrive as the text `media not supported yet`; the bot replies from there.
 
-Telegram uses long polling (no public URL needed). Replies split at 4096 chars.
+Without `allowed_users` / `allowed_chats` for `telegram`, every inbound message is denied (default-deny). Telegram uses long polling (no public URL needed). Replies split at 4096 chars.
 
 ## Setup: Discord
 
 1. Create an application at the [Discord developer portal](https://discord.com/developers/applications), add a **Bot**, and copy the bot token.
 2. Enable the **Message Content Intent** (Bot settings → Privileged Gateway Intents) — the adapter requests intents `512 | 32768`, which includes message content.
 3. Invite the bot with the `bot` scope (OAuth2 → URL Generator; no extra permissions needed beyond sending messages in target channels).
-4. Export the token (and the bot's application/user id, so leading `<@BOT_ID>` mentions are stripped) and run:
+4. Allow channel and/or user ids in config, export the token (and the bot's application/user id, so leading `<@BOT_ID>` mentions are stripped) and run:
+
+```json
+{
+  "gateway": {
+    "allowed_chats": { "discord": ["123456789012345678"] }
+  }
+}
+```
 
 ```sh
 export LICH_DISCORD_BOT_TOKEN=your-bot-token
@@ -81,14 +106,23 @@ export LICH_DISCORD_BOT_ID=123456789012345678
 lich gateway discord
 ```
 
-5. Send the bot a message (DM or any channel it can read — every non-bot message gets a reply); each channel has its own conversation memory (keyed by `channel_id`). Replies split at 2000 chars. Bot-authored messages are ignored (no loops).
+5. Send the bot a message in an allowed channel; each channel has its own conversation memory (keyed by `channel_id`). Replies split at 2000 chars. Bot-authored messages are ignored (no loops). Without allowlists for `discord`, every inbound message is denied.
 
 **Known limitation:** the Discord adapter has no reconnect resume. If its gateway WebSocket drops, messages sent while offline are missed permanently; the adapter reconnects fresh after 5s. If guaranteed delivery across disconnects matters, run webhook or Telegram instead.
 
 ## Setup: Twitch
 
 1. Generate an OAuth token with the `chat:read` and `chat:edit` scopes (for example via [twitchtokengen](https://twitchtokengen.com)).
-2. Export it, your bot account's nickname, and the channels to join (comma-separated, lowercased by the adapter):
+2. Allow channel names and/or viewer nicks in config, export credentials, and run:
+
+```json
+{
+  "gateway": {
+    "allowed_chats": { "twitch": ["channelone"] },
+    "allowed_users": { "twitch": ["trustedviewer"] }
+  }
+}
+```
 
 ```sh
 export LICH_TWITCH_OAUTH_TOKEN=oauth:abc123...
@@ -97,9 +131,26 @@ export LICH_TWITCH_CHANNELS=channelone,channeltwo
 lich gateway twitch
 ```
 
-3. The bot joins `#channelone` and `#channeltwo` and replies in chat (own messages are ignored). Replies split at 512 chars; IRC PING/PONG is answered automatically.
+3. The bot joins `#channelone` and `#channeltwo` and replies in chat only when the allowlist matches (own messages are ignored). Replies split at 512 chars; IRC PING/PONG is answered automatically.
 
-All three fields (`token`, `nick`, `channels`) are required — a missing one idles the adapter.
+All three fields (`token`, `nick`, `channels`) are required — a missing one idles the adapter. Without allowlists for `twitch`, every inbound message is denied.
+
+## Allowlists and gateway tools
+
+Public platforms (telegram, discord, twitch) are **default-deny**. Configure at least one of:
+
+| Field | Meaning |
+| --- | --- |
+| `gateway.allowed_users.<platform>` | User ids (Telegram/Discord) or nicks (Twitch) that may talk to the bot. |
+| `gateway.allowed_chats.<platform>` | Chat / channel ids (or Twitch channel names) that may talk to the bot. |
+
+If both lists are set for a platform, a message must match **both**. If only one list is set, the other dimension is unrestricted. Enforcement lives in the shared gateway bus — denied senders get no agent run and no reply.
+
+The gateway agent ignores top-level `tools_enabled` and uses `gateway.tools_enabled`, which defaults to a read-only subset:
+
+`read_file`, `list_dir`, `grep_files`, `fetch_url`, `web_search`, `docs_read`, `docs_search`
+
+Set `"gateway": { "tools_enabled": "all" }` (or an explicit name list) only when you intentionally want writes / `terminal` on chat platforms.
 
 ## Running multiple platforms at once
 
@@ -116,8 +167,9 @@ Adapters whose credentials are missing start **idle** (a warning is logged, e.g.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `LICH_GATEWAY_HOST` | `127.0.0.1` | Webhook bind address. Non-loopback requires `LICH_GATEWAY_TOKEN`. |
 | `LICH_GATEWAY_PORT` | `8089` | Webhook server port (invalid/empty values fall back to 8089). |
-| `LICH_GATEWAY_TOKEN` | unset | If set, POST `/message` requires header `x-lich-token` to match; else 401. |
+| `LICH_GATEWAY_TOKEN` | unset | If set, POST `/message` requires header `x-lich-token` to match; else 401. Required for non-loopback binds. |
 | `LICH_TELEGRAM_BOT_TOKEN` | unset | Bot token from BotFather; adapter idles without it. |
 | `LICH_DISCORD_BOT_TOKEN` | unset | Bot token from the developer portal; adapter idles without it. |
 | `LICH_DISCORD_BOT_ID` | unset | Bot user id; strips a leading `<@id>` mention from messages. |
@@ -143,10 +195,10 @@ Provider/model configuration comes from the same resolution as every mode (`LICH
 Request:
 
 ```json
-{"text": "hello", "platform": "webhook", "chat_id": "default", "user_id": "anonymous"}
+{"text": "hello", "chat_id": "default", "user_id": "anonymous"}
 ```
 
-Only `text` is required. Success (`200`):
+Only `text` is required. Any `platform` field in the body is ignored; the conversation key is always `webhook:<chat_id>`. Success (`200`):
 
 ```json
 {"reply":"Hello! How can I help you today? ...","usage":null}

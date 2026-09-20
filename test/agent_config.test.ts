@@ -47,6 +47,24 @@ describe("parse_agent_config", () => {
     expect(config.tools_enabled).toEqual(["read_file", "shell"]);
   });
 
+  it("defaults gateway allowlists empty and tools to the safe subset", () => {
+    const config = parse_agent_config({
+      providers: minimal_providers,
+      gateway: {},
+    });
+    expect(config.gateway?.allowed_users).toEqual({});
+    expect(config.gateway?.allowed_chats).toEqual({});
+    expect(config.gateway?.tools_enabled).toEqual([
+      "read_file",
+      "list_dir",
+      "grep_files",
+      "fetch_url",
+      "web_search",
+      "docs_read",
+      "docs_search",
+    ]);
+  });
+
   it("applies log_level debug without throwing", () => {
     const config = parse_agent_config({ providers: minimal_providers, log_level: "debug" });
     expect(config.log_level).toBe("debug");
