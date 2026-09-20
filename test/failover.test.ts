@@ -232,4 +232,27 @@ describe("chat_with_failover", () => {
     expect(result.provider_name).toBe("primary");
     expect(result.finish_reason).toBe("stop");
   });
+
+  it("rethrows caller aborts without failing over to the next provider", async () => {
+    const controller = new AbortController();
+    let backup_calls = 0;
+    const router = new ProviderRouter([
+      openai_config("primary", () => {
+        controller.abort();
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        return Promise.reject(error);
+      }),
+      openai_config("backup", () => {
+        backup_calls += 1;
+        return Promise.resolve(new Response(JSON.stringify(OK_BODY), { status: 200 }));
+      }),
+    ]);
+    const failure = await chat_with_failover(router, [{ role: "user", content: "hi" }], [], {
+      signal: controller.signal,
+    }).catch((error: unknown) => error);
+    expect(backup_calls).toBe(0);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).name).toBe("AbortError");
+  });
 });

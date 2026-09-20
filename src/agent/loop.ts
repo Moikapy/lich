@@ -90,8 +90,13 @@ async function run_tool_calls(
   turn: number,
   calls: readonly ToolCall[],
   emitter: AgentEmitter | undefined,
-): Promise<void> {
+  signal: AbortSignal | undefined,
+): Promise<"continued" | "aborted"> {
   for (const call of calls) {
+    if (signal_aborted(signal) === true) {
+      history.push(cancelled_tool_message(call));
+      continue;
+    }
     emitter?.emit({ type: "tool_call_start", turn, call });
     const result = await deps.tools.execute(call.name, call.args, deps.tool_context);
     const tool_message: ToolMessage = {
@@ -106,6 +111,17 @@ async function run_tool_calls(
     history.push(tool_message);
     emitter?.emit({ type: "tool_call_end", turn, call, result });
   }
+  return signal_aborted(signal) === true ? "aborted" : "continued";
+}
+
+function cancelled_tool_message(call: ToolCall): ToolMessage {
+  return {
+    role: "tool",
+    tool_call_id: call.id,
+    name: call.name,
+    content: format_tool_result_content({ ok: false, output: "", error: "cancelled" }),
+    is_error: true,
+  };
 }
 
 async function call_chat(
@@ -121,6 +137,9 @@ async function call_chat(
       signal: params.signal,
     });
   } catch (error) {
+    if (signal_aborted(params.signal) === true) {
+      throw error;
+    }
     if (error instanceof ProviderError) {
       logger.error(`provider error kind=${error.kind} provider=${error.provider_name}`, error);
     } else {
@@ -166,6 +185,26 @@ function find_last_assistant(messages: readonly Message[]): AssistantMessage | u
   return [...messages].reverse().find((message) => message.role === "assistant");
 }
 
+function signal_aborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function aborted_outcome(history: Message[], turns_used: number, emitter: AgentEmitter | undefined): LoopOutcome {
+  emitter?.emit({ type: "error", error: new DOMException("agent loop aborted", "AbortError") });
+  return {
+    messages: history,
+    final: find_last_assistant(history),
+    result: undefined,
+    turns_used,
+    stopped_reason: "aborted",
+  };
+}
+
+/** AbortSignal.aborted can flip during await; avoid loop-entry control-flow narrowing. */
+function is_aborted(signal: AbortSignal | undefined): boolean {
+  return signal !== undefined && signal.aborted === true;
+}
+
 export async function run_conversation(
   deps: LoopDeps,
   messages: readonly Message[],
@@ -174,20 +213,21 @@ export async function run_conversation(
   const history = seed_system_prompt(messages, params.system_prompt);
   const emitter = deps.emitter;
   for (const turn of turn_range(params.max_turns)) {
-    if (params.signal?.aborted === true) {
-      emitter?.emit({ type: "error", error: new DOMException("agent loop aborted", "AbortError") });
-      return {
-        messages: history,
-        final: find_last_assistant(history),
-        result: undefined,
-        turns_used: turn - 1,
-        stopped_reason: "aborted",
-      };
+    if (signal_aborted(params.signal) === true) {
+      return aborted_outcome(history, turn - 1, emitter);
     }
     emitter?.emit({ type: "turn_start", turn });
     await compress_if_needed(deps, history, params, emitter);
     emitter?.emit({ type: "llm_start", turn });
-    const result = await call_chat(deps, history, params, emitter);
+    let result: ChatResult;
+    try {
+      result = await call_chat(deps, history, params, emitter);
+    } catch (error) {
+      if (signal_aborted(params.signal) === true) {
+        return aborted_outcome(history, turn - 1, emitter);
+      }
+      throw error;
+    }
     emitter?.emit({ type: "llm_end", turn, result });
     history.push(result.message);
     const calls = result.message.tool_calls ?? [];
@@ -196,7 +236,10 @@ export async function run_conversation(
       emitter?.emit({ type: "turn_end", turn });
       return { messages: history, final: result.message, result, turns_used: turn, stopped_reason: "final" };
     }
-    await run_tool_calls(deps, history, turn, calls, emitter);
+    const tool_status = await run_tool_calls(deps, history, turn, calls, emitter, params.signal);
+    if (tool_status === "aborted") {
+      return aborted_outcome(history, turn, emitter);
+    }
   }
   emitter?.emit({ type: "budget_exhausted", turns_used: params.max_turns });
   emitter?.emit({ type: "turn_end", turn: params.max_turns });

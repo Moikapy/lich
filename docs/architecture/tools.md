@@ -38,8 +38,9 @@ result either way.
 
 **`ToolContext`** gives each execution a working directory (`work_dir`, the
 confinement root), a process environment map (the agent injects
-`LICH_TERMINAL_TIMEOUT_MS`), and an abort `signal` that fires on caller abort
-**or** the executor deadline (`tool.timeout_ms`, else
+`LICH_TERMINAL_TIMEOUT_MS`), and an optional abort `signal` the agent passes
+from `Agent.run` so tools cancel on caller abort **or** the executor deadline
+(`tool.timeout_ms`, else
 `DEFAULT_TOOL_TIMEOUT_MS` = 30000). `terminal` sets 300000, `run_tests` sets
 600000, and registered MCP tools set 120000.
 

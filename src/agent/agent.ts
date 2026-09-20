@@ -166,7 +166,11 @@ export class Agent {
     try {
       const seed_messages: Message[] = [...(options.history ?? [])];
       seed_messages.push({ role: "user", content: options.input });
-      const tool_context: ToolContext = { work_dir: this.config.work_dir, env: tool_env(this.config) };
+      const tool_context: ToolContext = {
+        work_dir: this.config.work_dir,
+        env: tool_env(this.config),
+        signal: options.signal,
+      };
       outcome = await run_conversation(this.loop_deps(tool_context), seed_messages, {
         system_prompt: this.config.system_prompt ?? DEFAULT_AGENT_SYSTEM_PROMPT,
         max_turns: this.config.max_turns,
@@ -183,8 +187,7 @@ export class Agent {
       }
     }
     const session_path = await this.persist_session(outcome, options, usage_total);
-    const full_messages: Message[] = [...(options.history ?? []), ...outcome.messages];
-    return { outcome, messages: full_messages, usage_total, session_path };
+    return { outcome, messages: outcome.messages, usage_total, session_path };
   }
 
   /** tools/list once, before the model sees definitions. Empty allowlists never connect. */
