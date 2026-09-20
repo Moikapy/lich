@@ -155,16 +155,16 @@ export function parse_irc_line(line: string): ParsedLine {
 
 function match_privmsg(line: string): ParsedLine | undefined {
   const without_tags = line.startsWith("@") === true ? line.slice(line.indexOf(" ") + 1) : line;
-  const body = / PRIVMSG #([\w]+) :/.exec(without_tags);
-  if (body === null || body.index < 0) {
+  const matched = /^:(\w+)!\S+ PRIVMSG #(\w+) :(.*)$/.exec(without_tags);
+  if (matched === null) {
     return undefined;
   }
-  const prefix = without_tags.slice(0, body.index);
-  const ident = prefix.startsWith(":") === true ? prefix.slice(1) : prefix;
-  const user = ident.slice(ident.lastIndexOf("!") + 1).split("@")[0] ?? "";
-  const channel = body[1] ?? "";
-  const text = without_tags.slice(body.index + body[0].length);
-  return { kind: "privmsg", channel, user, text };
+  return {
+    kind: "privmsg",
+    user: matched[1] ?? "",
+    channel: matched[2] ?? "",
+    text: matched[3] ?? "",
+  };
 }
 
 function split_chunks(text: string, limit: number): string[] {

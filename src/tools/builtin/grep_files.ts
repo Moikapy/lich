@@ -2,7 +2,14 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { JsonSchemaObject } from "../../util/json_schema.js";
-import { capture_errors, optional_number_arg, optional_string_arg, require_string_arg, resolve_safe_path } from "../guard.js";
+import {
+  assert_file_tool_access,
+  capture_errors,
+  optional_number_arg,
+  optional_string_arg,
+  require_string_arg,
+  resolve_safe_path,
+} from "../guard.js";
 import type { Tool, ToolContext } from "../types.js";
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".lich", ".cursor"]);
@@ -103,7 +110,7 @@ async function scan_dir(
     return { files, dirs };
   }
   for (const entry of entries) {
-    if (SKIP_DIRS.has(entry.name) === true) {
+    if (SKIP_DIRS.has(entry.name) === true || entry.isSymbolicLink() === true) {
       continue;
     }
     const full = path.join(frame.dir, entry.name);
@@ -116,19 +123,34 @@ async function scan_dir(
   return { files, dirs };
 }
 
+/** Re-check confinement and deny lists before reading a candidate path. */
+function guard_grep_target(work_dir: string, absolute: string): string {
+  const relative = path.relative(work_dir, absolute);
+  const safe = resolve_safe_path(work_dir, relative);
+  assert_file_tool_access(work_dir, safe, "read");
+  return safe;
+}
+
 async function search_file(
   frame: StackFrame,
+  work_dir: string,
   relative_root: string,
   regex: RegExp,
   collected: string[],
   max_results: number,
 ): Promise<boolean> {
-  const size = await file_size(frame.dir);
-  const lines = await read_if_text(frame.dir, size);
+  let safe: string;
+  try {
+    safe = guard_grep_target(work_dir, frame.dir);
+  } catch {
+    return false;
+  }
+  const size = await file_size(safe);
+  const lines = await read_if_text(safe, size);
   if (lines === undefined) {
     return false;
   }
-  const relative = path.relative(relative_root, frame.dir);
+  const relative = path.relative(relative_root, safe);
   for (const hit of match_lines(lines, regex)) {
     collected.push(`${relative}:${hit.line_no}: ${hit.text}`);
     if (collected.length >= max_results) {
@@ -138,7 +160,13 @@ async function search_file(
   return false;
 }
 
-async function search_tree(root: string, regex: RegExp, matcher: (name: string) => boolean, max_results: number): Promise<string[]> {
+async function search_tree(
+  root: string,
+  work_dir: string,
+  regex: RegExp,
+  matcher: (name: string) => boolean,
+  max_results: number,
+): Promise<string[]> {
   const collected: string[] = [];
   const stack: StackFrame[] = [{ dir: root, name: root }];
   while (stack.length > 0 && collected.length < max_results) {
@@ -148,7 +176,7 @@ async function search_tree(root: string, regex: RegExp, matcher: (name: string) 
     }
     const found = await scan_dir(frame, matcher);
     for (const file of found.files) {
-      const hit_cap = await search_file(file, root, regex, collected, max_results);
+      const hit_cap = await search_file(file, work_dir, root, regex, collected, max_results);
       if (hit_cap === true) {
         break;
       }
@@ -171,17 +199,31 @@ function finalize_output(matches: string[], max_results: number): string {
 
 function search_file_direct(
   file_path: string,
+  work_dir: string,
   regex: RegExp,
   collected: string[],
   max_results: number,
 ): Promise<boolean> {
-  return search_file({ dir: file_path, name: path.basename(file_path) }, path.dirname(file_path), regex, collected, max_results);
+  return search_file(
+    { dir: file_path, name: path.basename(file_path) },
+    work_dir,
+    path.dirname(file_path),
+    regex,
+    collected,
+    max_results,
+  );
 }
 
-async function collect_file_matches(root: string, regex: RegExp, matcher: (name: string) => boolean, max_results: number): Promise<string[]> {
+async function collect_file_matches(
+  root: string,
+  work_dir: string,
+  regex: RegExp,
+  matcher: (name: string) => boolean,
+  max_results: number,
+): Promise<string[]> {
   const collected: string[] = [];
   if (matcher(path.basename(root)) === true) {
-    await search_file_direct(root, regex, collected, max_results);
+    await search_file_direct(root, work_dir, regex, collected, max_results);
   }
   return collected;
 }
@@ -199,11 +241,13 @@ async function run_grep(args: Record<string, unknown>, work_dir: string): Promis
   }
   const matcher = glob.length > 0 ? glob_matcher(glob) : () => true;
   const root = resolve_safe_path(work_dir, target);
+  assert_file_tool_access(work_dir, root, "read");
   const root_stat = await stat(root);
   const cap = max_results + 1;
-  const matches = root_stat.isDirectory() === true
-    ? await search_tree(root, regex, matcher, cap)
-    : await collect_file_matches(root, regex, matcher, cap);
+  const matches =
+    root_stat.isDirectory() === true
+      ? await search_tree(root, work_dir, regex, matcher, cap)
+      : await collect_file_matches(root, work_dir, regex, matcher, cap);
   return finalize_output(matches, max_results);
 }
 

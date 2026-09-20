@@ -21,13 +21,15 @@ function fake_response(body: string, init: { status?: number; headers?: Record<s
 
 const real_fetch: typeof fetch = globalThis.fetch;
 
-/** Assign mock_fn as the global fetch; restore_fetch() undoes it. */
+/** Stub both url_guard (safe_fetch) and global fetch (web_search). */
 function stub_fetch(mock_fn: typeof fetch): void {
+  set_url_guard_fetch(mock_fn);
   globalThis.fetch = mock_fn as typeof fetch;
 }
 
-/** Restore the real global fetch captured before any stubbing. */
+/** Restore both fetch seams. */
 function restore_fetch(): void {
+  reset_url_guard_fetch();
   globalThis.fetch = real_fetch;
 }
 
@@ -132,6 +134,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restore_fetch();
+  reset_url_guard_fetch();
   vi.restoreAllMocks();
   delete process.env.LICH_TEST_SECRET_1;
   delete process.env.LICH_TEST_PLAIN;
@@ -216,6 +219,18 @@ describe("fetch_url", () => {
     expect(result.ok).toBe(false);
     expect(result.error?.startsWith("blocked_url")).toBe(true);
     expect(fetch_mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the https hostname in the URL handed to fetch (TLS/SNI)", async () => {
+    const fetch_mock = vi.fn(async (_input: string | URL | Request) =>
+      fake_response("zen", { headers: { "content-type": "text/plain" } }),
+    );
+    stub_fetch(fetch_mock);
+    const result = await executor.execute("fetch_url", { url: "https://example.com/zen" });
+    expect(result.ok).toBe(true);
+    const called = fetch_mock.mock.calls[0] as unknown as [string] | undefined;
+    expect(called?.[0]).toBe("https://example.com/zen");
+    expect(String(called?.[0])).not.toMatch(/93\.184\.216\.34/);
   });
 });
 

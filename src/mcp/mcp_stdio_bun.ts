@@ -35,7 +35,6 @@ export function bun_line_child(command: string, args: readonly string[], env?: R
   try {
     const options = { stdin: "pipe" as const, stdout: "pipe" as const, stderr: "pipe" as const };
     const child = env === undefined ? Bun.spawn([command, ...args], options) : Bun.spawn([command, ...args], { ...options, env });
-    child.unref();
     void pump_stdout(child.stdout, queue);
     void drain_stderr(child.stderr);
     return {
