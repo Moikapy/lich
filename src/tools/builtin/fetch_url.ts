@@ -1,6 +1,7 @@
 import type { JsonSchemaObject } from "../../util/json_schema.js";
 import { capture_errors, clamp_output, optional_number_arg, require_string_arg } from "../guard.js";
 import type { Tool, ToolResult } from "../types.js";
+import { parse_http_url, safe_fetch } from "../url_guard.js";
 
 const DEFAULT_MAX_CHARS = 20000;
 const MAX_MAX_CHARS = 100000;
@@ -27,15 +28,7 @@ export function clamp_int_arg(args: Record<string, unknown>, key: string, fallba
 
 /** Reject malformed and non-http(s) URLs (file:, ftp:, data:, ...) with invalid_url. */
 export function valid_http_url(raw: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new Error(`invalid_url: ${raw}`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`invalid_url: unsupported protocol ${parsed.protocol}`);
-  }
+  parse_http_url(raw);
 }
 
 /** Compose the per-call timeout signal with the executor's cancellation signal. */
@@ -49,8 +42,7 @@ async function run_fetch_url(args: Record<string, unknown>, external?: AbortSign
   valid_http_url(url);
   const max_chars = clamp_int_arg(args, "max_chars", DEFAULT_MAX_CHARS, MAX_MAX_CHARS);
   const timeout_ms = clamp_int_arg(args, "timeout_ms", DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
-  const response = await fetch(url, {
-    redirect: "follow",
+  const response = await safe_fetch(url, {
     headers: { "user-agent": USER_AGENT },
     signal: compose_abort_signal(timeout_ms, external),
   });

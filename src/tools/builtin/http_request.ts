@@ -1,6 +1,7 @@
 import type { JsonSchemaObject } from "../../util/json_schema.js";
 import { capture_errors, clamp_output, optional_string_arg, require_string_arg } from "../guard.js";
 import type { Tool, ToolResult } from "../types.js";
+import { safe_fetch } from "../url_guard.js";
 import { clamp_int_arg, compose_abort_signal, valid_http_url } from "./fetch_url.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -67,7 +68,6 @@ async function run_http(args: Record<string, unknown>, external?: AbortSignal): 
   const init: RequestInit = {
     method,
     headers: read_headers(args),
-    redirect: "follow",
     signal: compose_abort_signal(timeout_ms, external),
   };
   if (method !== "GET" && method !== "HEAD") {
@@ -76,7 +76,7 @@ async function run_http(args: Record<string, unknown>, external?: AbortSignal): 
       init.body = body;
     }
   }
-  const response = await fetch(url, init);
+  const response = await safe_fetch(url, init);
   const content_type = response.headers.get("content-type") ?? "unknown";
   const text = await response.text();
   const sections = [

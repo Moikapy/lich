@@ -4,7 +4,8 @@ import type { Tool } from "../types.js";
 
 const MAX_KEYS = 50;
 const MAX_VALUE_CHARS = 2000;
-const SECRET_PATTERN = /(secret|token|password|key|credential|auth)/i;
+/** Name pattern treated as secret by env_get and terminal env scrubbing. */
+export const SECRET_PATTERN = /(secret|token|password|key|credential|auth)/i;
 
 const parameters: JsonSchemaObject = {
   type: "object",
