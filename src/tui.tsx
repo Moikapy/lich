@@ -10,8 +10,12 @@ import { load_theme } from "./util/theme.js";
 
 export async function run_tui(config: AgentConfig): Promise<number> {
   const agent = await create_agent_with_plugins(config);
-  const theme = load_theme(config.theme);
-  const instance = render(<TuiApp agent={agent} theme={theme} />);
-  await instance.waitUntilExit();
-  return 0;
+  try {
+    const theme = load_theme(config.theme);
+    const instance = render(<TuiApp agent={agent} theme={theme} />);
+    await instance.waitUntilExit();
+    return 0;
+  } finally {
+    agent.close();
+  }
 }

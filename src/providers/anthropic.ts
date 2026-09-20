@@ -21,6 +21,7 @@ const MAX_ERROR_BODY_CHARS = 500;
 const OVERFLOW_BODY_PATTERN = /context|token|maximum/i;
 const OVERLOADED_STATUS = 529;
 const UNPARSEABLE_ARGS_NOTE = "[unparseable tool arguments]";
+const EMPTY_TEXT_PLACEHOLDER = "(empty)";
 const MAX_TOKENS_FLOOR = 1;
 const DEFAULT_MAX_TOKENS = 4096;
 
@@ -212,7 +213,7 @@ function to_anthropic_turns(messages: readonly Message[]): AnthropicTurnDto[] {
     }
     flush_tool_results(turns, pending_tool_results);
     if (message.role === "user") {
-      turns.push({ role: "user", content: [{ type: "text", text: message.content }] });
+      turns.push({ role: "user", content: [text_block(message.content)] });
     } else {
       turns.push({ role: "assistant", content: assistant_to_blocks(message) });
     }
@@ -231,11 +232,15 @@ function flush_tool_results(
   turns.push({ role: "user", content: pending_tool_results.splice(0, pending_tool_results.length) });
 }
 
+function text_block(text: string): { type: "text"; text: string } {
+  return { type: "text", text: text.length > 0 ? text : EMPTY_TEXT_PLACEHOLDER };
+}
+
 function tool_message_to_block(message: Extract<Message, { role: "tool" }>): AnthropicContentBlockDto {
   const block: AnthropicContentBlockDto = {
     type: "tool_result",
     tool_use_id: message.tool_call_id,
-    content: [{ type: "text", text: message.content }],
+    content: [text_block(message.content)],
   };
   if (message.is_error === true) {
     return { ...block, is_error: true };
@@ -252,7 +257,7 @@ function assistant_to_blocks(message: AssistantMessage): AnthropicContentBlockDt
     blocks.push({ type: "tool_use", id: tool_call.id, name: tool_call.name, input: tool_call.args });
   }
   if (blocks.length === 0) {
-    blocks.push({ type: "text", text: "" });
+    blocks.push(text_block(""));
   }
   return blocks;
 }

@@ -23,6 +23,7 @@ export function node_line_child(command: string, args: readonly string[], env?: 
   const queue = create_line_queue();
   let failure: string | undefined;
   const child = spawn(command, [...args], { stdio: ["pipe", "pipe", "pipe"], env: child_env(env) });
+  child.unref();
   const reader = createInterface({ input: child.stdout });
   reader.on("line", (line) => {
     queue.push(line);

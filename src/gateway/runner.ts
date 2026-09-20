@@ -34,9 +34,9 @@ export async function run_gateway(config: AgentConfig, platforms: readonly strin
     process.stderr.write("lich: gateway needs at least one valid platform (webhook|telegram|discord|twitch)\n");
     return 1;
   }
-  const { bus } = await create_gateway_bus(config);
+  const { agent, bus } = await create_gateway_bus(config);
   const adapters = build_adapters(config, bus, valid);
-  install_signal_handlers(bus, adapters);
+  install_signal_handlers(agent, bus, adapters);
   logger.info(`gateway starting: platforms=${valid.join(",")}, port=${process.env.LICH_GATEWAY_PORT ?? "8089"}, pid=${process.pid}`);
   await start_all_adapters(adapters);
   return await new Promise<number>(() => undefined);
@@ -109,7 +109,7 @@ async function start_all_adapters(adapters: readonly PlatformAdapter[]): Promise
   }
 }
 
-function install_signal_handlers(bus: GatewayBus, adapters: readonly PlatformAdapter[]): void {
+function install_signal_handlers(agent: Agent, bus: GatewayBus, adapters: readonly PlatformAdapter[]): void {
   const shutdown = (): void => {
     for (const adapter of adapters) {
       void adapter
@@ -117,6 +117,7 @@ function install_signal_handlers(bus: GatewayBus, adapters: readonly PlatformAda
         .catch((error: unknown) => logger.warn(`gateway adapter stop failed: ${adapter.name}`, error));
     }
     bus.stop();
+    agent.close();
     process.exit(0);
   };
   process.once("SIGINT", shutdown);

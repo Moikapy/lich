@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 (unreleased)
+## 0.7.0
 
 - add a general MCP client. `mcp_servers` is a closed record of named
   stdio or loopback-http entries, default off. tool names are
@@ -14,10 +14,7 @@
   add uses the catalog or `--command`/`--url`, stays disabled, and
   updates `.lich/config.json` through the existing writer without
   dropping other keys.
-- sync user docs with this tree. the published package is 0.6.0
-  (`lich --version` reads package.json). MCP commands are not in that
-  package. CLI, config, plugin load, and sidebar links match the code.
-  0.7.0 is not released.
+- sync user docs with this tree. MCP is included in the 0.7.0 package.
 
 ## 0.6.0
 

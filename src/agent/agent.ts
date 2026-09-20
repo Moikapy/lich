@@ -5,6 +5,7 @@
 import type { ChatFn } from "../context/compressor.js";
 import { register_builtin_tools } from "../tools/builtin/index.js";
 import { attach_enabled_mcp_tools, type McpRuntime } from "../mcp/mcp_tools.js";
+import type { McpSession } from "../mcp/mcp_session.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { HookedToolRunner } from "../plugins/hooks.js";
@@ -125,6 +126,7 @@ export class Agent {
   private readonly executor: ToolExecutor | HookedToolRunner;
   private readonly hook_runner: HookedToolRunner | undefined;
   private readonly mcp_runtime: McpRuntime | undefined;
+  private mcp_sessions: McpSession[] = [];
   private mcp_attached = false;
 
   constructor(config: AgentConfig, plugins: readonly LoadedPlugin[] = [], runtime?: { mcp?: McpRuntime }) {
@@ -190,13 +192,21 @@ export class Agent {
     return { outcome, messages: outcome.messages, usage_total, session_path };
   }
 
+  /** Close MCP sessions so stdio children do not keep the event loop alive. */
+  close(): void {
+    for (const session of this.mcp_sessions) {
+      session.close();
+    }
+    this.mcp_sessions = [];
+  }
+
   /** tools/list once, before the model sees definitions. Empty allowlists never connect. */
   private async attach_mcp_once(): Promise<void> {
     if (this.mcp_attached === true) {
       return;
     }
     this.mcp_attached = true;
-    await attach_enabled_mcp_tools(this.registry, this.config, this.mcp_runtime);
+    this.mcp_sessions = await attach_enabled_mcp_tools(this.registry, this.config, this.mcp_runtime);
   }
 
   /** Per-run deps: the built-once ToolContext threads through every tool execution. */
@@ -275,5 +285,9 @@ export async function run_agent(
   options?: { signal?: AbortSignal; label?: string },
 ): Promise<AgentRunResult> {
   const agent = await create_agent_with_plugins(raw_config);
-  return agent.run({ input, signal: options?.signal, label: options?.label });
+  try {
+    return await agent.run({ input, signal: options?.signal, label: options?.label });
+  } finally {
+    agent.close();
+  }
 }

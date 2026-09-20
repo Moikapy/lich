@@ -249,7 +249,7 @@ function build_config(options: CliOptions): AgentConfig {
   apply_overrides(base, options.overrides);
   const providers = base["providers"];
   if (Array.isArray(providers) === false || providers.length === 0) {
-    throw new Error("no model configured: set LICH_MODEL, pass --model, or create .lich/config.json (`lich config` prints a template)");
+    base["providers"] = [env_provider(options.overrides)];
   }
   return parse_agent_config(base);
 }
@@ -289,6 +289,7 @@ export async function run_one_shot(config: unknown, input: string): Promise<numb
     result = await agent.run({ input });
   } finally {
     stop_progress();
+    agent.close();
   }
   const final = result.outcome.final;
   if (final !== undefined && final.content.length > 0) {
@@ -357,6 +358,7 @@ export async function run_chat(config: unknown): Promise<number> {
     }
   } finally {
     rl.close();
+    agent.close();
   }
 }
 

@@ -398,4 +398,47 @@ describe("anthropic provider", () => {
       }
     }
   });
+
+  it("never emits empty text blocks for blank user, tool, or assistant content", async () => {
+    const { fetch_fn, requests } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        model: "claude-test",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    await provider.chat(
+      [
+        { role: "user", content: "" },
+        { role: "assistant", content: "" },
+        { role: "user", content: "retry" },
+        { role: "assistant", content: "", tool_calls: [{ id: "call_1", name: "list_dir", args: { path: "/" } }] },
+        { role: "tool", tool_call_id: "call_1", name: "list_dir", content: "" },
+      ],
+      [SAMPLE_TOOL],
+    );
+    const body = request_json(requests[0]!);
+    expect(as_array(body["messages"])).toEqual([
+      { role: "user", content: [{ type: "text", text: "(empty)" }] },
+      { role: "assistant", content: [{ type: "text", text: "(empty)" }] },
+      { role: "user", content: [{ type: "text", text: "retry" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "call_1", name: "list_dir", input: { path: "/" } }],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_1",
+            content: [{ type: "text", text: "(empty)" }],
+          },
+        ],
+      },
+    ]);
+  });
 });
