@@ -64,8 +64,8 @@ function before_info(tool_name: string, args: Record<string, unknown>): BeforeTo
   return { tool_name, args };
 }
 
-function after_info(tool_name: string, ok: boolean): AfterToolCallInfo {
-  return { tool_name, args: {}, result_summary: "", ok };
+function after_info(tool_name: string, ok: boolean, args: Record<string, unknown> = {}): AfterToolCallInfo {
+  return { tool_name, args, result_summary: "", ok };
 }
 
 beforeEach(async () => {
@@ -145,6 +145,15 @@ describe("gatekeeper plugin", () => {
     expect(state.get("dirty")).toBe(false);
     await plugin.hooks?.after_tool_call?.(after_info("git_commit", true), ctx_for(state));
     expect(state.get("commits")).toBe(1);
+  });
+
+  it("does not set tests_ok when run_tests used a filter", async () => {
+    const plugin = gatekeeper_plugin(true);
+    const state = new Map<string, unknown>();
+    await plugin.hooks?.on_run_start?.({ input_chars: 1 }, ctx_for(state));
+    await plugin.hooks?.after_tool_call?.(after_info("run_tests", true, { filter: "test/one.test.ts" }), ctx_for(state));
+    expect(state.get("tests_ok")).toBe(false);
+    expect(state.get("dirty")).toBe(true);
   });
 
   it("ignores failed tool calls in after_tool_call", async () => {

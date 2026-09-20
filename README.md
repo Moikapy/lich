@@ -15,7 +15,7 @@ mythology lives in display strings only.
 | --- | --- | --- |
 | **phylacteries** | JSONL session files in `.lich/sessions/` — conversations survive process death | This glossary; TUI `/sessions` listing label |
 | **vessel-hopping** | Provider failover: 429/5xx retried with backoff, then the next provider takes over | This glossary |
-| **the lair / wards** | `work_dir` confinement + `path_escape` guardrails | This glossary |
+| **the lair / wards** | `work_dir` confinement + `path_escape` guardrails for file tools. Wards do **not** apply to `terminal` or `run_tests` (shell still runs in `work_dir`; secret env names are scrubbed on spawn). | This glossary |
 | **lair actions** | Plugin hooks that observe or veto tool calls | This glossary |
 | **familiars** | Gateway adapters (webhook/telegram/discord/twitch) routing into one shared agent | This glossary |
 | **spells** | Builtin tools in the registry | This glossary |

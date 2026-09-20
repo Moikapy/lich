@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { truncate_text } from "../util/json.js";
 import type { ToolResult } from "./types.js";
@@ -5,19 +6,86 @@ import type { ToolResult } from "./types.js";
 export const DEFAULT_MAX_OUTPUT_CHARS = 20000;
 export const DEFAULT_TOOL_TIMEOUT_MS = 30000;
 
+/** True when `candidate` is `base` or a descendant (lexical). */
+function is_inside(base: string, candidate: string): boolean {
+  const relative = path.relative(base, candidate);
+  return relative.startsWith("..") === false && path.isAbsolute(relative) === false;
+}
+
+/** Walk up from `target` until an existing path is found (non-recursive). */
+function deepest_existing(target: string): string {
+  let current = target;
+  while (fs.existsSync(current) === false) {
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return current;
+    }
+    current = parent;
+  }
+  return current;
+}
+
 /**
  * Resolve `target` against `base_dir` and confine it inside `base_dir`.
- * Absolute targets are respected but must still land inside the base.
- * Throws `path_escape` on any attempt to leave the base directory.
+ * After the lexical check, realpath the deepest existing ancestor and the base,
+ * then re-test containment. When `for_write` is set, reject symlink leaves.
  */
-export function resolve_safe_path(base_dir: string, target: string): string {
+export function resolve_safe_path(base_dir: string, target: string, for_write = false): string {
   const base = path.resolve(base_dir);
   const resolved = path.resolve(base, target);
-  const relative = path.relative(base, resolved);
-  if (relative.startsWith("..") === true || path.isAbsolute(relative) === true) {
+  if (is_inside(base, resolved) === false) {
     throw new Error(`path_escape: ${target} escapes ${base_dir}`);
   }
-  return resolved;
+  const real_base = fs.realpathSync(base);
+  const existing = deepest_existing(resolved);
+  const real_existing = fs.realpathSync(existing);
+  const suffix = path.relative(existing, resolved);
+  const real_resolved = suffix.length === 0 ? real_existing : path.resolve(real_existing, suffix);
+  if (is_inside(real_base, real_resolved) === false) {
+    throw new Error(`path_escape: ${target} escapes ${base_dir}`);
+  }
+  if (for_write === true) {
+    reject_symlink_leaf(resolved, target, base_dir);
+  }
+  return real_resolved;
+}
+
+/** Writes must not follow a symlink leaf (create/overwrite only regular paths). */
+function reject_symlink_leaf(resolved: string, target: string, base_dir: string): void {
+  let info: fs.Stats;
+  try {
+    info = fs.lstatSync(resolved);
+  } catch (err) {
+    if (is_enoent(err) === true) {
+      return;
+    }
+    throw err;
+  }
+  if (info.isSymbolicLink() === true) {
+    throw new Error(`path_escape: ${target} escapes ${base_dir}`);
+  }
+}
+
+/**
+ * Deny `.lich/config.json` to file tools; allow `.lich/` writes only under
+ * `skills/`; deny `.env*` basenames on writes.
+ */
+export function assert_file_tool_access(work_dir: string, resolved: string, mode: "read" | "write"): void {
+  const base = fs.realpathSync(path.resolve(work_dir));
+  const rel = path.relative(base, resolved);
+  const parts = rel.split(path.sep).filter((part) => part.length > 0);
+  if (parts[0] === ".lich" && parts[1] === "config.json" && parts.length === 2) {
+    throw new Error("forbidden_path: .lich/config.json");
+  }
+  if (mode === "write" && parts[0] === ".lich" && parts[1] !== "skills") {
+    throw new Error("forbidden_path: .lich writes limited to skills/");
+  }
+  if (mode === "write") {
+    const base = path.basename(resolved);
+    if (base === ".env" || base.startsWith(".env.")) {
+      throw new Error("forbidden_path: .env*");
+    }
+  }
 }
 
 /** Read a required non-empty string argument, or throw `missing_arg`. */

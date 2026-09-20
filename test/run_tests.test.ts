@@ -86,6 +86,15 @@ describe("run_tests", () => {
     expect(calls[0]?.command).toContain("node_modules/vitest/vitest.mjs run");
   });
 
+  it("rejects filters that start with a dash", async () => {
+    const { calls, runner } = recording_runner({ exit_code: 0 });
+    set_test_command_runner(runner);
+    const result = await executor.execute("run_tests", { filter: "--help" }, { work_dir: tmp_root, env: {} });
+    expect(result.ok).toBe(false);
+    expect(result.error?.startsWith("invalid_filter")).toBe(true);
+    expect(calls.length).toBe(0);
+  });
+
   it("appends the filter argument to the command", async () => {
     const { calls, runner } = recording_runner({ exit_code: 0 });
     set_test_command_runner(runner);

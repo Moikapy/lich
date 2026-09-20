@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import type { JsonSchemaObject } from "../../util/json_schema.js";
 import { capture_errors, clamp_output, optional_string_arg } from "../guard.js";
 import type { Tool, ToolContext, ToolResult } from "../types.js";
+import { scrub_spawn_env } from "./terminal.js";
 
 const MAX_OUTPUT_CHARS = 2000;
 const DEFAULT_TEST_COMMAND = "node node_modules/vitest/vitest.mjs run";
@@ -37,7 +38,7 @@ function default_runner(
 ): Promise<{ exit_code: number }> {
   const child = spawn("bash", ["-lc", command], {
     cwd,
-    env: process.env,
+    env: scrub_spawn_env(process.env, {}),
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout?.on("data", (chunk: Buffer) => on_chunk("stdout", chunk));
@@ -82,6 +83,9 @@ export const run_tests_tool: Tool = {
       busy = true;
       try {
         const filter = optional_string_arg(args, "filter", "");
+        if (filter.startsWith("-") === true) {
+          return { ok: false, output: "", error: "invalid_filter: must not start with -" } satisfies ToolResult;
+        }
         const command = build_command(filter === "" ? undefined : filter, context.env);
         const streams = { stdout: "", stderr: "" };
         const on_chunk = (stream: "stdout" | "stderr", chunk: Buffer): void => {

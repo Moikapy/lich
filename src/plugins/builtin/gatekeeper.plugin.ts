@@ -254,8 +254,12 @@ function gatekeeper_hooks(allow_self_commit: boolean): PluginHooks {
       if (info.tool_name === "write_file" || info.tool_name === "edit_file") {
         ctx.state?.set("dirty", true);
       } else if (info.tool_name === "run_tests") {
-        ctx.state?.set("tests_ok", true);
-        ctx.state?.set("dirty", false);
+        const filter = info.args["filter"];
+        const filtered = typeof filter === "string" && filter.length > 0;
+        if (filtered === false) {
+          ctx.state?.set("tests_ok", true);
+          ctx.state?.set("dirty", false);
+        }
       } else if (info.tool_name === "git_commit") {
         ctx.state?.set("commits", state_count(ctx, "commits") + 1);
       }

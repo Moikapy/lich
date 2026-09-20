@@ -1,6 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { JsonSchemaObject } from "../../util/json_schema.js";
-import { capture_errors, is_enoent, optional_boolean_arg, require_string_arg, resolve_safe_path } from "../guard.js";
+import {
+  assert_file_tool_access,
+  capture_errors,
+  is_enoent,
+  optional_boolean_arg,
+  require_string_arg,
+  resolve_safe_path,
+} from "../guard.js";
 import type { Tool } from "../types.js";
 
 const parameters: JsonSchemaObject = {
@@ -33,7 +40,8 @@ async function apply_edit(
   new_string: string,
   replace_all: boolean,
 ): Promise<{ output: string; replaced: number }> {
-  const file_path = resolve_safe_path(work_dir, target);
+  const file_path = resolve_safe_path(work_dir, target, true);
+  assert_file_tool_access(work_dir, file_path, "write");
   let content: string;
   try {
     content = await readFile(file_path, "utf8");

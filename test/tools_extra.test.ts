@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import dns from "node:dns/promises";
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
@@ -8,6 +9,7 @@ import { register_builtin_tools } from "../src/tools/builtin/index.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 import { ToolExecutor } from "../src/tools/executor.js";
 import { ToolRegistry } from "../src/tools/registry.js";
+import { is_blocked_ip, reset_url_guard_fetch, set_url_guard_fetch } from "../src/tools/url_guard.js";
 
 let tmp_root: string;
 let executor: ToolExecutor;
@@ -120,6 +122,12 @@ beforeAll(async () => {
 beforeEach(() => {
   process.env.LICH_TEST_SECRET_1 = "hush-hush";
   process.env.LICH_TEST_PLAIN = "plain-value";
+  vi.spyOn(dns, "lookup").mockImplementation(async (_hostname: string, options?: unknown) => {
+    if (typeof options === "object" && options !== null && (options as { all?: boolean }).all === true) {
+      return [{ address: "93.184.216.34", family: 4 }] as never;
+    }
+    return { address: "93.184.216.34", family: 4 } as never;
+  });
 });
 
 afterEach(() => {
@@ -179,11 +187,35 @@ describe("fetch_url", () => {
 
   it("converts fetch failures into ok:false with a message", async () => {
     stub_fetch(vi.fn(async () => {
-      throw new Error("connect ECONNREFUSED 127.0.0.1:1");
+      throw new Error("connect ECONNREFUSED 93.184.216.34:1");
     }));
-    const result = await executor.execute("fetch_url", { url: "https://127.0.0.1:1/x" });
+    const result = await executor.execute("fetch_url", { url: "https://example.com:1/x" });
     expect(result.ok).toBe(false);
     expect(result.error?.includes("ECONNREFUSED")).toBe(true);
+  });
+
+  it("blocks loopback, link-local, and private URLs before fetch", async () => {
+    const fetch_mock = vi.fn(async () => fake_response("nope"));
+    stub_fetch(fetch_mock);
+    for (const url of ["http://127.0.0.1/", "http://169.254.169.254/latest", "http://10.0.0.1/", "http://[::1]/"]) {
+      const result = await executor.execute("fetch_url", { url });
+      expect(result.ok).toBe(false);
+      expect(result.error?.startsWith("blocked_url")).toBe(true);
+    }
+    expect(fetch_mock).not.toHaveBeenCalled();
+    expect(is_blocked_ip("192.168.1.1")).toBe(true);
+    expect(is_blocked_ip("8.8.8.8")).toBe(false);
+  });
+
+  it("revalidates redirect hops and refuses a private Location", async () => {
+    const fetch_mock = vi.fn(async () =>
+      fake_response("", { status: 302, headers: { location: "http://127.0.0.1/secret", "content-type": "text/plain" } }),
+    );
+    stub_fetch(fetch_mock);
+    const result = await executor.execute("fetch_url", { url: "https://example.com/start" });
+    expect(result.ok).toBe(false);
+    expect(result.error?.startsWith("blocked_url")).toBe(true);
+    expect(fetch_mock).toHaveBeenCalledTimes(1);
   });
 });
 
