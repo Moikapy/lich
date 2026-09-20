@@ -268,8 +268,8 @@ describe("http_request", () => {
     expect(call !== undefined).toBe(true);
     const init = call?.[1];
     expect(init?.method).toBe("POST");
-    const headers = init?.headers as Record<string, string> | undefined;
-    expect(headers?.["content-type"]).toBe("application/json");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
     expect(init?.body).toBe('{"name":"test"}');
     expect(result.output.includes("# status 200")).toBe(true);
     expect(result.output.includes("# content-type application/json")).toBe(true);

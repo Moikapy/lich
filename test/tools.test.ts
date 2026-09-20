@@ -433,14 +433,16 @@ describe("forbidden file paths", () => {
     expect(write.error?.startsWith("forbidden_path")).toBe(true);
   });
 
-  it("allows writes under .lich/skills and denies other .lich writes and .env*", async () => {
+  it("allows writes under .lich/skills and .lich/plugins; denies other .lich writes and .env*", async () => {
     const registry = new ToolRegistry();
     register_builtin_tools(registry);
     const executor = make_executor(registry);
     const skill = await executor.execute("write_file", { path: ".lich/skills/demo.md", content: "# demo\n" });
     expect(skill.ok).toBe(true);
-    const plugin = await executor.execute("write_file", { path: ".lich/plugins/evil.ts", content: "export default {}\n" });
-    expect(plugin.error?.startsWith("forbidden_path")).toBe(true);
+    const plugin = await executor.execute("write_file", { path: ".lich/plugins/greet.ts", content: "export default {}\n" });
+    expect(plugin.ok).toBe(true);
+    const other = await executor.execute("write_file", { path: ".lich/sessions/x.jsonl", content: "{}\n" });
+    expect(other.error?.startsWith("forbidden_path")).toBe(true);
     const env_file = await executor.execute("write_file", { path: ".env", content: "X=1\n" });
     expect(env_file.error?.startsWith("forbidden_path")).toBe(true);
     const env_local = await executor.execute("write_file", { path: ".env.local", content: "X=1\n" });

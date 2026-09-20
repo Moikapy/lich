@@ -68,7 +68,7 @@ function reject_symlink_leaf(resolved: string, target: string, base_dir: string)
 
 /**
  * Deny `.lich/config.json` to file tools; allow `.lich/` writes only under
- * `skills/`; deny `.env*` basenames on writes.
+ * `skills/` and `plugins/`; deny `.env*` basenames on writes.
  */
 export function assert_file_tool_access(work_dir: string, resolved: string, mode: "read" | "write"): void {
   const base = fs.realpathSync(path.resolve(work_dir));
@@ -77,12 +77,15 @@ export function assert_file_tool_access(work_dir: string, resolved: string, mode
   if (parts[0] === ".lich" && parts[1] === "config.json" && parts.length === 2) {
     throw new Error("forbidden_path: .lich/config.json");
   }
-  if (mode === "write" && parts[0] === ".lich" && parts[1] !== "skills") {
-    throw new Error("forbidden_path: .lich writes limited to skills/");
+  if (mode === "write" && parts[0] === ".lich") {
+    const allowed = parts[1] === "skills" || parts[1] === "plugins";
+    if (allowed === false) {
+      throw new Error("forbidden_path: .lich writes limited to skills/ and plugins/");
+    }
   }
   if (mode === "write") {
-    const base = path.basename(resolved);
-    if (base === ".env" || base.startsWith(".env.")) {
+    const leaf = path.basename(resolved);
+    if (leaf === ".env" || leaf.startsWith(".env.")) {
       throw new Error("forbidden_path: .env*");
     }
   }
