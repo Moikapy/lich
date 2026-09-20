@@ -134,7 +134,7 @@ describe("gateway bus", () => {
   });
 
   it("drops leading non-user messages after a history cap slice (G-7)", async () => {
-    const work_dir = mkdtempSync(join(tmpdir(), "lich-gw-"));
+    const work_dir = temp_work_dir();
     try {
       const records: RunRecord[] = [];
       let runs = 0;
