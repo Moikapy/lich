@@ -142,4 +142,41 @@ describe("lich mcp", () => {
     const empty = await capture(["--work-dir", work_dir, "mcp", "list"]);
     expect(empty).toEqual({ code: 0, out: "" });
   });
+
+  it("falls back to LICH_MODEL when project config has only mcp_servers", async () => {
+    const work_dir = await temp_dir("mcp-env-fallback");
+    await write_config(work_dir, {
+      mcp_servers: {
+        lab: { enabled: false, command: "echo", args: ["hi"] },
+      },
+    });
+    const saved_model = process.env.LICH_MODEL;
+    const saved_kind = process.env.LICH_PROVIDER_KIND;
+    const saved_key = process.env.ANTHROPIC_API_KEY;
+    process.env.LICH_MODEL = "env-fallback-model";
+    process.env.LICH_PROVIDER_KIND = "anthropic";
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      const failure = await run_cli(["--work-dir", work_dir, "hi"]).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(String(failure)).not.toMatch(/no model configured/);
+      expect(String(failure)).toMatch(/api key|auth/i);
+    } finally {
+      if (saved_model === undefined) {
+        delete process.env.LICH_MODEL;
+      } else {
+        process.env.LICH_MODEL = saved_model;
+      }
+      if (saved_kind === undefined) {
+        delete process.env.LICH_PROVIDER_KIND;
+      } else {
+        process.env.LICH_PROVIDER_KIND = saved_kind;
+      }
+      if (saved_key === undefined) {
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        process.env.ANTHROPIC_API_KEY = saved_key;
+      }
+    }
+  });
 });

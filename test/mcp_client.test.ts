@@ -121,7 +121,11 @@ async function visible_tools(raw: Record<string, unknown>, spawn?: LineSpawner):
     providers: [{ ...providers[0], base_url: "http://127.0.0.1:9", fetch_fn }],
     log_level: "error",
   }), [], spawn === undefined ? undefined : { mcp: { spawn } });
-  await agent.run({ input: "ping" });
+  try {
+    await agent.run({ input: "ping" });
+  } finally {
+    agent.close();
+  }
   return seen;
 }
 
@@ -315,6 +319,28 @@ describe("mcp handshake", () => {
 });
 
 describe("mcp tool disablement", () => {
+  it("closes stdio sessions on agent.close so the child stops", async () => {
+    const work_dir = await temp_dir("mcp-close");
+    const binary = path.join(work_dir, "redot");
+    await writeFile(binary, "");
+    const record = empty_record();
+    const fetch_fn: typeof fetch = async () => new Response(JSON.stringify(chat_ok()), { status: 200 });
+    const agent = new Agent(parse_agent_config({
+      providers: [{ ...providers[0], base_url: "http://127.0.0.1:9", fetch_fn }],
+      work_dir,
+      log_level: "error",
+      tools_enabled: "all",
+      mcp_servers: { redot: { enabled: true, command: binary, args: redot_args(path.join(work_dir, "game")) } },
+    }), [], { mcp: { spawn: mock_spawner(record) } });
+    await agent.run({ input: "ping" });
+    expect(record.calls).toBe(1);
+    expect(record.stopped).toBe(0);
+    agent.close();
+    expect(record.stopped).toBe(1);
+    agent.close();
+    expect(record.stopped).toBe(1);
+  });
+
   it("stays off unless enabled and tools_enabled allows the names", async () => {
     const work_dir = await temp_dir("mcp-off");
     const binary = path.join(work_dir, "redot");

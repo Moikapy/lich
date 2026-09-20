@@ -24,6 +24,7 @@ interface BunPipeSpawned {
   stderr: ReadableStream<Uint8Array>;
   exited: Promise<number>;
   kill(): void;
+  unref(): void;
 }
 
 interface BunSpawn {

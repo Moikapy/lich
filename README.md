@@ -256,10 +256,8 @@ and [`examples/game_bridge`](examples/game_bridge/README.md). Default is off.
 `npm`, `bunx`, `uvx`, `curl`, `wget`, remote URLs, and shell metacharacters
 are refused.
 
-This source has `lich mcp list|add|enable|disable|remove` (changelog 0.7.0,
-unreleased). The published npm package is 0.6.0 and does not include those
-commands; `lich --version` still prints `0.6.0` because it reads
-`package.json`. From a clone: `bun src/cli.ts mcp list`. Redot is a catalog
+This source has `lich mcp list|add|enable|disable|remove` (changelog 0.7.0).
+From a clone: `bun src/cli.ts mcp list`. Redot is a catalog
 entry (`redot --headless --mcp-server`), not a fork inside lich. Godot has
 no official MCP server; lich does not download a community addon. See
 [docs/user-guide/redot.md](docs/user-guide/redot.md).

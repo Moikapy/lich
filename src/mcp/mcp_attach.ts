@@ -14,13 +14,15 @@ async function open_and_register(
   name: string,
   enabled: AgentConfig["tools_enabled"],
   session: McpSession,
-): Promise<void> {
+): Promise<McpSession | undefined> {
   try {
     register_listed(registry, name, await session.list_tools(), enabled, session);
+    return session;
   } catch (error) {
     session.close();
     const message = error instanceof Error ? error.message : "mcp skipped";
     logger.warn(`mcp ${name} skipped: ${message}`);
+    return undefined;
   }
 }
 
@@ -30,15 +32,15 @@ export async function attach_stdio(
   entry: { command: string; args: readonly string[]; env?: Record<string, string> },
   config: AgentConfig,
   runtime: McpRuntime | undefined,
-): Promise<void> {
+): Promise<McpSession | undefined> {
   const planned = plan_stdio(name, entry.command, entry.args, runtime?.env_path ?? process.env.PATH);
   if (typeof planned === "string") {
     logger.warn(`mcp ${name} skipped: ${planned}`);
-    return;
+    return undefined;
   }
   const spawn = runtime?.spawn ?? default_line_spawner;
   const session = new McpSession(stdio_pipe(spawn(planned.command, planned.args, entry.env)));
-  await open_and_register(registry, name, config.tools_enabled, session);
+  return open_and_register(registry, name, config.tools_enabled, session);
 }
 
 export async function attach_http(
@@ -47,7 +49,7 @@ export async function attach_http(
   url: string,
   config: AgentConfig,
   runtime: McpRuntime | undefined,
-): Promise<void> {
+): Promise<McpSession | undefined> {
   const session = new McpSession(http_pipe(url, runtime?.fetch_fn ?? fetch));
-  await open_and_register(registry, name, config.tools_enabled, session);
+  return open_and_register(registry, name, config.tools_enabled, session);
 }
