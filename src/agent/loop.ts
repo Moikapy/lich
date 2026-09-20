@@ -200,11 +200,6 @@ function aborted_outcome(history: Message[], turns_used: number, emitter: AgentE
   };
 }
 
-/** AbortSignal.aborted can flip during await; avoid loop-entry control-flow narrowing. */
-function is_aborted(signal: AbortSignal | undefined): boolean {
-  return signal !== undefined && signal.aborted === true;
-}
-
 export async function run_conversation(
   deps: LoopDeps,
   messages: readonly Message[],
