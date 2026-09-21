@@ -1,15 +1,18 @@
 /**
  * SSRF guard for HTTP tools: resolve host, reject private/loopback/link-local/ULA,
- * pin the connect to a vetted IP, and re-validate every redirect hop.
+ * pin the connect to a vetted IP (hostname kept for SNI/TLS), re-validate redirects.
  * Operator opt-out: LICH_ALLOW_PRIVATE_URLS=1.
  */
 import dns from "node:dns/promises";
+import http from "node:http";
+import https from "node:https";
 import net from "node:net";
+import type { LookupFunction } from "node:net";
 
 const MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-/** Optional fetch override for tests; otherwise uses live globalThis.fetch. */
+/** Optional fetch override for tests; otherwise uses pinned http(s).request. */
 let fetch_override: typeof fetch | undefined;
 
 /** Replace the fetch used by safe_fetch (test seam). */
@@ -20,10 +23,6 @@ export function set_url_guard_fetch(impl: typeof fetch): void {
 /** Clear the fetch override (test seam teardown). */
 export function reset_url_guard_fetch(): void {
   fetch_override = undefined;
-}
-
-function active_fetch(): typeof fetch {
-  return fetch_override ?? globalThis.fetch.bind(globalThis);
 }
 
 /** True when private-URL opt-out is active for local dev. */
@@ -143,21 +142,105 @@ export async function resolve_public_ip(raw_hostname: string): Promise<string> {
   return records[0]?.address ?? hostname;
 }
 
-/** Pin URL hostname to a vetted IP; preserve Host for virtual hosts / SNI. */
-async function pin_url(url: URL): Promise<{ href: string; host_header: string }> {
-  const host_header = url.host;
-  const ip = await resolve_public_ip(url.hostname);
-  const pinned = new URL(url.href);
-  pinned.hostname = ip;
-  return { href: pinned.href, host_header };
+/** Lookup that always returns the already-vetted address (IPv4 or IPv6). */
+function pinned_lookup(ip: string): LookupFunction {
+  const family = net.isIPv6(ip) === true ? 6 : 4;
+  return ((_hostname, options, callback) => {
+    const cb = typeof options === "function" ? options : callback;
+    const opts = typeof options === "function" ? undefined : options;
+    if (typeof cb !== "function") {
+      return;
+    }
+    if (opts !== undefined && opts.all === true) {
+      cb(null, [{ address: ip, family }]);
+      return;
+    }
+    cb(null, ip, family);
+  }) as LookupFunction;
 }
 
-function merge_host_header(init: RequestInit | undefined, host_header: string): Headers {
-  const headers = new Headers(init?.headers);
-  if (headers.has("host") === false) {
-    headers.set("Host", host_header);
-  }
+/** Flatten RequestInit headers into a plain object for http.request. */
+function request_headers(init: RequestInit | undefined): Record<string, string> {
+  const headers: Record<string, string> = {};
+  new Headers(init?.headers).forEach((value, key) => {
+    headers[key] = value;
+  });
   return headers;
+}
+
+/** Body bytes for http.request; strings and Uint8Array only (tool callers). */
+function request_body(init: RequestInit | undefined): string | Uint8Array | undefined {
+  const body = init?.body;
+  if (body === undefined || body === null) {
+    return undefined;
+  }
+  if (typeof body === "string" || body instanceof Uint8Array) {
+    return body;
+  }
+  throw new Error("blocked_url: unsupported_body");
+}
+
+/**
+ * Connect with hostname kept for SNI/Host, but DNS forced to the vetted IP.
+ * Does not follow redirects (caller handles Location).
+ */
+function pinned_http_fetch(url: URL, ip: string, init: RequestInit): Promise<Response> {
+  const lib = url.protocol === "https:" ? https : http;
+  const method = (init.method ?? "GET").toUpperCase();
+  const headers = request_headers(init);
+  const body = request_body(init);
+  return new Promise((resolve, reject) => {
+    const req = lib.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port.length > 0 ? Number(url.port) : undefined,
+        path: `${url.pathname}${url.search}`,
+        method,
+        headers,
+        lookup: pinned_lookup(ip),
+      },
+      (incoming) => {
+        const chunks: Buffer[] = [];
+        incoming.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        incoming.on("end", () => {
+          const status = incoming.statusCode ?? 0;
+          const response_headers = new Headers();
+          for (const [key, value] of Object.entries(incoming.headers)) {
+            if (typeof value === "string") {
+              response_headers.set(key, value);
+            } else if (Array.isArray(value) === true) {
+              for (const part of value) {
+                response_headers.append(key, part);
+              }
+            }
+          }
+          resolve(new Response(Buffer.concat(chunks), { status, headers: response_headers }));
+        });
+      },
+    );
+    req.on("error", reject);
+    const signal = init.signal;
+    if (signal !== undefined && signal !== null) {
+      if (signal.aborted === true) {
+        req.destroy(new Error("aborted"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => {
+          req.destroy(new Error("aborted"));
+        },
+        { once: true },
+      );
+    }
+    if (body !== undefined) {
+      req.write(body);
+    }
+    req.end();
+  });
 }
 
 function redirect_target(current: URL, response: Response): URL | undefined {
@@ -174,14 +257,17 @@ function redirect_target(current: URL, response: Response): URL | undefined {
 /**
  * Fetch with SSRF checks: pin each hop to a public IP, redirect:"manual",
  * re-validate every Location. Opt out with LICH_ALLOW_PRIVATE_URLS=1.
+ * HTTPS keeps the original hostname for TLS/SNI; the connect IP is pinned.
  */
 export async function safe_fetch(raw_url: string, init?: RequestInit): Promise<Response> {
   let current = parse_http_url(raw_url);
   let request_init: RequestInit = { ...(init ?? {}), redirect: "manual" };
   for (let hop = 0; hop < MAX_REDIRECTS; hop += 1) {
-    const pinned = await pin_url(current);
-    const headers = merge_host_header(request_init, pinned.host_header);
-    const response = await active_fetch()(pinned.href, { ...request_init, headers, redirect: "manual" });
+    const ip = await resolve_public_ip(current.hostname);
+    const response =
+      fetch_override !== undefined
+        ? await fetch_override(current.href, { ...request_init, redirect: "manual" })
+        : await pinned_http_fetch(current, ip, request_init);
     const next = redirect_target(current, response);
     if (next === undefined) {
       return response;

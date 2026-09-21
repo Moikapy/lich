@@ -3,10 +3,18 @@
  */
 import { mkdir, mkdtemp, symlink, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { assert_file_tool_access, resolve_safe_path } from "../src/tools/guard.js";
-import { is_blocked_ip, private_urls_allowed, resolve_public_ip } from "../src/tools/url_guard.js";
+import {
+  is_blocked_ip,
+  private_urls_allowed,
+  reset_url_guard_fetch,
+  resolve_public_ip,
+  safe_fetch,
+  set_url_guard_fetch,
+} from "../src/tools/url_guard.js";
 import { scrub_spawn_env } from "../src/tools/builtin/terminal.js";
+import { grep_files_tool } from "../src/tools/builtin/grep_files.js";
 import { run_tests_tool, set_test_command_runner, reset_test_command_runner } from "../src/tools/builtin/run_tests.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
@@ -17,6 +25,10 @@ afterAll(async () => {
     await rm(dir, { recursive: true, force: true });
   }
   reset_test_command_runner();
+});
+
+afterEach(() => {
+  reset_url_guard_fetch();
 });
 
 async function make_temp_dir(): Promise<string> {
@@ -78,6 +90,51 @@ describe("S-2 SSRF helpers", () => {
       return;
     }
     await expect(resolve_public_ip("[::1]")).rejects.toThrow(/blocked_url/);
+  });
+
+  it("safe_fetch keeps https hostname for the fetch seam (no IP rewrite)", async () => {
+    const seen: string[] = [];
+    set_url_guard_fetch(async (input) => {
+      seen.push(String(input));
+      return new Response("ok", { status: 200 });
+    });
+    const response = await safe_fetch("https://example.com/path");
+    expect(response.status).toBe(200);
+    expect(seen).toEqual(["https://example.com/path"]);
+  });
+});
+
+describe("S-1/S-3 grep_files guards", () => {
+  it("does not follow a symlink file out of work_dir", async () => {
+    const work = await make_temp_dir();
+    const outside = await make_temp_dir();
+    await mkdir(path.join(work, "w"), { recursive: true });
+    await writeFile(path.join(outside, "secret.txt"), "outside_secret_marker");
+    await symlink(path.join(outside, "secret.txt"), path.join(work, "w", "link.txt"));
+    await writeFile(path.join(work, "w", "ok.txt"), "inside_ok");
+    const result = await grep_files_tool.execute(
+      { pattern: "outside_secret_marker|inside_ok", path: "w" },
+      { work_dir: work, env: {} },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("inside_ok");
+    expect(result.output).not.toContain("outside_secret_marker");
+  });
+
+  it("denies grepping .lich/config.json and does not leak api_key from .lich", async () => {
+    const work = await make_temp_dir();
+    await mkdir(path.join(work, ".lich"), { recursive: true });
+    await writeFile(path.join(work, ".lich", "config.json"), '{"api_key":"sk-test-secret"}');
+    const direct = await grep_files_tool.execute(
+      { pattern: "api_key", path: ".lich/config.json" },
+      { work_dir: work, env: {} },
+    );
+    expect(direct.ok).toBe(false);
+    expect(direct.error).toMatch(/forbidden_path/);
+    const dir = await grep_files_tool.execute({ pattern: "api_key", path: ".lich" }, { work_dir: work, env: {} });
+    expect(dir.ok).toBe(true);
+    expect(dir.output).not.toContain("api_key");
+    expect(dir.output).not.toContain("sk-test-secret");
   });
 });
 

@@ -511,4 +511,12 @@ describe("twitch irc parsing", () => {
     expect(parse_irc_line(":tmi.twitch.tv 001 nick :Welcome").kind).toBe("other");
     expect(parse_irc_line("@tags :nick!nick@nick.tmi.twitch.tv JOIN #chan").kind).toBe("other");
   });
+
+  it("rejects USERNOTICE/WHISPER spoof lines that embed PRIVMSG", () => {
+    const usernotice =
+      "@msg-id=raid :tmi.twitch.tv USERNOTICE #chan :hi x!owner@o PRIVMSG #chan :pwned";
+    expect(parse_irc_line(usernotice).kind).toBe("other");
+    const whisper = ":evil!evil@evil.tmi.twitch.tv WHISPER victim :x!owner@o PRIVMSG #chan :pwned";
+    expect(parse_irc_line(whisper).kind).toBe("other");
+  });
 });
