@@ -22,7 +22,7 @@ The client is general, the same shape as Hermes and Claude: a named list you ext
 }
 ```
 
-stdio is a local binary you named, plus `args`, plus optional `env`. The process is spawned with those argv, never a shell. `npx`, `npm`, `bunx`, `uvx`, `curl`, `wget`, a URL, and shell metacharacters are refused. lich does not run `npx -y` or fetch an addon. Values in `env` are passed to the process and are never logged. `lich mcp add` has no flag for `env`; set that key in the file if you need it.
+stdio is a local binary you named, plus `args`, plus optional `env`. The process is spawned with those argv, never a shell. `npx`, `npm`, `bunx`, `uvx`, `curl`, `wget`, a URL, and shell metacharacters are refused. lich does not run `npx -y` or fetch an addon. Values in `env` are passed to the process and are never logged. `lich mcp add` has no flag for `env`; set that key in the file if you need it. On Bun, the spawned child is not `unref`'d, so one-shot and other short-lived runs wait for the MCP answer instead of exiting while the child is still working; `Agent.close()` (every CLI mode calls it) kills the child.
 
 HTTP is `{ "url": "http://127.0.0.1:9/mcp" }`. The host must be `127.0.0.1` or `localhost`. `0.0.0.0` and any other host are refused. There is no remote MCP in v1.
 

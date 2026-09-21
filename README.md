@@ -101,7 +101,7 @@ snake_case args and are registered under the `builtin` toolset.
 | `edit_file` | Replace a unique string in a file, with an optional replace-all. |
 | `list_dir` | List a directory tree iteratively (dirs first, file sizes). |
 | `terminal` | Run a shell command via `bash -lc` and capture output plus exit code. |
-| `grep_files` | Regex search across files, skipping node_modules/.git/dist and binaries. |
+| `grep_files` | Regex search across files, skipping node_modules/.git/dist, symlinks, and binaries; `.lich/config.json` is denied. |
 | `fetch_url` | GET an http(s) URL and return the body text with a status header. |
 | `web_search` | Web search via DuckDuckGo's HTML endpoint (no api key). |
 | `http_request` | Generic HTTP calls (method/headers/body) for REST-ish APIs. |
@@ -137,6 +137,7 @@ the next self-commit. One gated `git_commit` per run requires
 | `LICH_BASE_URL` | provider base url (ollama default: `http://localhost:11434`) |
 | `LICH_API_KEY_ENV` | env var holding the api key (unused by ollama) |
 | `LICH_ALLOW_SELF_COMMIT` | set to `1` to allow one gated `git_commit` per run; unset is fail-closed |
+| `LICH_ALLOW_PRIVATE_URLS` | set to exactly `1` to let `fetch_url` / `http_request` reach private or loopback URLs; unset or any other value is fail-closed (blocked) |
 | `LICH_TEST_COMMAND` | command `run_tests` runs (default: `node node_modules/vitest/vitest.mjs run`) |
 
 ## Ollama
@@ -254,7 +255,10 @@ command, or loopback HTTP). The game connects **to** lich through the webhook
 and [`examples/game_bridge`](examples/game_bridge/README.md). Default is off.
 `mcp_servers` is a closed record. Names are `mcp_<server>_<tool>`. `npx`,
 `npm`, `bunx`, `uvx`, `curl`, `wget`, remote URLs, and shell metacharacters
-are refused.
+are refused. On Bun, stdio children are not `unref`'d, so a one-shot or
+other short-lived run waits for the MCP answer instead of exiting while
+the child is still working; `agent.close()` (which every CLI mode calls)
+kills the child.
 
 This source has `lich mcp list|add|enable|disable|remove` (changelog 0.7.0).
 From a clone: `bun src/cli.ts mcp list`. Redot is a catalog
