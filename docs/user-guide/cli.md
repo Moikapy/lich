@@ -160,6 +160,7 @@ never accepted as a config passthrough.
 | Variable | Meaning |
 | --- | --- |
 | `LICH_ALLOW_SELF_COMMIT` | Set to `1` to allow one gated `git_commit` per run. Unset or any other value is fail-closed. Read at agent construction. |
+| `LICH_ALLOW_PRIVATE_URLS` | Set to exactly `1` to let `fetch_url` / `http_request` reach private or loopback URLs. Unset or any other value is fail-closed (they are blocked). |
 | `LICH_TEST_COMMAND` | Command `run_tests` runs in `work_dir` (default `node node_modules/vitest/vitest.mjs run`). An optional `filter` argument is appended. |
 
 Veto reasons, the terminal git denylist, skills, and `MEMORY.md` are in the

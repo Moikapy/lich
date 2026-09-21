@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- pin outbound HTTP: `fetch_url` and `http_request` keep the https
+  hostname for TLS/SNI and the `Host` header while `safe_fetch` pins the
+  connect to a vetted public IP through a custom DNS `lookup`, and
+  re-validates every redirect hop. the operator opt-out is exact:
+  `LICH_ALLOW_PRIVATE_URLS=1`; unset or any other value is fail-closed
+  (private/loopback URLs blocked).
+- harden `grep_files`: the directory walk skips symbolic links (same
+  skip path as `SKIP_DIRS`), and every candidate read runs
+  `assert_file_tool_access`, so `.lich/config.json` is denied with
+  `forbidden_path: .lich/config.json`.
+- twitch gateway: `PRIVMSG` matching is anchored (`^:... PRIVMSG #...
+  :...$` after the optional tags strip), so `USERNOTICE` and
+  `WHISPER` lines are not chat and cannot spoof the allowlist.
+- bun stdio MCP children are no longer `unref`'d: one-shot and
+  short-lived runs wait for the MCP answer instead of letting the child
+  detach and exit early.
+
 ## 0.7.0
 
 - add a general MCP client. `mcp_servers` is a closed record of named

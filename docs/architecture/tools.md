@@ -152,7 +152,7 @@ Docs tools join the list only when a docs root resolves.
 | `edit_file` | `path`, `old_string`, `new_string`, `replace_all?` | Fails `old_string_not_found` / `old_string_not_unique (N)` unless `replace_all` - an exact-match protocol that forces the model to anchor edits. |
 | `list_dir` | `path?`, `depth?` (1-4) | Iterative worklist (no recursion), dirs-first sorting, skips `node_modules`/`.git`/`dist`/`.lich`/`.cursor`, caps at 500 entries, file sizes via `stat`. |
 | `terminal` | `command`, `timeout_ms?` | Spawns `bash -lc`, streams and caps stdout+stderr at 50 K chars, SIGKILLs on deadline, appends `[exit N]`; `ok` requires exit code 0 and no cancellation. |
-| `grep_files` | `pattern`, `path?`, `glob?`, `max_results?` | Explicit stack walk (no recursion), binary sniff (NUL byte in first 1000 bytes), 1 MB file cap, `*.ext` suffix-glob matcher, overcollect-by-one to report suppressed counts. |
+| `grep_files` | `pattern`, `path?`, `glob?`, `max_results?` | Explicit stack walk (no recursion), skips `SKIP_DIRS` entries and symbolic links, per-file `assert_file_tool_access` check (`.lich/config.json` is denied), binary sniff (NUL byte in first 1000 bytes), 1 MB file cap, `*.ext` suffix-glob matcher, overcollect-by-one to report suppressed counts. |
 | `fetch_url` | `url`, `max_chars?`, `timeout_ms?` | GET only; rejects non-http(s) protocols; refuses images/octet-stream; tags HTML bodies with `[html content]`; status/type header line first. |
 | `web_search` | `query`, `max_results?` | Scrapes DuckDuckGo's HTML endpoint (no API key); unwraps `uddg=` redirect links; decodes the handful of entities DDG emits. |
 | `http_request` | `url`, `method?`, `headers?`, `body?`, ... | Method allowlist (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS); stringified caller headers; reports `content-length`, `ratelimit-remaining`, `retry-after`. |
@@ -166,6 +166,32 @@ helpers from `fetch_url.ts`: `valid_http_url` (URL parse + protocol
 allowlist), `compose_abort_signal` (per-call `AbortSignal.timeout` merged
 with the executor's cancellation via `AbortSignal.any`), and `clamp_int_arg`
 (floored, bounded to `[1, max]`).
+
+`grep_files` also runs `assert_file_tool_access` on every candidate path
+(the same deny list as `read_file`/`write_file`/`edit_file`): a direct
+grep of `.lich/config.json` fails with `forbidden_path:
+.lich/config.json`. During the walk, symbolic links are skipped on the
+same branch as `SKIP_DIRS`, so symlink entries are neither followed nor
+searched.
+
+### HTTP tools and `safe_fetch` - pinned outbound requests
+
+`fetch_url` and `http_request` send every request through `safe_fetch`
+([`src/tools/url_guard.ts`](../../src/tools/url_guard.ts)). Per hop:
+
+1. `resolve_public_ip` resolves the hostname and rejects private,
+   loopback, link-local, and ULA addresses (`blocked_url:`), including
+   `localhost` / `*.localhost` / `*.local` names.
+2. The request is then issued with the **original hostname** kept for
+   TLS/SNI and the `Host` header - the URL is not rewritten to the IP.
+   The connect is pinned instead: a custom DNS `lookup` function handed
+   to `http(s).request` returns only the already-vetted public IP.
+3. Redirects are followed manually (`redirect: "manual"`) and every
+   `Location` hop is re-resolved and re-vetted, up to 5 hops.
+
+The operator opt-out is exact: `LICH_ALLOW_PRIVATE_URLS=1` allows
+private targets (the value is compared to `"1"`), while unset or any
+other value is fail-closed and private URLs stay blocked.
 
 ## Docs search and skills
 

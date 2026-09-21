@@ -133,6 +133,8 @@ lich gateway twitch
 
 3. The bot joins `#channelone` and `#channeltwo` and replies in chat only when the allowlist matches (own messages are ignored). Replies split at 512 chars; IRC PING/PONG is answered automatically.
 
+Only real chat messages count for the allowlist: the adapter strips optional IRC tags and then requires a full `PRIVMSG` line (`^:<nick>!... PRIVMSG #<channel> :<text>`), so Twitch events such as `USERNOTICE` (raids, subs) and `WHISPER` are ignored even if their text contains something that looks like a `PRIVMSG` — they can never impersonate an allowed user or channel.
+
 All three fields (`token`, `nick`, `channels`) are required — a missing one idles the adapter. Without allowlists for `twitch`, every inbound message is denied.
 
 ## Allowlists and gateway tools
