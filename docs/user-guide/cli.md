@@ -204,7 +204,7 @@ lich \
   "Find the current LTS version of Node.js using web_search, fetch the release page with fetch_url, and summarize the support schedule."
 ```
 
-Note: `web_search` scrapes DuckDuckGo's HTML endpoint without an api key and can be blocked with `search_failed` errors when rate-limited; retrying later usually works.
+Note: `web_search` scrapes DuckDuckGo's HTML endpoint without an api key and can be blocked with `search_failed` errors when rate-limited; retrying later usually works. `fetch_url` and `http_request` are SSRF-guarded: `localhost`, names ending in `.local` or `.localhost`, and addresses that are private, loopback, link-local, or ULA fail with `blocked_url` unless process env `LICH_ALLOW_PRIVATE_URLS` is exactly `1` (not a config field; read on each request). Every fetch that passes that check rewrites the URL hostname to the vetted IP, sets `Host` to the original host when the caller did not, and re-checks each redirect the same way.
 
 Batch one-shots from a script, checking each exit code:
 
