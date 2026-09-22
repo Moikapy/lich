@@ -293,6 +293,36 @@ describe("HookedToolRunner", () => {
     // on_run_start fired, so run 1's marker did not leak across the reset.
     expect(marker_from_prior_run).toEqual([false, false]);
   });
+
+  it("keeps concurrent run_scope bags isolated (M-6)", async () => {
+    const seen: number[] = [];
+    const hooks: PluginHooks = {
+      on_run_start: async (_info, ctx) => {
+        ctx.state?.set("commits", 0);
+      },
+      after_tool_call: async (_info, ctx) => {
+        const next = (typeof ctx.state?.get("commits") === "number" ? (ctx.state.get("commits") as number) : 0) + 1;
+        ctx.state?.set("commits", next);
+        seen.push(next);
+      },
+    };
+    const { runner } = spy_runner("ok");
+    const hooked = new HookedToolRunner(runner, [plugin_with(hooks)]);
+    await Promise.all([
+      hooked.run_scope(async () => {
+        await hooked.call_run_start({ input_chars: 1 }, { work_dir: "/tmp" });
+        await hooked.execute("write_file", {});
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await hooked.execute("write_file", {});
+      }),
+      hooked.run_scope(async () => {
+        await hooked.call_run_start({ input_chars: 1 }, { work_dir: "/tmp" });
+        await hooked.execute("write_file", {});
+      }),
+    ]);
+    // Each scope increments from its own zero; concurrent reset must not collapse to 3 in one bag.
+    expect(seen.sort((a, b) => a - b)).toEqual([1, 1, 2]);
+  });
 });
 
 describe("Agent with plugins", () => {

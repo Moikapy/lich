@@ -1,3 +1,7 @@
+import { clamp_output } from "../tools/guard.js";
+
+const MCP_ERROR_MAX = 4000;
+
 export function content_text(result: unknown): string {
   if (typeof result !== "object" || result === null) {
     return "";
@@ -18,9 +22,10 @@ export function content_text(result: unknown): string {
       }
     }
   }
-  const text = parts.join("\n");
+  const text = clamp_output(parts.join("\n"));
   if (body.isError === true) {
-    throw new Error(text.length > 0 ? text : "mcp tool failed");
+    const detail = text.length > 0 ? text : "mcp tool failed";
+    throw new Error(detail.length > MCP_ERROR_MAX ? detail.slice(0, MCP_ERROR_MAX) : detail);
   }
   return text;
 }

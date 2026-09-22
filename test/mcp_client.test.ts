@@ -140,6 +140,11 @@ describe("mcp refusal", () => {
     expect(plan_stdio("lab", "curl", ["https://example.invalid/addon"], undefined)).toMatch(/curl/);
     expect(plan_stdio("lab", "https://redotengine.org/redot", [], undefined)).toMatch(/refused url/);
     expect(plan_stdio("lab", "redot; rm", [], undefined)).toMatch(/shell/);
+    expect(plan_stdio("lab", "bash", ["-c", "npx -y x"], undefined)).toMatch(/shell 'bash'/);
+    expect(plan_stdio("lab", "sh", ["-c", "curl x"], undefined)).toMatch(/shell 'sh'/);
+    expect(plan_stdio("lab", "env", ["npx", "-y", "x"], undefined)).toMatch(/env → 'npx'|download/);
+    expect(plan_stdio("lab", "bun", ["x", "pkg"], undefined)).toMatch(/bun x/);
+    expect(plan_stdio("lab", "node", ["-e", "1"], undefined)).toMatch(/eval flag/);
     expect(plan_stdio("redot", path.join(work_dir, "godot"), redot_args(project), undefined)).toMatch(/basename 'godot'/);
     expect(plan_stdio("redot", binary, ["--headless", "--mcp-server", "--path", "https://evil.example/game"], undefined)).toMatch(/refused project path/);
     expect(plan_stdio("lab", path.join(work_dir, "lab"), ["https://evil.example/addon"], undefined)).toMatch(/refused url in mcp args/);
@@ -248,6 +253,27 @@ describe("mcp handshake", () => {
     });
     const names = registry.list().map((tool) => tool.name).sort();
     expect(names).toEqual(["mcp_lab_execute", "mcp_lab_ping", "mcp_redot_ping"]);
+  });
+
+  it("excludes execute when a custom name runs the redot binary (M-5)", async () => {
+    const work_dir = await temp_dir("mcp-redot-alias");
+    const redot = path.join(work_dir, "redot");
+    await writeFile(redot, "");
+    const config = parse_agent_config({
+      providers,
+      work_dir,
+      log_level: "error",
+      mcp_servers: {
+        my_redot: { enabled: true, command: redot, args: redot_args(work_dir) },
+      },
+    });
+    const registry = new ToolRegistry();
+    await attach_enabled_mcp_tools(registry, config, {
+      spawn: mock_spawner(empty_record(), ["execute", "scene_action", "ping"]),
+    });
+    const names = registry.list().map((tool) => tool.name).sort();
+    expect(names).toEqual(["mcp_my_redot_ping", "mcp_my_redot_scene_action"]);
+    expect(plan_stdio("my_redot", redot, ["--script", "evil.gd"], work_dir)).toMatch(/refused redot args/);
   });
 
   it("rejects a bad handshake and does not register tools", async () => {
