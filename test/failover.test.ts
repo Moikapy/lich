@@ -208,11 +208,10 @@ describe("chat_with_failover", () => {
     expect(result.provider_name).toBe("backup");
   });
 
-  it("throws the last error when every provider fails", async () => {
+  it("throws the first hard error when every provider fails", async () => {
     const router = new ProviderRouter([
-      openai_config("one", mock_fetch(() => ({ status: 401, body: { error: { message: "bad key" } } }))),
-      openai_config("two", mock_fetch(() => ({ status: 401, body: { error: { message: "bad key" } } }))),
-      openai_config("three", mock_fetch(() => ({ status: 400, text_body: "invalid request payload" }))),
+      openai_config("one", mock_fetch(() => ({ status: 400, text_body: "invalid request payload" }))),
+      openai_config("two", mock_fetch(() => ({ status: 503, text_body: "upstream down" }))),
     ]);
     const failure = await chat_with_failover(router, [{ role: "user", content: "hi" }], []).catch(
       (error: unknown) => error,
@@ -220,7 +219,26 @@ describe("chat_with_failover", () => {
     expect(failure).toBeInstanceOf(ProviderError);
     const provider_error = failure as ProviderError;
     expect(provider_error.kind).toBe("bad_request");
-    expect(provider_error.provider_name).toBe("three");
+    expect(provider_error.provider_name).toBe("one");
+    expect(provider_error.message).toContain("invalid request payload");
+  });
+
+  it("fails over immediately when Retry-After exceeds the cap", async () => {
+    let primary_calls = 0;
+    const router = new ProviderRouter([
+      openai_config("throttled", mock_fetch(() => {
+        primary_calls += 1;
+        return {
+          status: 429,
+          body: { error: { message: "slow down" } },
+          headers: { "retry-after": "600" },
+        };
+      })),
+      openai_config("backup", mock_fetch(() => ({ status: 200, body: OK_BODY }))),
+    ]);
+    const result = await chat_with_failover(router, [{ role: "user", content: "hi" }], []);
+    expect(result.provider_name).toBe("backup");
+    expect(primary_calls).toBe(1);
   });
 
   it("returns the first provider's success untouched", async () => {

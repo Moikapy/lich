@@ -32,6 +32,12 @@ export interface AssistantMessage {
   role: "assistant";
   content: string;
   tool_calls?: ToolCall[];
+  /**
+   * Opaque provider content blocks preserved for round-trip (e.g. Anthropic
+   * thinking / redacted_thinking). When present, Anthropic replays these
+   * instead of reconstructing text + tool_use from content/tool_calls.
+   */
+  provider_content?: readonly Record<string, unknown>[];
 }
 
 export interface ToolMessage {
@@ -90,10 +96,14 @@ export interface ProviderConfig {
   api_key?: string;
   api_key_env?: string;
   timeout_ms?: number;
+  /** Anthropic-only: forward ChatOptions.temperature (default: omit). */
+  send_temperature?: boolean;
   /** Ollama-only: request thinking mode (adds think:true to /api/chat). */
   think?: boolean;
   /** Ollama-only: how long the model stays loaded (e.g. "10m"). */
   keep_alive?: string;
+  /** Ollama-only: context window size sent as options.num_ctx. */
+  num_ctx?: number;
   /** Injectable fetch, mainly for tests. Defaults to global fetch. */
   fetch_fn?: typeof fetch;
 }
