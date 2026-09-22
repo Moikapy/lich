@@ -11,7 +11,7 @@ export const PACKAGE_NAME = "@moikapy/lich";
 export const VIEW_ARGS = ["view", PACKAGE_NAME, "version"] as const;
 export const INSTALL_ARGS = ["install", "-g", `${PACKAGE_NAME}@latest`] as const;
 
-export type InstallKind = "npm" | "git" | "npx";
+export type InstallKind = "npm" | "git" | "npx" | "local";
 
 export interface CommandResult {
   exit_code: number;
@@ -40,6 +40,8 @@ const NPM_MISSING =
   "lich: npm is not on PATH. Install Node.js, or run `npm install -g @moikapy/lich@latest` once npm is available.\n";
 const EXIT_FIRST_HINT =
   "Exit any running `lich tui` or `lich gateway` first — npm cannot replace the package while those processes are running.\n";
+const LOCAL_INSTALL_HINT =
+  "lich: this copy is not an npm global install. Update via your package manager, or install with `npm install -g @moikapy/lich`.\n";
 
 function parse_semver(version: string): Semver | null {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(version.trim());
@@ -75,7 +77,15 @@ export function version_relation(installed: string, registry: string): VersionRe
   return "current";
 }
 
-/** npm global, a git clone (`git pull`), or an npx temporary copy. */
+/** True for npm's global layout: `<prefix>/lib/node_modules/...`. */
+function is_npm_global_node_modules(node_modules_dir: string): boolean {
+  return path.basename(path.dirname(node_modules_dir)) === "lib";
+}
+
+/**
+ * npm global (`…/lib/node_modules`), a git clone (`git pull`), npx, or a
+ * project-local / bun / pnpm copy that must not run `npm install -g`.
+ */
 export function detect_install_kind(
   module_path: string,
   env: NodeJS.ProcessEnv,
@@ -86,11 +96,14 @@ export function detect_install_kind(
   }
   let dir = path.dirname(path.resolve(module_path));
   const root = path.parse(dir).root;
+  let saw_non_global_node_modules = false;
   while (dir !== root) {
     if (path.basename(dir) === "node_modules") {
-      return "npm";
-    }
-    if (has_git(dir) === true) {
+      if (is_npm_global_node_modules(dir) === true) {
+        return "npm";
+      }
+      saw_non_global_node_modules = true;
+    } else if (has_git(dir) === true) {
       return "git";
     }
     const parent = path.dirname(dir);
@@ -98,6 +111,9 @@ export function detect_install_kind(
       break;
     }
     dir = parent;
+  }
+  if (saw_non_global_node_modules === true) {
+    return "local";
   }
   return "npm";
 }
@@ -108,6 +124,9 @@ function blocked_install_message(kind: InstallKind): string | null {
   }
   if (kind === "npx") {
     return "lich: npx runs a temporary copy and cannot persist an update. Install with `npm install -g @moikapy/lich`.\n";
+  }
+  if (kind === "local") {
+    return LOCAL_INSTALL_HINT;
   }
   return null;
 }

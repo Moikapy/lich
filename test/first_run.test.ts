@@ -229,12 +229,27 @@ describe("lich init and bare lich", () => {
     try {
       expect(await run_cli(["init", "--work-dir", dir, "--model", "from-flag", "--provider-kind", "anthropic"])).toBe(0);
       expect(JSON.parse(readFileSync(project_config_path(dir), "utf8"))).toMatchObject({
-        providers: [{ kind: "anthropic", model: "from-flag" }],
+        providers: [
+          {
+            kind: "anthropic",
+            model: "from-flag",
+            base_url: "https://api.anthropic.com",
+            api_key_env: "ANTHROPIC_API_KEY",
+          },
+        ],
       });
     } finally {
       delete process.env.LICH_MODEL;
       delete process.env.LICH_PROVIDER_KIND;
     }
+  });
+
+  it("clears a stale ollama base_url when --provider-kind changes", async () => {
+    const dir = make_temp_dir("init-kind-clears-url");
+    expect(await run_cli(["init", "--work-dir", dir, "--model", "claude", "--provider-kind", "anthropic"])).toBe(0);
+    const provider = JSON.parse(readFileSync(project_config_path(dir), "utf8")).providers[0] as Record<string, unknown>;
+    expect(provider["base_url"]).toBe("https://api.anthropic.com");
+    expect(provider["base_url"]).not.toBe("http://localhost:11434");
   });
 
   it("skips the wizard when .lich/config.json already exists", async () => {

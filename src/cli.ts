@@ -4,21 +4,28 @@
  * config files, and environment-based provider resolution.
  */
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { createInterface, type Interface } from "node:readline";
+import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./agent/agent.js";
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import { AgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
-import { load_config, config_template, existing_config_path, starter_config_object, write_lich_config } from "./cli_config.js";
+import {
+  load_config,
+  config_template,
+  existing_config_path,
+  provider_kind_defaults,
+  starter_config_object,
+  write_lich_config,
+  type ProviderKind,
+} from "./cli_config.js";
 import { run_mcp } from "./cli_mcp.js";
 import { empty_mcp_flags, take_mcp_flag, type McpCliFlags } from "./cli_mcp_flags.js";
 import { run_update } from "./cli_update.js";
+import type { Message } from "./providers/types.js";
 import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
 import { load_theme, notice_flavor } from "./util/theme.js";
-
-type ProviderKind = "openai_compat" | "anthropic" | "ollama";
 
 interface CliOptions {
   config_path?: string;
@@ -41,18 +48,6 @@ const FLAG_KEYS: Record<string, string> = {
   "--session-dir": "session_dir",
   "--log-level": "log_level",
   "--theme": "theme",
-};
-
-const DEFAULT_BASE_URLS: Record<ProviderKind, string> = {
-  openai_compat: "https://api.openai.com/v1",
-  anthropic: "https://api.anthropic.com",
-  ollama: "http://localhost:11434",
-};
-
-const DEFAULT_ENV_API_KEYS: Record<ProviderKind, string | undefined> = {
-  openai_compat: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  ollama: undefined, // ollama needs no api key
 };
 
 function usage_text(): string {
@@ -197,22 +192,26 @@ export function parse_args(argv: string[]): CliOptions {
   return options;
 }
 
-function env_provider(overrides: Record<string, string>): Record<string, unknown> {
-  const kind_value = overrides["provider_kind"] ?? process.env.LICH_PROVIDER_KIND ?? "openai_compat";
+function parse_provider_kind(kind_value: string): ProviderKind {
   if (kind_value !== "openai_compat" && kind_value !== "anthropic" && kind_value !== "ollama") {
     throw new Error(`unknown provider kind "${kind_value}" (expected openai_compat, anthropic, or ollama)`);
   }
-  const kind: ProviderKind = kind_value;
+  return kind_value;
+}
+
+function env_provider(overrides: Record<string, string>): Record<string, unknown> {
+  const kind = parse_provider_kind(overrides["provider_kind"] ?? process.env.LICH_PROVIDER_KIND ?? "openai_compat");
   const model = overrides["provider_model"] ?? process.env.LICH_MODEL;
   if (model === undefined || model.length === 0) {
     throw new Error("no model configured: set LICH_MODEL, pass --model, or create .lich/config.json (`lich config` prints a template)");
   }
+  const defaults = provider_kind_defaults(kind);
   return {
     kind,
     name: "default",
     model,
-    base_url: overrides["provider_base_url"] ?? process.env.LICH_BASE_URL ?? DEFAULT_BASE_URLS[kind],
-    api_key_env: overrides["provider_api_key_env"] ?? process.env.LICH_API_KEY_ENV ?? DEFAULT_ENV_API_KEYS[kind],
+    base_url: overrides["provider_base_url"] ?? process.env.LICH_BASE_URL ?? defaults.base_url,
+    api_key_env: overrides["provider_api_key_env"] ?? process.env.LICH_API_KEY_ENV ?? defaults.api_key_env,
   };
 }
 
@@ -226,6 +225,20 @@ function load_config_file(config_path: string): Record<string, unknown> {
     return parsed as Record<string, unknown>;
   } catch (error) {
     throw new Error(`cannot use config file ${config_path}: ${error_message(error)}`);
+  }
+}
+
+function apply_kind_defaults(provider: Record<string, unknown>, kind: ProviderKind, overrides: Record<string, string>): void {
+  const defaults = provider_kind_defaults(kind);
+  if (overrides["provider_base_url"] === undefined) {
+    provider["base_url"] = defaults.base_url;
+  }
+  if (overrides["provider_api_key_env"] === undefined) {
+    if (defaults.api_key_env === undefined) {
+      delete provider["api_key_env"];
+    } else {
+      provider["api_key_env"] = defaults.api_key_env;
+    }
   }
 }
 
@@ -250,6 +263,10 @@ function apply_provider_override(config: Record<string, unknown>, overrides: Rec
     if (value !== undefined) {
       provider[key.replace("provider_", "")] = value;
     }
+  }
+  // Kind change without an explicit URL/key must drop the previous kind's defaults.
+  if (overrides["provider_kind"] !== undefined) {
+    apply_kind_defaults(provider, parse_provider_kind(overrides["provider_kind"]), overrides);
   }
 }
 
@@ -343,31 +360,22 @@ export async function run_one_shot(config: unknown, input: string): Promise<numb
   return 0;
 }
 
-async function run_chat_turn(agent: Agent, input: string): Promise<void> {
+async function run_chat_turn(agent: Agent, input: string, history: readonly Message[]): Promise<Message[]> {
   const stop_progress = attach_progress(agent.events);
   try {
-    const result = await agent.run({ input });
+    const result = await agent.run({ input, history });
     const final = result.outcome.final;
     if (final !== undefined && final.content.length > 0) {
       process.stdout.write(`${final.content}\n`);
     }
     process.stdout.write(`[turns ${result.outcome.turns_used} | tokens ${result.usage_total.total_tokens}]\n`);
+    return result.messages;
   } catch (error) {
     process.stderr.write(`[lich] ${error_message(error)}\n`);
+    return [...history];
   } finally {
     stop_progress();
   }
-}
-
-function ask_line(rl: Interface): Promise<string> {
-  return new Promise((resolve) => {
-    const on_close = (): void => resolve("");
-    rl.question("> ", (answer) => {
-      rl.removeListener("close", on_close);
-      resolve(answer);
-    });
-    rl.once("close", on_close);
-  });
 }
 
 function budget_stderr_line(turns: number, notice: string): string {
@@ -380,19 +388,23 @@ export async function run_chat(config: unknown): Promise<number> {
   const agent = await create_agent_with_plugins(config);
   const theme = load_theme(agent.config.theme);
   const rl = createInterface({ input: process.stdin, output: process.stdout });
+  let history: Message[] = [];
   try {
-    for (;;) {
-      const line = await ask_line(rl);
+    process.stdout.write("> ");
+    for await (const line of rl) {
       if (line.trim() === "") {
-        return 0;
+        process.stdout.write("> ");
+        continue;
       }
       const command = line.trim();
       if (command === "/exit" || command === "/quit") {
         process.stdout.write(`${theme.glyph} ${theme.goodbye}\n`);
         return 0;
       }
-      await run_chat_turn(agent, command);
+      history = await run_chat_turn(agent, command, history);
+      process.stdout.write("> ");
     }
+    return 0;
   } finally {
     rl.close();
     agent.close();
