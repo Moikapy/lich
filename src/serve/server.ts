@@ -8,6 +8,7 @@ import path from "node:path";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { LICH_VERSION } from "../version.js";
 import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
+import type { AgentConfig } from "../agent/config.js";
 import { create_serve_prompt_service, type ServePromptService } from "./prompts.js";
 import { handle_serve_rpc_message } from "./rpc.js";
 import { create_serve_session_store, type ServeSessionStore } from "./sessions.js";
@@ -50,6 +51,31 @@ export interface ServeServer {
   readonly boot: ServeBootInfo | undefined;
   readonly sessions: ServeSessionStore;
   readonly prompts: ServePromptService | undefined;
+}
+
+/**
+ * CLI entry: bind loopback with the same Agent config as `lich tui` / chat,
+ * emit boot JSON, then stay alive until SIGINT/SIGTERM.
+ */
+export async function run_serve(
+  config: AgentConfig,
+  options: { host?: string; port?: number } = {},
+): Promise<number> {
+  const server = create_serve_server({
+    host: options.host,
+    port: options.port,
+    agent_config: config,
+    session_dir: config.session_dir,
+  });
+  const shutdown = (): void => {
+    void server.stop().finally(() => {
+      process.exit(0);
+    });
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  await server.start();
+  return await new Promise<number>(() => undefined);
 }
 
 export function create_serve_server(options: ServeOptions = {}): ServeServer {

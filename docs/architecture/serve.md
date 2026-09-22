@@ -11,7 +11,7 @@ This page documents the shared contract in
 [`src/serve/protocol.ts`](../../src/serve/protocol.ts), the loopback
 WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts),
 and prompt/event handling in [`src/serve/prompts.ts`](../../src/serve/prompts.ts).
-The `lich serve` CLI lands in #84.
+Start it with `lich serve` (or `bun src/cli.ts serve`).
 
 ## Role in the system
 
@@ -96,7 +96,5 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
 - `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
 - Pass `agent` or `agent_config` (same shape as CLI / `create_agent_with_plugins`) so
   `prompt.*` is available; without an agent, those methods return an application error.
-
-## Not in this layer yet
-
-- No `lich serve` CLI entry (#84).
+- **CLI:** `lich serve [--host 127.0.0.1] [--port 0]` builds the Agent from the same
+  config resolution as TUI/chat and passes it as `agent_config`.

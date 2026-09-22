@@ -10,6 +10,7 @@ lich init              # write .lich/config.json without the wizard (flags apply
 lich "one shot task"   # run a single task and print the reply
 lich chat              # interactive chat (commands: /exit, /quit)
 lich tui               # interactive terminal UI (ink)
+lich serve             # headless WebSocket JSON-RPC agent on loopback
 lich gateway <plat..>  # messaging gateway (webhook|telegram|discord|twitch)
 lich config            # print a starter config template
 lich update            # install a newer npm release, if one exists
@@ -27,6 +28,7 @@ lich --version         # package.json version (published package and this tree: 
 - **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr.
 - **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer.
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
+- **Serve** starts a loopback-only WebSocket JSON-RPC server with the same Agent/config resolution as TUI/chat. On listen it prints one JSON line `{"port":…,"token":…}` to stdout for clients (e.g. ossuary) to parse. `--host` defaults to `127.0.0.1` and must be loopback; `--port` defaults to `0` (ephemeral). See the [serve architecture note](../architecture/serve.md).
 - **Gateway** runs platform adapters (defaults to `webhook` when no platform is given). See the [Gateway guide](gateway.md). Unknown platform names are skipped with a warning; if none remain, the CLI exits `1`.
 - **Update** compares the installed version to the npm registry and, when a newer release exists, runs `npm install -g @moikapy/lich@latest`. Exit any running TUI or gateway first; npm cannot replace the package while those processes are running. A git clone is told to `git pull`. See [Updating](../getting-started.md#updating).
 - **MCP** (`lich mcp`) edits only `mcp_servers` in `<work-dir>/.lich/config.json` through the same writer as `lich init` (`update` mode, so other keys stay). A missing file lists as empty; `add` creates the file if needed. New entries stay disabled until `enable`. Names must match `^[a-z][a-z0-9_]*$`. Catalog names use `optional-mcps/`; otherwise pass `--command` and repeatable `--arg`, or `--url` (loopback only), not both. Redot still needs `--project-path` for the catalog args, and the command basename must be `redot`. No prompts. See the [Redot guide](redot.md).
@@ -51,12 +53,14 @@ Flags work before or after the subcommand. Every value flag can also be set via 
 | `--resume <id\|latest>` | TUI only: load an existing session transcript into history. Exact id, unique filename prefix, or `latest` (newest by mtime). | – |
 | `--log-level <level>` | `debug` \| `info` \| `warn` \| `error`. | `info` |
 | `--theme <name>` | Display theme loaded once at startup. `lich` is built-in; other names read `~/.lich/themes/<name>.json`. | `lich` |
+| `--host <addr>` | `lich serve` only: bind address (loopback only for v1). | `127.0.0.1` |
+| `--port <n>` | `lich serve` only: TCP port (`0` = ephemeral). | `0` |
 | `--command <bin>` | `lich mcp add` only: local stdio binary. | – |
 | `--arg <value>` | `lich mcp add` only: repeatable stdio arg. May start with `--`. | – |
 | `--url <url>` | `lich mcp add` only: loopback HTTP MCP URL. | – |
 | `--project-path <path>` | `lich mcp add` only: catalog `${project_path}` substitute. | – |
 
-Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a positive integer`. Unknown flags fail with `unknown flag: --foo`. A flag missing its value fails with `<flag> requires a value`. `--resume` outside the TUI (one-shot, `chat`, `gateway`) fails with `--resume is only supported in TUI mode (not <mode>)`.
+Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a positive integer`. Unknown flags fail with `unknown flag: --foo`. A flag missing its value fails with `<flag> requires a value`. `--resume` outside the TUI (one-shot, `chat`, `gateway`, `serve`) fails with `--resume is only supported in TUI mode (not <mode>)`. `--host` / `--port` outside `serve` are unknown flags. Non-loopback `--host` is refused.
 
 ## Provider resolution
 
