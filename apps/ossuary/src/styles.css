@@ -16,15 +16,28 @@ body,
   height: 100%;
 }
 
-.hello {
+.hello,
+.shell {
   min-height: 100%;
   display: grid;
   place-items: center;
 }
 
-.hello h1 {
+.hello h1,
+.pane-header h1 {
   margin: 0;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: lowercase;
+}
+
+.pane {
+  width: min(36rem, 100%);
+  padding: 2rem;
+  text-align: center;
+}
+
+.pane-body {
+  margin: 0.75rem 0 0;
+  opacity: 0.7;
 }
