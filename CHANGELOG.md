@@ -4,8 +4,13 @@
 
 - TUI session resume (Phase 1): `lich --resume <id|latest>` loads an existing
   JSONL transcript into the TUI history and shows a `resumed <id> (n messages)`
-  banner. Persistence is still post-run until Phase 2; one-shot, chat, and
-  gateway reject `--resume`.
+  banner. One-shot, chat, and gateway reject `--resume`.
+- Incremental session persistence (Phase 2): Agent appends transcript records
+  as the loop emits (`llm_end`, `tool_call_end`, `budget_exhausted`,
+  `compress_end`) instead of a post-run bulk write. TUI opens one
+  `SessionHandle` per launch and passes it into every `agent.run`; one-shot,
+  chat, and gateway keep per-run files. Append failures warn and never fail
+  the run.
 
 ## 0.7.1
 

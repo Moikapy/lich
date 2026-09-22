@@ -185,24 +185,31 @@ coarse - see the trade-off note in [overview](./overview.md#design-trade-offs).
   "message": { "role": "assistant", "content": "done" } }
 ```
 
-What gets persisted, per run (`Agent.persist_session`): a `run_start` meta
-record, one `message` record per outcome message (including the seeded system
-message and tool messages), a `budget_exhausted` meta record when the run
-stopped on budget, and a `run_end` meta record (`stopped_reason`, `usage`)
-on every completed run. `usage` is the run's `usage_total`. Everything is
-best-effort: any error logs a warning and returns `session_path: undefined`
-instead of failing the run.
+What gets persisted while a run is active (`src/session/recorder.ts`): a
+`run_start` meta record at seed time, the seeded system/user (and prior
+history when the handle is owned or first used), then event-driven appends —
+`llm_end` → assistant message, `tool_call_end` → tool message (via exported
+`format_tool_result_content` / `tool_message_from_result`), `budget_exhausted`
+meta, and a `compress_end` meta marker. A `run_end` meta record
+(`stopped_reason`, `usage`) closes every completed run. `usage` is the run's
+`usage_total`. Everything is best-effort: any error logs a warning and never
+fails the run; `session_path` is the handle path when recording started.
+
+Callers may pass `AgentRunOptions.session` to reuse a `SessionHandle`. The TUI
+opens one handle per launch so N turns share one transcript file (one session
+id). One-shot, chat, and gateway omit the option and keep per-run files.
 
 `read_session_messages(path)` parses a file back into `Message[]`: per line it
 JSON-parses leniently, accepts only records with a `kind: "message"`-shaped
 `message` whose `role` is one of the four known roles, and silently skips
-everything else. Missing files parse to an empty array.
+everything else. Missing files parse to an empty array. On resume, raw
+pre-compress messages are replayed; compression simply re-runs on a later turn.
 
-**Resume (Phase 1):** `lich --resume <id|latest>` resolves a path with
+**Resume (Phase 1 + 2):** `lich --resume <id|latest>` resolves a path with
 `src/session/resolve.ts` (`latest` = newest `.jsonl` by mtime; otherwise exact
 `<id>.jsonl` or a unique filename-prefix match), then loads messages via
-`read_session_messages` into the TUI history. Persistence is still the
-post-run `persist_session` path above; incremental appends are Phase 2.
+`read_session_messages` into the TUI history. New turns append into a fresh
+per-launch handle (seeded with that history on first write).
 
 ## Error propagation
 
