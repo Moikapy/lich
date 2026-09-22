@@ -156,6 +156,15 @@ describe("config_template", () => {
       expect(template.providers[0]?.["model"]).toBe("test-model");
     });
   });
+
+  it("sets anthropic defaults when LICH_PROVIDER_KIND is anthropic", () => {
+    with_env_vars({ LICH_MODEL: undefined, LICH_PROVIDER_KIND: "anthropic" }, () => {
+      const template = JSON.parse(config_template()) as { providers: Array<Record<string, unknown>> };
+      expect(template.providers[0]?.["kind"]).toBe("anthropic");
+      expect(template.providers[0]?.["base_url"]).toBe("https://api.anthropic.com");
+      expect(template.providers[0]?.["api_key_env"]).toBe("ANTHROPIC_API_KEY");
+    });
+  });
 });
 
 describe("ensure_lich_config_dir", () => {

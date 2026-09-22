@@ -11,6 +11,31 @@ const LICH_DIRNAME = ".lich";
 const CONFIG_RELPATH = `${LICH_DIRNAME}/config.json`;
 const DEFAULT_USER_CONFIG = ".config/lich/config.json";
 
+export type ProviderKind = "openai_compat" | "anthropic" | "ollama";
+
+export interface ProviderKindDefaults {
+  base_url: string;
+  api_key_env?: string;
+}
+
+const KIND_DEFAULTS: Record<ProviderKind, ProviderKindDefaults> = {
+  openai_compat: { base_url: "https://api.openai.com/v1", api_key_env: "OPENAI_API_KEY" },
+  anthropic: { base_url: "https://api.anthropic.com", api_key_env: "ANTHROPIC_API_KEY" },
+  ollama: { base_url: "http://localhost:11434" },
+};
+
+/** Default base_url / api_key_env for a provider kind (CLI flags and templates). */
+export function provider_kind_defaults(kind: ProviderKind): ProviderKindDefaults {
+  return KIND_DEFAULTS[kind];
+}
+
+function parse_template_kind(raw: string): ProviderKind {
+  if (raw === "openai_compat" || raw === "anthropic" || raw === "ollama") {
+    return raw;
+  }
+  return "ollama";
+}
+
 /** Ordered absolute chain: work_dir (default cwd) first, then the user config home. */
 export function config_search_paths(work_dir?: string): string[] {
   const root = work_dir ?? process.cwd();
@@ -46,14 +71,16 @@ export function load_config(explicit?: string): Record<string, unknown> | undefi
 
 /** Starter config honoring LICH_* env hints; `lich config` prints it. */
 export function config_template(): string {
-  const kind = process.env.LICH_PROVIDER_KIND ?? "ollama";
+  const kind = parse_template_kind(process.env.LICH_PROVIDER_KIND ?? "ollama");
+  const defaults = provider_kind_defaults(kind);
   const provider: Record<string, unknown> = {
     kind,
     name: "main",
     model: process.env.LICH_MODEL ?? "<model-name>",
+    base_url: defaults.base_url,
   };
-  if (kind === "ollama") {
-    provider["base_url"] = "http://localhost:11434";
+  if (defaults.api_key_env !== undefined) {
+    provider["api_key_env"] = defaults.api_key_env;
   }
   return JSON.stringify({ providers: [provider], max_turns: 25, theme: "lich" }, null, 2);
 }
