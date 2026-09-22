@@ -284,16 +284,16 @@ Update `CHANGELOG.md` first so the new version notes match what you ship
 
 ### GitHub Actions (preferred)
 
-1. Create an npm **automation** token (or granular token) with publish
-   access to `@moikapy/lich`. Do **not** use a classic token that requires
-   an interactive OTP — `npm publish` in CI cannot answer OTP prompts.
-2. In the repo: **Settings → Secrets and variables → Actions → New
-   repository secret**, name `NPM_TOKEN`, paste the token.
-3. Ensure Actions can push commits/tags to `main` (repo
+Requires the `NPM_TOKEN` repository secret (npm **automation** or
+granular token with publish access to `@moikapy/lich` — not a classic
+token that needs interactive OTP, which `npm publish` in CI cannot
+answer). It is typically already configured; if not, add it under
+**Settings → Secrets and variables → Actions → New repository secret**.
+1. Ensure Actions can push commits/tags to `main` (repo
    **Settings → Actions → General → Workflow permissions**: read and
    write; if branch protection blocks `GITHUB_TOKEN`, allow GitHub Actions
    to bypass or push to `main`).
-4. Run: **Actions → Release → Run workflow** (from `main` only) → choose
+2. Run: **Actions → Release → Run workflow** (from `main` only) → choose
    `bump` (`patch` / `minor` / `major`, default `patch`).
 
 The workflow runs `bun release <bump>` (typecheck, test, bump, build,
