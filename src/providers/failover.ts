@@ -4,6 +4,8 @@ import type { ProviderErrorKind } from "./types.js";
 
 const DEFAULT_BACKOFF_BASE_MS = 500;
 const DEFAULT_BACKOFF_MAX_MS = 8000;
+/** Cap honored Retry-After; longer values skip retry and fail over. */
+const MAX_RETRY_AFTER_MS = 30_000;
 
 /**
  * Map any thrown value onto a provider error kind for retry/failover logic.
@@ -70,7 +72,11 @@ async function execute_retry_loop<T>(
       return { ok: false, error: make_abort_error(outcome.error) };
     }
     const kind = classify_error(outcome.error);
-    if (is_retryable_kind(kind) === false || attempt >= params.max_attempts) {
+    if (
+      is_retryable_kind(kind) === false ||
+      attempt >= params.max_attempts ||
+      retry_after_too_long(outcome.error) === true
+    ) {
       return outcome;
     }
     const delay_ms = delay_for_error(outcome.error, attempt);
@@ -101,15 +107,25 @@ function caller_aborted(signal: AbortSignal | undefined): boolean {
 }
 
 /**
- * Honor a server-provided Retry-After as the delay floor: use it whenever it
- * exceeds the computed deterministic backoff for this attempt.
+ * Honor a server-provided Retry-After as the delay floor, capped at
+ * MAX_RETRY_AFTER_MS. Values above the cap are rejected earlier via
+ * retry_after_too_long so the router can fail over instead of sleeping.
  */
 function delay_for_error(error: unknown, attempt: number): number {
   const backoff = compute_backoff_ms(attempt);
-  if (error instanceof ProviderError && error.retry_after_ms !== undefined && error.retry_after_ms > backoff) {
-    return error.retry_after_ms;
+  if (error instanceof ProviderError && error.retry_after_ms !== undefined) {
+    const capped = Math.min(error.retry_after_ms, MAX_RETRY_AFTER_MS);
+    return capped > backoff ? capped : backoff;
   }
   return backoff;
+}
+
+function retry_after_too_long(error: unknown): boolean {
+  return (
+    error instanceof ProviderError &&
+    error.retry_after_ms !== undefined &&
+    error.retry_after_ms > MAX_RETRY_AFTER_MS
+  );
 }
 
 async function wait_out_delay(delay_ms: number, signal: AbortSignal | undefined): Promise<void> {

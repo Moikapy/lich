@@ -17,8 +17,10 @@ import type {
 
 const DEFAULT_BASE_URL = "http://localhost:11434";
 const MAX_ERROR_BODY_CHARS = 500;
-const OVERFLOW_BODY_PATTERN = /context|token|maximum|too long/i;
+const OVERFLOW_BODY_PATTERN =
+  /context.?length|maximum context|prompt(?: is)? too (?:long|large)|token.?limit|context window|too many tokens|too long|exceed.{0,30}context limit/i;
 const UNPARSEABLE_ARGS_NOTE = "[unparseable tool arguments]";
+const TRUNCATED_TOOL_CALLS_NOTE = "[truncated tool call omitted]";
 
 let tool_call_counter = 0;
 
@@ -63,6 +65,7 @@ interface OllamaToolDto {
 interface OllamaOptionsDto {
   temperature?: number;
   num_predict?: number;
+  num_ctx?: number;
 }
 
 interface OllamaToolCallResponseDto {
@@ -230,7 +233,7 @@ function build_request_body(
   if (wire_tools.length > 0) {
     body.tools = wire_tools;
   }
-  const wire_options = build_wire_options(options);
+  const wire_options = build_wire_options(config, options);
   if (wire_options !== undefined) {
     body.options = wire_options;
   }
@@ -243,7 +246,10 @@ function build_request_body(
   return body;
 }
 
-function build_wire_options(options: ChatOptions | undefined): OllamaOptionsDto | undefined {
+function build_wire_options(
+  config: ProviderConfig,
+  options: ChatOptions | undefined,
+): OllamaOptionsDto | undefined {
   const wire_options: OllamaOptionsDto = {};
   if (options?.temperature !== undefined) {
     wire_options.temperature = options.temperature;
@@ -251,7 +257,13 @@ function build_wire_options(options: ChatOptions | undefined): OllamaOptionsDto 
   if (options?.max_tokens !== undefined) {
     wire_options.num_predict = options.max_tokens;
   }
-  const has_any = wire_options.temperature !== undefined || wire_options.num_predict !== undefined;
+  if (config.num_ctx !== undefined) {
+    wire_options.num_ctx = config.num_ctx;
+  }
+  const has_any =
+    wire_options.temperature !== undefined ||
+    wire_options.num_predict !== undefined ||
+    wire_options.num_ctx !== undefined;
   return has_any === true ? wire_options : undefined;
 }
 
@@ -323,7 +335,7 @@ function status_to_error_kind(status: number, body_text: string): ProviderErrorK
   if (status === 429 || status >= 500) {
     return "rate_limit";
   }
-  if (status === 400 && OVERFLOW_BODY_PATTERN.test(body_text) === true) {
+  if (status === 413 || (status === 400 && OVERFLOW_BODY_PATTERN.test(body_text) === true)) {
     return "overflow";
   }
   return "bad_request";
@@ -361,7 +373,14 @@ function to_chat_response(dto: OllamaChatResponseDto, config: ProviderConfig): C
   if (message_content.length > 0) {
     content_parts.push(message_content);
   }
-  const parsed_calls = parse_tool_calls(dto.message.tool_calls ?? [], content_parts);
+  const finish_reason = map_done_reason(dto.done_reason, (dto.message.tool_calls ?? []).length > 0);
+  const parsed_calls =
+    finish_reason === "length"
+      ? []
+      : parse_tool_calls(dto.message.tool_calls ?? [], content_parts);
+  if (finish_reason === "length" && (dto.message.tool_calls ?? []).length > 0) {
+    content_parts.push(TRUNCATED_TOOL_CALLS_NOTE);
+  }
   const has_tool_calls = parsed_calls.length > 0;
   return {
     message: {
@@ -370,7 +389,7 @@ function to_chat_response(dto: OllamaChatResponseDto, config: ProviderConfig): C
       ...(has_tool_calls === true ? { tool_calls: parsed_calls } : {}),
     },
     usage: parse_usage(dto),
-    finish_reason: map_done_reason(dto.done_reason, has_tool_calls),
+    finish_reason: has_tool_calls === true ? "tool_calls" : finish_reason === "tool_calls" ? "stop" : finish_reason,
     model: dto.model ?? config.model,
     provider_name: config.name,
   };
@@ -381,11 +400,31 @@ function next_tool_call_id(): string {
   return `ollama_${Date.now().toString(36)}_${tool_call_counter}`;
 }
 
+function parse_tool_calls(raw_calls: OllamaToolCallResponseDto[], content_parts: string[]): ToolCall[] {
+  const tool_calls: ToolCall[] = [];
+  for (const raw_call of raw_calls) {
+    const name = raw_call.function?.name ?? "";
+    const args = try_normalize_tool_arguments(raw_call.function?.arguments, content_parts);
+    if (args === undefined) {
+      continue;
+    }
+    tool_calls.push({
+      id: next_tool_call_id(),
+      name,
+      args,
+    });
+  }
+  return tool_calls;
+}
+
 /**
  * Tool-call arguments arrive as an object per the docs, but some proxies send
- * a JSON string; accept both and fall back to empty args with a note.
+ * a JSON string; accept both. Unparseable args are omitted (not executed as {}).
  */
-function normalize_tool_arguments(raw_arguments: unknown, content_parts: string[]): Record<string, unknown> {
+function try_normalize_tool_arguments(
+  raw_arguments: unknown,
+  content_parts: string[],
+): Record<string, unknown> | undefined {
   if (is_record(raw_arguments) === true) {
     return raw_arguments;
   }
@@ -396,20 +435,7 @@ function normalize_tool_arguments(raw_arguments: unknown, content_parts: string[
     }
   }
   content_parts.push(UNPARSEABLE_ARGS_NOTE);
-  return {};
-}
-
-function parse_tool_calls(raw_calls: OllamaToolCallResponseDto[], content_parts: string[]): ToolCall[] {
-  const tool_calls: ToolCall[] = [];
-  for (const raw_call of raw_calls) {
-    const name = raw_call.function?.name ?? "";
-    tool_calls.push({
-      id: next_tool_call_id(),
-      name,
-      args: normalize_tool_arguments(raw_call.function?.arguments, content_parts),
-    });
-  }
-  return tool_calls;
+  return undefined;
 }
 
 function parse_usage(dto: OllamaChatResponseDto): Usage {

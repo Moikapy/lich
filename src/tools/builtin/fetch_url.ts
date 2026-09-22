@@ -1,5 +1,6 @@
 import type { JsonSchemaObject } from "../../util/json_schema.js";
 import { capture_errors, clamp_output, optional_number_arg, require_string_arg } from "../guard.js";
+import { read_clamped_text } from "../read_clamped.js";
 import type { Tool, ToolResult } from "../types.js";
 import { parse_http_url, safe_fetch } from "../url_guard.js";
 
@@ -7,6 +8,8 @@ const DEFAULT_MAX_CHARS = 20000;
 const MAX_MAX_CHARS = 100000;
 const DEFAULT_TIMEOUT_MS = 20000;
 const MAX_TIMEOUT_MS = 60000;
+/** Hard byte ceiling when streaming; slightly above max_chars to leave room for encoding. */
+const MAX_BODY_BYTES = MAX_MAX_CHARS * 4;
 
 export const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36";
 
@@ -53,16 +56,17 @@ async function run_fetch_url(args: Record<string, unknown>, external?: AbortSign
   if (content_type.startsWith("image/") === true || content_type.startsWith("application/octet-stream") === true) {
     return { ok: false, output: "", error: `unsupported_content_type: ${content_type}` };
   }
-  const text = await response.text();
+  const byte_budget = Math.min(MAX_BODY_BYTES, max_chars * 4);
+  const clamped = await read_clamped_text(response, byte_budget);
   const marker = content_type.toLowerCase().includes("text/html") === true ? "[html content]\n" : "";
-  const body = clamp_output(`${marker}${text}`, max_chars);
-  return { ok: true, output: `${header_line(response, text)}\n${body}` };
+  const body = clamp_output(`${marker}${clamped.text}`, max_chars);
+  return { ok: true, output: `${header_line(response, clamped.bytes_read)}\n${body}` };
 }
 
-function header_line(response: Response, text: string): string {
+function header_line(response: Response, bytes_read: number): string {
   const content_type = response.headers.get("content-type") ?? "unknown";
   const declared = Number.parseInt(response.headers.get("content-length") ?? "", 10);
-  const bytes = Number.isFinite(declared) === true ? declared : Buffer.byteLength(text, "utf8");
+  const bytes = Number.isFinite(declared) === true ? declared : bytes_read;
   return `# ${response.status} ${content_type} (${bytes} bytes)`;
 }
 
