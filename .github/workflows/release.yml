@@ -1,0 +1,69 @@
+# Manual release: bump → pack → push main+tag → npm publish.
+# Requires repository secret NPM_TOKEN (npm automation/granular publish token).
+# OIDC trusted publishing is preferred long-term; id-token: write is reserved for that follow-up.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver bump kind
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Persist credentials so bun release can push main + tags with GITHUB_TOKEN.
+          persist-credentials: true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Stage release (bump, build, pack, commit, tag, push)
+        env:
+          CI: "true"
+        run: bun release ${{ inputs.bump }}
+
+      - name: Publish packed tarball to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          TGZ="test/.tmp/lich-${VERSION}.tgz"
+          if [ ! -f "$TGZ" ]; then
+            echo "Pack missing: ${TGZ} — refusing to publish"
+            exit 1
+          fi
+          npm publish "$TGZ" --access public

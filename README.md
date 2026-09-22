@@ -279,15 +279,42 @@ packages in /tmp and break dependency resolution.
 
 ## Releasing
 
+Update `CHANGELOG.md` first so the new version notes match what you ship
+(GitHub release labels / automated notes are a follow-up).
+
+### GitHub Actions (preferred)
+
+1. Create an npm **automation** token (or granular token) with publish
+   access to `@moikapy/lich`. Do **not** use a classic token that requires
+   an interactive OTP — `npm publish` in CI cannot answer OTP prompts.
+2. In the repo: **Settings → Secrets and variables → Actions → New
+   repository secret**, name `NPM_TOKEN`, paste the token.
+3. Ensure Actions can push commits/tags to `main` (repo
+   **Settings → Actions → General → Workflow permissions**: read and
+   write; if branch protection blocks `GITHUB_TOKEN`, allow GitHub Actions
+   to bypass or push to `main`).
+4. Run: **Actions → Release → Run workflow** (from `main` only) → choose
+   `bump` (`patch` / `minor` / `major`, default `patch`).
+
+The workflow runs `bun release <bump>` (typecheck, test, bump, build,
+pack + audit, commit, tag, push — no force-push), then
+`npm publish test/.tmp/lich-<version>.tgz --access public` with
+`NODE_AUTH_TOKEN` from `NPM_TOKEN`. It refuses to publish if the pack
+file is missing. Permissions include `id-token: write` for a future npm
+OIDC trusted-publishing switch; today the token path is what works.
+
+### Local
+
 ```sh
 bun release patch    # or minor | major
+npm publish test/.tmp/lich-<version>.tgz
 ```
 
 Fails closed on a dirty tree, a non-main branch, a typecheck error, or a
 test failure; bumps via `npm version`, builds, and packs + audits
 `test/.tmp/lich-<version>.tgz` (SHA-512 + scope verification) before
-committing, tagging `v<version>`, and pushing main. Publishing stays manual
-(`npm publish test/.tmp/lich-<version>.tgz`) so npm can prompt for the OTP.
+committing, tagging `v<version>`, and pushing main. Local publish stays
+interactive so npm can prompt for OTP.
 
 ## License
 
