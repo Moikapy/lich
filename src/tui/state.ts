@@ -192,7 +192,8 @@ export function resume_session_view(
 ): { blocks: readonly HistoryBlock[]; banner_line: string } {
   const banner_line = resume_banner_line(id, resume_banner_count(messages));
   const notice: HistoryBlock = { role: "meta", lines: [`\u00b7 ${banner_line}`] };
-  return { blocks: [notice, ...split_history_blocks(messages, cap, theme)], banner_line };
+  const history_cap = Math.max(0, cap - 1);
+  return { blocks: [notice, ...split_history_blocks(messages, history_cap, theme)], banner_line };
 }
 
 /** Missing `/resume` argument notice. */
