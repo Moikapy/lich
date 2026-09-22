@@ -4,13 +4,18 @@
  * an idle adapter. No resume support — reconnects are fresh by design.
  */
 import { logger } from "../util/log.js";
+import { sleep } from "../util/sleep.js";
 import { platform_token_env, read_platform_token } from "./token_env.js";
 import type { AdapterParams, PlatformAdapter, RawSocket } from "./types.js";
 import { create_idle_adapter, open_socket, run_inbound_message } from "./types.js";
 
 const DISCORD_API = "https://discord.com/api/v10";
 const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
-const INTENTS = 512 | 32768;
+/** Guild messages + message content + direct messages. */
+const INTENTS = 512 | 32768 | 4096;
+export const DISCORD_BACKOFF_MS = [5000, 10000, 20000, 30000] as const;
+/** Auth / sharding / API-version failures — reconnecting cannot recover. */
+const DISCORD_FATAL_CLOSE = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
 /** Live heartbeat timers keyed by socket, cleared when the session ends. */
 const heartbeat_timers = new WeakMap<RawSocket, ReturnType<typeof setInterval>>();
 
@@ -27,6 +32,12 @@ interface DiscordMessageData {
   author_id: string;
 }
 
+interface DiscordSessionState {
+  last_seq: number | null;
+  identified: boolean;
+  ack_pending: boolean;
+}
+
 export function create_discord_adapter(params: AdapterParams): PlatformAdapter {
   const token = read_platform_token(params.config, "discord");
   if (token === undefined) {
@@ -34,16 +45,19 @@ export function create_discord_adapter(params: AdapterParams): PlatformAdapter {
   }
   let running = false;
   let socket: RawSocket | undefined;
+  let stop_controller = new AbortController();
   return {
     name: "discord",
     start: async () => {
       running = true;
+      stop_controller = new AbortController();
       void connect_loop(params, token, () => running, (opened) => {
         socket = opened;
-      });
+      }, stop_controller.signal);
     },
     stop: async () => {
       running = false;
+      stop_controller.abort();
       socket?.close();
       socket = undefined;
     },
@@ -55,37 +69,64 @@ async function connect_loop(
   token: string,
   keep_running: () => boolean,
   set_socket: (socket: RawSocket) => void,
+  signal: AbortSignal,
 ): Promise<void> {
+  let backoff_index = 0;
   while (keep_running()) {
+    let close_code: number | undefined;
+    let identified = false;
     try {
       const socket = await open_socket(GATEWAY_URL);
       set_socket(socket);
-      await socket_session(socket, token, params);
+      const session = await socket_session(socket, token, params);
+      close_code = session.close_code;
+      identified = session.identified;
+      if (close_code !== undefined && DISCORD_FATAL_CLOSE.has(close_code)) {
+        logger.warn(`gateway discord fatal close ${close_code}; stopping reconnect`);
+        return;
+      }
     } catch (error) {
-      logger.warn("gateway discord connection failed; reconnecting in 5s", error);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      logger.warn("gateway discord connection failed", error);
     }
+    if (keep_running() === false) {
+      return;
+    }
+    if (identified === true) {
+      backoff_index = 0;
+    }
+    const delay = DISCORD_BACKOFF_MS[backoff_index] ?? 30000;
+    const close_note = close_code === undefined ? "" : ` (close ${close_code})`;
+    logger.warn(`gateway discord reconnecting in ${delay}ms${close_note}`);
+    try {
+      await sleep(delay, signal);
+    } catch {
+      return;
+    }
+    backoff_index = Math.min(backoff_index + 1, DISCORD_BACKOFF_MS.length - 1);
   }
 }
 
-async function socket_session(socket: RawSocket, token: string, params: AdapterParams): Promise<void> {
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
-  const done = new Promise<void>((resolve) => {
-    socket.onclose = () => resolve();
+async function socket_session(
+  socket: RawSocket,
+  token: string,
+  params: AdapterParams,
+): Promise<{ close_code: number; identified: boolean }> {
+  const state: DiscordSessionState = { last_seq: null, identified: false, ack_pending: false };
+  const done = new Promise<number>((resolve) => {
+    socket.onclose = ((event?: { code?: number }) => {
+      resolve(typeof event?.code === "number" ? event.code : 1000);
+    }) as () => void;
   });
   socket.onmessage = (event) => {
     const payload = parse_payload(event.data);
     if (payload === undefined) {
       return;
     }
-    handle_discord_payload(socket, token, params, payload);
+    handle_discord_payload(socket, token, params, payload, state);
   };
-  await done;
-  heartbeat = heartbeat_timers.get(socket);
-  if (heartbeat !== undefined) {
-    clearInterval(heartbeat);
-    heartbeat_timers.delete(socket);
-  }
+  const close_code = await done;
+  clear_heartbeat(socket);
+  return { close_code, identified: state.identified };
 }
 
 function handle_discord_payload(
@@ -93,10 +134,30 @@ function handle_discord_payload(
   token: string,
   params: AdapterParams,
   payload: DiscordPayload,
+  state: DiscordSessionState,
 ): void {
+  if (typeof payload.s === "number") {
+    state.last_seq = payload.s;
+  }
+  if (payload.op === 11) {
+    state.ack_pending = false;
+    return;
+  }
+  if (payload.op === 1) {
+    send_heartbeat(socket, state);
+    return;
+  }
+  if (payload.op === 7 || payload.op === 9) {
+    socket.close();
+    return;
+  }
   if (payload.op === 10 && is_hello(payload.d)) {
     socket.send(JSON.stringify({ op: 2, d: identify_body(token) }));
-    schedule_heartbeat(socket, payload.d.heartbeat_interval);
+    schedule_heartbeat(socket, payload.d.heartbeat_interval, state);
+    return;
+  }
+  if (payload.t === "READY") {
+    state.identified = true;
     return;
   }
   if (payload.t === "MESSAGE_CREATE") {
@@ -107,12 +168,31 @@ function handle_discord_payload(
 function schedule_heartbeat(
   socket: RawSocket,
   interval_ms: unknown,
+  state: DiscordSessionState,
 ): void {
+  clear_heartbeat(socket);
   const interval = typeof interval_ms === "number" ? interval_ms : 45000;
   const timer = setInterval(() => {
-    socket.send(JSON.stringify({ op: 1, d: null }));
+    if (state.ack_pending === true) {
+      socket.close();
+      return;
+    }
+    send_heartbeat(socket, state);
   }, Math.max(1000, interval - 1000));
   heartbeat_timers.set(socket, timer);
+}
+
+function send_heartbeat(socket: RawSocket, state: DiscordSessionState): void {
+  state.ack_pending = true;
+  socket.send(JSON.stringify({ op: 1, d: state.last_seq }));
+}
+
+function clear_heartbeat(socket: RawSocket): void {
+  const heartbeat = heartbeat_timers.get(socket);
+  if (heartbeat !== undefined) {
+    clearInterval(heartbeat);
+    heartbeat_timers.delete(socket);
+  }
 }
 
 function identify_body(token: string): Record<string, unknown> {
@@ -150,7 +230,7 @@ async function rest_send_message(params: AdapterParams, channel_id: string, text
     const response = await fetch(`${DISCORD_API}/channels/${channel_id}/messages`, {
       method: "POST",
       headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ content: chunk }),
+      body: JSON.stringify({ content: chunk, allowed_mentions: { parse: [] } }),
       signal: AbortSignal.timeout(30_000),
     });
     if (response.ok === false) {
