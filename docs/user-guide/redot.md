@@ -22,13 +22,13 @@ The client is general, the same shape as Hermes and Claude: a named list you ext
 }
 ```
 
-stdio is a local binary you named, plus `args`, plus optional `env`. The process is spawned with those argv, never a shell. `npx`, `npm`, `bunx`, `uvx`, `curl`, `wget`, a URL, and shell metacharacters are refused. lich does not run `npx -y` or fetch an addon. Values in `env` are passed to the process and are never logged. `lich mcp add` has no flag for `env`; set that key in the file if you need it. On Bun, the spawned child is not `unref`'d, so one-shot and other short-lived runs wait for the MCP answer instead of exiting while the child is still working; `Agent.close()` (every CLI mode calls it) kills the child.
+stdio is a local binary you named, plus `args`, plus optional `env`. The process is spawned with those argv, never a shell. Config validation refuses common downloader basenames (`npx`, `npm`, `bunx`, `uvx`, `curl`, `wget`), a URL in the command, and shell metacharacters — a footgun guard, not a sandbox (wrappers like `bash -c` or `env npx` are not covered). Treat an enabled server as trusted code. lich does not run `npx -y` or fetch an addon. Values in `env` are passed to the process and are never logged. `lich mcp add` has no flag for `env`; set that key in the file if you need it. On Bun, the spawned child is not `unref`'d, so one-shot and other short-lived runs wait for the MCP answer instead of exiting while the child is still working; `Agent.close()` (every CLI mode calls it) kills the child.
 
 HTTP is `{ "url": "http://127.0.0.1:9/mcp" }`. The host must be `127.0.0.1` or `localhost`. `0.0.0.0` and any other host are refused. There is no remote MCP in v1.
 
 On connect the client sends `initialize`, then `notifications/initialized`, then `tools/list`. `tools/call` runs only when the model invokes a registered tool. Registered names are `mcp_<server>_<tool>`, so two servers cannot collide. They appear only when that server is `enabled` and `tools_enabled` is `"all"` or lists the prefixed name. `tools_enabled: []` drops them even when the server is enabled, and does not connect. Plugin tools still register, including the gatekeeper's `git_commit`. The commander persona keeps `tools_enabled: []` and the `game_bridge` plugin only — `persona_config` does not copy `mcp_servers`.
 
-This client ships in 0.7.0 (`lich mcp`, `mcp_servers`). From a clone, use `bun src/cli.ts mcp ...`.
+This client has shipped since 0.7.0 (`lich mcp`, `mcp_servers`; current package 0.8.0). From a clone, use `bun src/cli.ts mcp ...`.
 
 ## Add a server
 

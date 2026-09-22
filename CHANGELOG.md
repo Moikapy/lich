@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0 (unreleased)
+## 0.8.0
 
 - TUI session resume (Phase 1): `lich --resume <id|latest>` loads an existing
   JSONL transcript into the TUI history and shows a `resumed <id> (n messages)`
