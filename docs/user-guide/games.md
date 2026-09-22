@@ -60,7 +60,8 @@ jq -r 'select(.kind=="message") | select(.message.role=="tool" and .message.is_e
 ```
 
 ```bash
-# (5) pacing
+# (5) pacing (`.ts` is append/write time for each JSONL record — useful with
+# incremental persistence; not a model-side event clock)
 jq -r 'select(.kind=="message") | select(.message.role=="user" or .message.role=="assistant")
        | [.ts, .message.role] | @tsv' .lich/sessions/<run>.jsonl
 ```

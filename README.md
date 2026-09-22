@@ -15,7 +15,7 @@ mythology lives in display strings only.
 | --- | --- | --- |
 | **phylacteries** | JSONL session files in `.lich/sessions/` — conversations survive process death | This glossary; TUI `/sessions` listing label |
 | **vessel-hopping** | Provider failover: 429/5xx retried with backoff, then the next provider takes over | This glossary |
-| **the lair / wards** | `work_dir` confinement + `path_escape` guardrails for file tools. Wards do **not** apply to `terminal` or `run_tests` (shell still runs in `work_dir`; secret env names are scrubbed on spawn). | This glossary |
+| **the lair / wards** | `work_dir` confinement for file tools (`resolve_safe_path` / realpath). Lexical+realpath only — not a sandbox. Wards do **not** apply to `terminal` or `run_tests` (shell still runs in `work_dir`; secret env names are scrubbed on spawn). | This glossary |
 | **lair actions** | Plugin hooks that observe or veto tool calls | This glossary |
 | **familiars** | Gateway adapters (webhook/telegram/discord/twitch) routing into one shared agent | This glossary |
 | **spells** | Builtin tools in the registry | This glossary |
@@ -47,11 +47,11 @@ npm install -g @moikapy/lich
 ```
 
 ```sh
-# one-shot task
-LICH_MODEL=gpt-4.1-mini LICH_PROVIDER_KIND=openai_compat lich "summarize this repo"
+# one-shot task (use a model id your provider accepts)
+LICH_MODEL=gpt-4o-mini LICH_PROVIDER_KIND=openai_compat lich "summarize this repo"
 
 # interactive chat (commands: /exit, /quit)
-LICH_MODEL=claude-sonnet-4 LICH_PROVIDER_KIND=anthropic lich chat
+LICH_MODEL=claude-sonnet-4-20250514 LICH_PROVIDER_KIND=anthropic lich chat
 
 # local ollama (no api key needed)
 ollama pull llama3.2
@@ -132,13 +132,29 @@ the next self-commit. One gated `git_commit` per run requires
 
 | Variable | Purpose |
 | --- | --- |
-| `LICH_MODEL` | model name (e.g. `gpt-4.1-mini`, `claude-sonnet-4`, `llama3.2`) |
+| `LICH_MODEL` | model id your provider accepts (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`, `llama3.2`) |
 | `LICH_PROVIDER_KIND` | `openai_compat` \| `anthropic` \| `ollama` (default `openai_compat`) |
 | `LICH_BASE_URL` | provider base url (ollama default: `http://localhost:11434`) |
 | `LICH_API_KEY_ENV` | env var holding the api key (unused by ollama) |
 | `LICH_ALLOW_SELF_COMMIT` | set to `1` to allow one gated `git_commit` per run; unset is fail-closed |
 | `LICH_ALLOW_PRIVATE_URLS` | set to exactly `1` to let `fetch_url` / `http_request` reach private or loopback URLs; unset or any other value is fail-closed (blocked) |
 | `LICH_TEST_COMMAND` | command `run_tests` runs (default: `node node_modules/vitest/vitest.mjs run`) |
+| `LICH_DOCS_DIR` | optional docs root for `docs_read` / `docs_search` (directory with `index.md`, or a parent containing `docs/`); else `<work_dir>/docs` or the package docs |
+| `LICH_TERMINAL_TIMEOUT_MS` | injected into tool context from config `terminal_timeout_ms`; the `terminal` tool does **not** read it yet — use the tool's `timeout_ms` arg (default 60000) |
+
+Gateway-only vars are listed under [Gateway](#gateway).
+
+## Trust model
+
+Short map of who can do what:
+
+| Surface | Trust assumption |
+| --- | --- |
+| **File tools** | Confined to `work_dir` via realpath checks. Not a VM/sandbox; symlinks that stay inside the tree are allowed. |
+| **`terminal` / `run_tests`** | Full shell in `work_dir`. Outside the file wards. Secret-ish env names are scrubbed on spawn; still treat as high privilege. |
+| **Plugins** | Load at startup from paths you list in config. In-process, same privileges as the agent. Only load code you wrote or audited. |
+| **MCP servers** | Enabled servers are trusted local processes (or loopback HTTP). Basename refuse lists block common downloaders as a footgun guard, not a hard boundary — wrappers can bypass them. |
+| **Gateway users** | Public platforms default-deny until allowlisted. Webhook binds loopback by default; non-loopback requires `LICH_GATEWAY_TOKEN`. Gateway tools default to a read-only subset unless you override `gateway.tools_enabled`. |
 
 ## Ollama
 
@@ -175,8 +191,9 @@ Environment variables:
 
 | Variable | Purpose |
 | --- | --- |
+| `LICH_GATEWAY_HOST` | webhook bind address (default `127.0.0.1`; non-loopback requires `LICH_GATEWAY_TOKEN`) |
 | `LICH_GATEWAY_PORT` | webhook port (default `8089`) |
-| `LICH_GATEWAY_TOKEN` | webhook auth: requests must send header `x-lich-token` |
+| `LICH_GATEWAY_TOKEN` | webhook auth: requests must send header `x-lich-token`; required for non-loopback binds |
 | `LICH_TELEGRAM_BOT_TOKEN` | telegram bot token (adapter idles without it) |
 | `LICH_DISCORD_BOT_TOKEN` | discord bot token (adapter idles without it) |
 | `LICH_DISCORD_BOT_ID` | discord bot id; mentions of `<@id>` are stripped |
@@ -210,7 +227,7 @@ lich tui
 ```
 
 Slash commands: `/help`, `/model`, `/usage`, `/clear`, `/sessions`,
-`/exit` (also `/quit`, `/q`). The transcript shows the newest 50 blocks.
+`/resume`, `/exit` (also `/quit`, `/q`). The transcript shows the newest 50 blocks.
 
 ## Themes
 
@@ -253,18 +270,20 @@ substitutes `{chars}`; `notices.sessions` substitutes `{count}`.
 Two directions. lich connects **to** an editor MCP server (stdio local
 command, or loopback HTTP). The game connects **to** lich through the webhook
 and [`examples/game_bridge`](examples/game_bridge/README.md). Default is off.
-`mcp_servers` is a closed record. Names are `mcp_<server>_<tool>`. `npx`,
-`npm`, `bunx`, `uvx`, `curl`, `wget`, remote URLs, and shell metacharacters
-are refused. On Bun, stdio children are not `unref`'d, so a one-shot or
-other short-lived run waits for the MCP answer instead of exiting while
-the child is still working; `agent.close()` (which every CLI mode calls)
-kills the child.
+`mcp_servers` is a closed record. Names are `mcp_<server>_<tool>`. Config
+validation refuses common downloader basenames (`npx`, `npm`, `bunx`,
+`uvx`, `curl`, `wget`), remote URLs, and shell metacharacters in the
+command — a footgun guard, not a sandbox (wrappers like `bash -c` or
+`env npx` are not covered). Treat enabled MCP as trusted code. On Bun,
+stdio children are not `unref`'d, so a one-shot or other short-lived run
+waits for the MCP answer instead of exiting while the child is still
+working; `agent.close()` (which every CLI mode calls) kills the child.
 
-This source has `lich mcp list|add|enable|disable|remove` (changelog 0.7.0).
-From a clone: `bun src/cli.ts mcp list`. Redot is a catalog
-entry (`redot --headless --mcp-server`), not a fork inside lich. Godot has
-no official MCP server; lich does not download a community addon. See
-[docs/user-guide/redot.md](docs/user-guide/redot.md).
+`lich mcp list|add|enable|disable|remove` ships in this package (since
+0.7.0; current release **0.8.0**). From a clone: `bun src/cli.ts mcp list`.
+Redot is a catalog entry (`redot --headless --mcp-server`), not a fork
+inside lich. Godot has no official MCP server; lich does not download a
+community addon. See [docs/user-guide/redot.md](docs/user-guide/redot.md).
 
 ## Development
 

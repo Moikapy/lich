@@ -42,7 +42,9 @@ confinement root), a process environment map (the agent injects
 from `Agent.run` so tools cancel on caller abort **or** the executor deadline
 (`tool.timeout_ms`, else
 `DEFAULT_TOOL_TIMEOUT_MS` = 30000). `terminal` sets 300000, `run_tests` sets
-600000, and registered MCP tools set 120000.
+600000, and registered MCP tools set 120000. Note: `LICH_TERMINAL_TIMEOUT_MS`
+is injected from config `terminal_timeout_ms` but the `terminal` tool ignores
+it today — use the tool's `timeout_ms` argument (default 60000).
 
 **Parameter schemas.** `parameters` is a `JsonSchemaObject`
 (`src/util/json_schema.ts`) passed through verbatim into provider requests.
