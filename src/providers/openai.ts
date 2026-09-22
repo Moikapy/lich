@@ -19,8 +19,11 @@ const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const WELL_KNOWN_HOST = "api.openai.com";
 const WELL_KNOWN_KEY_ENV = "OPENAI_API_KEY";
 const MAX_ERROR_BODY_CHARS = 500;
-const OVERFLOW_BODY_PATTERN = /context|token|length/i;
+const OVERFLOW_BODY_PATTERN =
+  /context.?length|maximum context|prompt(?: is)? too (?:long|large)|token.?limit|context window|too many tokens|exceed.{0,30}context limit/i;
 const UNPARSEABLE_ARGS_NOTE = "[unparseable tool arguments]";
+const TRUNCATED_TOOL_CALLS_NOTE = "[truncated tool call omitted]";
+const REASONING_MODEL_PATTERN = /^(o[1-9]|o[1-9]-|gpt-5)/i;
 
 /**
  * Wire DTOs for the OpenAI chat-completions API. Typed interfaces keep the
@@ -32,6 +35,7 @@ interface OpenAiChatRequestDto {
   tools?: OpenAiToolDto[];
   temperature?: number;
   max_tokens?: number;
+  max_completion_tokens?: number;
 }
 
 interface OpenAiMessageDto {
@@ -234,13 +238,21 @@ function build_request_body(
   if (wire_tools.length > 0) {
     body.tools = wire_tools;
   }
-  if (options?.temperature !== undefined) {
+  if (options?.temperature !== undefined && is_reasoning_model(model) === false) {
     body.temperature = options.temperature;
   }
   if (options?.max_tokens !== undefined) {
-    body.max_tokens = options.max_tokens;
+    if (is_reasoning_model(model) === true) {
+      body.max_completion_tokens = options.max_tokens;
+    } else {
+      body.max_tokens = options.max_tokens;
+    }
   }
   return body;
+}
+
+function is_reasoning_model(model: string): boolean {
+  return REASONING_MODEL_PATTERN.test(model) === true;
 }
 
 function build_request_init(api_key: string | undefined, body: string, signal: AbortSignal | undefined): RequestInit {
@@ -311,7 +323,7 @@ function status_to_error_kind(status: number, body_text: string): ProviderErrorK
   if (status === 429 || status >= 500) {
     return "rate_limit";
   }
-  if (status === 400 && OVERFLOW_BODY_PATTERN.test(body_text) === true) {
+  if (status === 413 || (status === 400 && OVERFLOW_BODY_PATTERN.test(body_text) === true)) {
     return "overflow";
   }
   return "bad_request";
@@ -338,28 +350,44 @@ function parse_chat_response(dto: OpenAiChatResponseDto, config: ProviderConfig)
       message: "provider returned a success response without choices",
     });
   }
+  const finish_reason = map_finish_reason(choice.finish_reason);
   return {
-    message: parse_assistant_message(choice.message),
+    message: parse_assistant_message(choice.message, finish_reason),
     usage: parse_usage(dto.usage),
-    finish_reason: map_finish_reason(choice.finish_reason),
+    finish_reason,
     model: dto.model ?? config.model,
     provider_name: config.name,
   };
 }
 
-function parse_assistant_message(dto: NonNullable<OpenAiChoiceDto["message"]>): AssistantMessage {
+function parse_assistant_message(
+  dto: NonNullable<OpenAiChoiceDto["message"]>,
+  finish_reason: FinishReason,
+): AssistantMessage {
   const content_parts: string[] = [];
   if (dto.content !== undefined && dto.content !== null && dto.content.length > 0) {
     content_parts.push(dto.content);
   }
+  const raw_calls = dto.tool_calls ?? [];
+  if (finish_reason === "length" && raw_calls.length > 0) {
+    content_parts.push(TRUNCATED_TOOL_CALLS_NOTE);
+    return {
+      role: "assistant",
+      content: content_parts.filter((part) => part.length > 0).join("\n"),
+    };
+  }
   const tool_calls: ToolCall[] = [];
-  for (const raw_call of dto.tool_calls ?? []) {
+  for (const raw_call of raw_calls) {
     const raw_arguments = raw_call.function?.arguments ?? "";
-    const parsed_arguments = raw_arguments.length === 0 ? {} : safe_json_parse<Record<string, unknown>>(raw_arguments);
+    const parsed_arguments =
+      raw_arguments.length === 0 ? {} : safe_json_parse<Record<string, unknown>>(raw_arguments);
     if (is_record(parsed_arguments) === true) {
-      tool_calls.push({ id: raw_call.id ?? "", name: raw_call.function?.name ?? "", args: parsed_arguments });
+      tool_calls.push({
+        id: raw_call.id ?? "",
+        name: raw_call.function?.name ?? "",
+        args: parsed_arguments,
+      });
     } else {
-      tool_calls.push({ id: raw_call.id ?? "", name: raw_call.function?.name ?? "", args: {} });
       content_parts.push(UNPARSEABLE_ARGS_NOTE);
     }
   }
