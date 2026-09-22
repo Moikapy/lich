@@ -39,20 +39,23 @@ Tool shapes and the meteor gate: [`examples/game_bridge/README.md`](../game_brid
 
 ## HTTP
 
-Loopback only (`127.0.0.1`), default port `8090` so it does not collide with the CLI webhook (`8089` on `0.0.0.0`). Optional `token` checks `x-lich-token`.
+Loopback only (`127.0.0.1`), default port `8090` so it does not collide with the CLI webhook (`8089` on `0.0.0.0`). A non-empty `token` is **required**; requests must send matching `x-lich-token`. `POST /message` also requires `Host` to be loopback, `Content-Type: application/json`, and a body under ~1 MB.
 
 ```sh
+export LICH_GATEWAY_TOKEN=sekrit
 curl -s -X POST http://127.0.0.1:8090/message \
   -H "content-type: application/json" \
+  -H "x-lich-token: sekrit" \
   -d '{"text":"round 1: hero1 at full. goblin is the only living enemy.","chat_id":"npc:commander:run-1"}'
 ```
 
-Success is `{reply, usage}`. `usage` is the run's `usage_total`. The CLI webhook still sends `usage: null`; a Godot client that only reads `reply` needs no change. Missing `text` is `400 {"error":"text is required"}`. A bad token is `401`. Unknown or missing `chat_id` is still `200` with `reply` starting `agent error: unknown persona` and `usage: null` — this example does not default `chat_id` to `"default"`, because a persona cannot be inferred.
+Success is `{reply, usage}`. `usage` is the run's `usage_total`. The CLI webhook still sends `usage: null`; a Godot client that only reads `reply` needs no change. Missing `text` is `400 {"error":"text is required"}`. A bad token is `401`. Wrong `Content-Type` is `415`. Oversized body is `413`. Unknown or missing `chat_id` is still `200` with `reply` starting `agent error: unknown persona` and `usage: null` — this example does not default `chat_id` to `"default"`, because a persona cannot be inferred.
 
 From a source checkout, with the working directory at the repo root:
 
 ```sh
+export LICH_GATEWAY_TOKEN=sekrit
 bun examples/persona_orchestrator/run.ts
 ```
 
-That entry uses a local Ollama provider. Tests inject `fetch_fn` and never open a network socket to a model.
+`run.ts` refuses to start without `LICH_GATEWAY_TOKEN` (or `LICH_PERSONA_TOKEN`). That entry uses a local Ollama provider. Tests inject `fetch_fn` and never open a network socket to a model.

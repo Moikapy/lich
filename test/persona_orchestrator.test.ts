@@ -10,9 +10,9 @@ import { create_agent_with_plugins } from "../src/agent/agent.js";
 import { create_orchestrator } from "../examples/persona_orchestrator/orchestrator.js";
 import { persona_by_id, PERSONA_TABLE } from "../examples/persona_orchestrator/personas.js";
 import { reply_text, round_fate } from "../examples/persona_orchestrator/reply.js";
-import { start_persona_server } from "../examples/persona_orchestrator/server.js";
+import { DEFAULT_MAX_BODY_BYTES, host_is_loopback, start_persona_server } from "../examples/persona_orchestrator/server.js";
 import type { AgentFactory, AgentLikeResult, PersonaEntry, SharedAgentDefaults } from "../examples/persona_orchestrator/types.js";
-import { enqueue } from "../examples/persona_orchestrator/history_queue.js";
+import { cap_history, enqueue } from "../examples/persona_orchestrator/history_queue.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
@@ -267,6 +267,58 @@ describe("persona orchestrator", () => {
     await expect(first).rejects.toThrow("boom");
     expect(await second).toBe("ok");
     expect(order).toEqual(["first", "second"]);
+    await Promise.resolve();
+    expect(chains.has("npc:commander:run-1")).toBe(false);
+  });
+
+  it("cap_history drops leading non-user turns after overflow", () => {
+    const messages = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1", tool_calls: [{ id: "t1" }] },
+      { role: "tool", content: "ok" },
+      { role: "user", content: "u2" },
+      { role: "assistant", content: "a2" },
+    ];
+    const capped = cap_history(messages, 3);
+    expect(capped[0]?.role).toBe("user");
+    expect(capped.map((message) => message.content)).toEqual(["u2", "a2"]);
+  });
+
+  it("requires a token and rejects wrong content-type / oversized bodies", async () => {
+    const work_dir = await make_temp_dir();
+    const factory: AgentFactory = async () => ({
+      run: async (options) => echo_result(options.input, options.history ?? []),
+    });
+    const orchestrator = create_orchestrator({
+      factory,
+      shared: shared_for(work_dir),
+      personas: PERSONA_TABLE,
+    });
+    await expect(start_persona_server({ orchestrator, token: "   " })).rejects.toThrow(/non-empty token/);
+    const server = await start_persona_server({ orchestrator, token: "sekrit", max_body_bytes: 64 });
+    try {
+      const plain = await fetch(`http://127.0.0.1:${server.port}/message`, {
+        method: "POST",
+        headers: { "content-type": "text/plain", "x-lich-token": "sekrit" },
+        body: '{"text":"hi","chat_id":"npc:commander:run-1"}',
+      });
+      expect(plain.status).toBe(415);
+      const huge = await fetch(`http://127.0.0.1:${server.port}/message`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-lich-token": "sekrit" },
+        body: JSON.stringify({ text: "x".repeat(128), chat_id: "npc:commander:run-1" }),
+      });
+      expect(huge.status).toBe(413);
+      expect(DEFAULT_MAX_BODY_BYTES).toBeGreaterThan(1000);
+      expect(host_is_loopback("127.0.0.1:8090")).toBe(true);
+      expect(host_is_loopback("localhost")).toBe(true);
+      expect(host_is_loopback("[::1]:8090")).toBe(true);
+      expect(host_is_loopback("evil.example")).toBe(false);
+      expect(host_is_loopback(undefined)).toBe(false);
+    } finally {
+      await server.stop();
+    }
   });
 });
 
