@@ -49,6 +49,7 @@ async function wait_for_text(file: string): Promise<string> {
 
 /** Seed a fresh repo with a root commit (A3) and return its dir. */
 async function seeded_repo(): Promise<string> {
+  await mkdir(TMP_BASE, { recursive: true });
   const dir = await mkdtemp(path.join(TMP_BASE, "gatekeeper-"));
   await git(dir, ["init"]);
   await git(dir, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "seed"]);
@@ -156,13 +157,30 @@ describe("gatekeeper plugin", () => {
     expect(state.get("dirty")).toBe(true);
   });
 
-  it("ignores failed tool calls in after_tool_call", async () => {
+  it("marks dirty on failed writes and other writers (M-7)", async () => {
     const plugin = gatekeeper_plugin(true);
     const state = new Map<string, unknown>();
     await plugin.hooks?.on_run_start?.({ input_chars: 1 }, ctx_for(state));
-    await plugin.hooks?.after_tool_call?.(after_info("run_tests", false), ctx_for(state));
-    expect(state.get("tests_ok")).toBe(false);
+    await plugin.hooks?.after_tool_call?.(after_info("run_tests", true), ctx_for(state));
+    expect(state.get("dirty")).toBe(false);
+    await plugin.hooks?.after_tool_call?.(after_info("write_file", false), ctx_for(state));
     expect(state.get("dirty")).toBe(true);
+    await plugin.hooks?.after_tool_call?.(after_info("run_tests", true), ctx_for(state));
+    expect(state.get("dirty")).toBe(false);
+    await plugin.hooks?.after_tool_call?.(after_info("terminal", true, { command: "echo hi" }), ctx_for(state));
+    expect(state.get("dirty")).toBe(true);
+    await plugin.hooks?.after_tool_call?.(after_info("run_tests", false), ctx_for(state));
+    expect(state.get("tests_ok")).toBe(true);
+    expect(state.get("dirty")).toBe(true);
+  });
+
+  it("does not dirty read-only tools", async () => {
+    const plugin = gatekeeper_plugin(true);
+    const state = new Map<string, unknown>();
+    await plugin.hooks?.on_run_start?.({ input_chars: 1 }, ctx_for(state));
+    await plugin.hooks?.after_tool_call?.(after_info("run_tests", true), ctx_for(state));
+    await plugin.hooks?.after_tool_call?.(after_info("read_file", true), ctx_for(state));
+    expect(state.get("dirty")).toBe(false);
   });
 
   it("seeds fresh state at run start (two-runs-one-process reset)", async () => {

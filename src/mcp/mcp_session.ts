@@ -9,7 +9,7 @@ import { parse_tools, type ListedTool } from "./mcp_result.js";
 export type { ListedTool } from "./mcp_result.js";
 
 export interface McpPipe {
-  request(method: string, params: unknown): Promise<unknown>;
+  request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown>;
   notify(method: string): void;
   close(): void;
 }
@@ -28,22 +28,22 @@ export class McpSession {
     this.pipe.close();
   }
 
-  async list_tools(): Promise<ListedTool[]> {
-    await this.ensure_ready();
-    return parse_tools(await this.pipe.request("tools/list", {}));
+  async list_tools(signal?: AbortSignal): Promise<ListedTool[]> {
+    await this.ensure_ready(signal);
+    return parse_tools(await this.pipe.request("tools/list", {}, signal));
   }
 
-  async call_tool(name: string, args: Record<string, unknown>): Promise<string> {
-    await this.ensure_ready();
-    return content_text(await this.pipe.request("tools/call", { name, arguments: args }));
+  async call_tool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+    await this.ensure_ready(signal);
+    return content_text(await this.pipe.request("tools/call", { name, arguments: args }, signal));
   }
 
-  private async ensure_ready(): Promise<void> {
+  private async ensure_ready(signal?: AbortSignal): Promise<void> {
     if (this.ready_done === true) {
       return;
     }
     try {
-      assert_handshake(await this.pipe.request("initialize", init_params()));
+      assert_handshake(await this.pipe.request("initialize", init_params(), signal));
       this.pipe.notify("notifications/initialized");
       this.ready_done = true;
     } catch (error) {

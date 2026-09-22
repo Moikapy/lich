@@ -5,7 +5,7 @@
  * snapshot of the handler set so handlers may safely unsubscribe mid-emit,
  * and a throwing handler never breaks the loop.
  */
-import type { AssistantMessage, ChatResult, ToolCall } from "../providers/types.js";
+import type { AssistantMessage, ChatResult, ToolCall, Usage } from "../providers/types.js";
 import type { ToolResult } from "../tools/types.js";
 import { logger } from "../util/log.js";
 
@@ -16,7 +16,8 @@ export interface AgentEvents {
   tool_call_start: { turn: number; call: ToolCall };
   tool_call_end: { turn: number; call: ToolCall; result: ToolResult; cancelled?: boolean };
   compress_start: { estimated_tokens: number };
-  compress_end: { summary_chars: number };
+  /** Summarizer usage is optional so the recorder never treats it as an assistant turn. */
+  compress_end: { summary_chars: number; usage?: Usage };
   turn_end: { turn: number };
   final: { message: AssistantMessage; result: ChatResult };
   budget_exhausted: { turns_used: number };
