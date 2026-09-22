@@ -23,6 +23,7 @@ import {
   model_label_block,
   parse_command,
   tui_banner_text,
+  resume_banner_count,
   resume_banner_line,
   run_notice_blocks,
   session_list_block,
@@ -225,7 +226,9 @@ export function TuiApp({ agent, theme, initial_history, resumed_id }: TuiAppProp
   const provider = agent.config.providers[0];
   const banner = tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown");
   const resume_line =
-    resumed_id === undefined ? undefined : resume_banner_line(resumed_id, initial_history?.length ?? 0);
+    resumed_id === undefined
+      ? undefined
+      : resume_banner_line(resumed_id, resume_banner_count(initial_history));
   return (
     <Box flexDirection="column" minHeight={8}>
       <Text dimColor>{resume_line === undefined ? banner : `${banner}\n${resume_line}`}</Text>

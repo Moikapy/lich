@@ -98,14 +98,30 @@ function error_message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** --resume only applies to the TUI; reject other agent modes early. */
+/** --resume only applies to the TUI (including bare `lich`); reject other modes. */
 function reject_resume_outside_tui(resume: string | undefined, mode: string): void {
   if (resume === undefined) {
     return;
   }
-  if (mode === "one-shot" || mode === "chat" || mode === "gateway") {
-    throw new Error(`--resume is only supported in TUI mode (not ${mode})`);
+  throw new Error(`--resume is only supported in TUI mode (not ${mode})`);
+}
+
+/** Mode label for the resume guard; undefined means TUI is allowed. */
+function non_tui_resume_mode(first: string | undefined): string | undefined {
+  if (first === undefined || first === "tui") {
+    return undefined;
   }
+  if (
+    first === "init" ||
+    first === "config" ||
+    first === "mcp" ||
+    first === "update" ||
+    first === "chat" ||
+    first === "gateway"
+  ) {
+    return first;
+  }
+  return "one-shot";
 }
 
 /** Mode-aware config failure message; one-shot keeps the generic variant. */
@@ -551,6 +567,10 @@ export async function run_cli(argv: string[]): Promise<number> {
     return 0;
   }
   const [first] = options.positionals;
+  const blocked_resume_mode = non_tui_resume_mode(first);
+  if (blocked_resume_mode !== undefined) {
+    reject_resume_outside_tui(options.resume, blocked_resume_mode);
+  }
   if (first === undefined) {
     return run_bare(options);
   }
@@ -574,17 +594,14 @@ export async function run_cli(argv: string[]): Promise<number> {
     if (options.positionals.length > 1) {
       throw new Error("chat mode takes no task argument");
     }
-    reject_resume_outside_tui(options.resume, "chat");
     return run_chat(build_config_for(options, first));
   }
   if (first === "tui") {
     return run_tui_entry(build_config_for(options, first), options.resume);
   }
   if (first === "gateway") {
-    reject_resume_outside_tui(options.resume, "gateway");
     return run_gateway_entry(build_config_for(options, first), options.positionals.slice(1));
   }
-  reject_resume_outside_tui(options.resume, "one-shot");
   return run_one_shot(build_config_for(options, "one-shot"), options.positionals.join(" "));
 }
 

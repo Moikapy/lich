@@ -44,6 +44,13 @@ describe("resolve_session_path", () => {
     await expect(resolve_session_path(dir, "m1abc-1-tui")).resolves.toBe(path.join(dir, "m1abc-1-tui.jsonl"));
   });
 
+  it("prefers exact id over a longer prefix match", async () => {
+    const dir = await make_session_dir();
+    await touch_jsonl(dir, "abc", 100);
+    await touch_jsonl(dir, "abc-2", 200);
+    await expect(resolve_session_path(dir, "abc")).resolves.toBe(path.join(dir, "abc.jsonl"));
+  });
+
   it("resolves a unique filename prefix", async () => {
     const dir = await make_session_dir();
     await touch_jsonl(dir, "m1abc-1-tui", 100);
@@ -67,8 +74,18 @@ describe("resolve_session_path", () => {
     );
   });
 
-  it("errors for latest when the session dir is empty", async () => {
+  it("errors for latest when the session dir is empty and includes dir", async () => {
     const dir = await make_session_dir();
-    await expect(resolve_session_path(dir, "latest")).rejects.toThrow(/session not found: "latest".*candidates: \(none\)/);
+    await expect(resolve_session_path(dir, "latest")).rejects.toSatisfy((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return message.includes(`session not found: "latest" in ${dir}`) && message.includes("candidates: (none)");
+    });
+  });
+
+  it("propagates non-ENOENT readdir errors", async () => {
+    const dir = await make_session_dir();
+    const not_a_dir = path.join(dir, "plain-file");
+    await writeFile(not_a_dir, "x", "utf8");
+    await expect(resolve_session_path(not_a_dir, "latest")).rejects.toMatchObject({ code: "ENOTDIR" });
   });
 });

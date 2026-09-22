@@ -114,6 +114,14 @@ export function tui_banner_text(theme: ThemeSpec, version: string, model: string
   return fill_template(theme.welcome, { version, model, kind });
 }
 
+/** Count messages shown in the resume banner (matches split_history_blocks visibility). */
+export function resume_banner_count(messages: readonly Message[] | undefined): number {
+  if (messages === undefined) {
+    return 0;
+  }
+  return messages.filter((message) => message.role !== "system").length;
+}
+
 /** Second banner line when a session transcript was loaded via `--resume`. */
 export function resume_banner_line(id: string, message_count: number): string {
   return `resumed ${id} (${message_count} messages)`;

@@ -11,6 +11,7 @@ import {
   model_label_block,
   parse_command,
   parse_tool_message_content,
+  resume_banner_count,
   resume_banner_line,
   run_notice_blocks,
   session_list_block,
@@ -257,6 +258,7 @@ describe("split_history_blocks", () => {
   });
 
   it("seeds resume transcript blocks from prior history", () => {
+    // Phase 1 gap: seeding into agent.run is covered via run_tui mock in cli_resume.test.ts.
     const history: Message[] = [
       { role: "system", content: "prompt" },
       { role: "user", content: "hello" },
@@ -270,7 +272,9 @@ describe("split_history_blocks", () => {
 });
 
 describe("resume_banner_line", () => {
-  it("formats resumed id and message count", () => {
+  it("formats resumed id and non-system message count", () => {
+    expect(resume_banner_count([{ role: "system", content: "s" }, { role: "user", content: "u" }])).toBe(1);
+    expect(resume_banner_count(undefined)).toBe(0);
     expect(resume_banner_line("m1abc-1-tui", 4)).toBe("resumed m1abc-1-tui (4 messages)");
     expect(resume_banner_line("latest-id", 0)).toBe("resumed latest-id (0 messages)");
   });
