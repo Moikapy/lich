@@ -4,8 +4,9 @@
 //
 // bumps the version, runs pre-flight checks (clean tree, main branch,
 // typecheck, tests), builds, packs + audits test/.tmp/lich-<version>.tgz,
-// commits, tags v<version>, and pushes origin main. it never publishes —
-// publishing stays interactive so npm can prompt for the OTP.
+// then commits, tags v<version>, and pushes origin main. it never
+// publishes — local runs leave publish interactive (OTP); CI publishes
+// the packed tarball with NODE_AUTH_TOKEN after this script exits.
 
 import { execFileSync, type StdioOptions } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -33,9 +34,9 @@ function usage_text(): string {
     "usage: bun release <patch|minor|major>",
     "",
     "stages a release: bumps the version, typechecks, runs the tests,",
-    "builds, packs + audits test/.tmp/lich-<version>.tgz, commits, tags",
-    "v<version>, and pushes origin main. publish stays manual:",
-    "npm publish test/.tmp/lich-<version>.tgz",
+    "builds, packs + audits test/.tmp/lich-<version>.tgz, then commits,",
+    "tags v<version>, and pushes origin main. publish stays manual",
+    "(or CI): npm publish test/.tmp/lich-<version>.tgz",
   ].join("\n");
 }
 
@@ -194,7 +195,11 @@ function print_summary(version: string, tarball: string, sha512: string, size_by
   console.log(`  sha-512:  ${sha512}`);
   console.log(`  size:     ${format_bytes(size_bytes)} (${size_bytes} bytes)`);
   console.log(`\nnext: npm publish ${tarball}`);
-  console.log("      (publish stays interactive — npm will prompt for the OTP)");
+  if (process.env.CI === "true") {
+    console.log("      (CI will publish with NODE_AUTH_TOKEN — no OTP prompt)");
+  } else {
+    console.log("      (publish stays interactive — npm will prompt for the OTP)");
+  }
 }
 
 function main(): void {
@@ -208,12 +213,14 @@ function main(): void {
   run_cmd("bun", ["run", "test"]);
   const version = bump_version(kind);
   log(`bumped to v${version}`);
-  commit_and_tag(version);
+  // build/pack/audit before commit/tag so a failed pack does not leave a
+  // half-cut release commit on main.
   log("building dist");
   run_cmd("bun", ["run", "build"]);
   const tarball = pack_tarball(version);
   const { sha512, size_bytes } = report_tarball(tarball);
   audit_tarball(tarball, version);
+  commit_and_tag(version);
   log("pushing main + tag to origin");
   run_cmd("git", ["push", "origin", "main", "--follow-tags"]);
   print_summary(version, tarball, sha512, size_bytes);
