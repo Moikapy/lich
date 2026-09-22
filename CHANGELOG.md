@@ -1,7 +1,37 @@
 # Changelog
 
-## Unreleased
+## 0.7.1
 
+- close agent-core review must-fixes A-1–A-4: multi-turn runs stop
+  duplicating history, tool pairs survive compression and gateway history
+  caps, and a mid-call abort becomes `stopped_reason: aborted` with the
+  abort signal reaching in-flight tools.
+- harden the webhook gateway (G-1/G-2/G-3/G-5): binds to loopback by
+  default and requires a token when exposed, defaults public platforms
+  (telegram/discord/twitch) to deny with a configurable allowlist plus a
+  reduced safe toolset, catches telegram/discord reply send failures
+  instead of crashing the run, and forces `platform=webhook` on the HTTP
+  adapter.
+- close MCP exit (M-1), empty Anthropic text, and env provider fallback:
+  one-shot/chat/TUI/gateway runs call `Agent.close()` so stdio MCP
+  sessions release; node children are still `unref`'d so the event loop
+  can drain (bun keeps the child attached — see below). an empty
+  Anthropic text block no longer 400s the session permanently, and
+  mcp-only project configs no longer shadow `LICH_MODEL` / env providers.
+- close tools must-fixes S-1–S-5: file writes/edits resolve realpath so
+  symlink escapes are confined, `fetch_url`/`http_request` block private
+  and loopback URLs, `.lich/config.json` and `.env` are forbidden write
+  targets, terminal child env is scrubbed of provider secrets, and
+  dash-leading `run_tests` filters are rejected so they cannot open the
+  commit gate. `http_request` also strips IPv6 brackets before SSRF IP
+  classification so `[::1]` literals are not skipped, and asserts headers
+  through `Headers` after the `safe_fetch` merge.
+- isolate usage per run (A-5) and memoize MCP attach (A-6): concurrent
+  `Agent.run` calls no longer mix `usage_total`, and attach races can
+  neither skip nor permanently fail.
+- TUI: ignore message submit while a run is in flight (U-1), and walk the
+  newest-first recall ring so Up moves to older entries instead of
+  clamping on the newest (U-2).
 - pin outbound HTTP: `fetch_url` and `http_request` keep the https
   hostname for TLS/SNI and the `Host` header while `safe_fetch` pins the
   connect to a vetted public IP through a custom DNS `lookup`, and
@@ -18,6 +48,15 @@
 - bun stdio MCP children are no longer `unref`'d: one-shot and
   short-lived runs wait for the MCP answer instead of letting the child
   detach and exit early.
+- add CI (tsc + vitest on Node 20/22), sync the 0.7.0 user docs with this
+  tree, and make `edit_file` treat `$` sequences literally while allowing
+  an empty `new_string` (#57).
+- sync docs/architecture with the outbound-HTTP pin, grep hardening,
+  twitch anchor, and bun MCP exit changes (#61).
+- add a manual Release workflow: Actions → Release → Run workflow (from
+  `main`) with a `patch|minor|major` bump runs `bun release`, then
+  publishes the packed tarball to npm with `NPM_TOKEN`. maintainer
+  plumbing, not a runtime change (#62).
 
 ## 0.7.0
 
