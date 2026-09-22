@@ -187,13 +187,13 @@ describe("detect_install_kind", () => {
     expect(detect_install_kind(entry, {}, () => false)).toBe("local");
   });
 
-  it("prefers git over a project-local node_modules ancestor", () => {
+  it("treats a project-local node_modules copy under a git repo as local", () => {
     const root = make_temp_dir("local-in-git");
     mkdirSync(path.join(root, ".git"));
     const entry = path.join(root, "node_modules", "@moikapy", "lich", "dist", "cli.js");
     mkdirSync(path.dirname(entry), { recursive: true });
     writeFileSync(entry, "");
-    expect(detect_install_kind(entry, {}, (dir) => existsSync(path.join(dir, ".git")))).toBe("git");
+    expect(detect_install_kind(entry, {}, (dir) => existsSync(path.join(dir, ".git")))).toBe("local");
   });
 
   it("treats a bun global path as local so npm install -g is not run", () => {

@@ -258,6 +258,7 @@ function apply_provider_override(config: Record<string, unknown>, overrides: Rec
     throw new Error("config providers[0] must be an object");
   }
   const provider = first as Record<string, unknown>;
+  const previous_kind = provider["kind"];
   for (const key of keys) {
     const value = overrides[key];
     if (value !== undefined) {
@@ -266,7 +267,10 @@ function apply_provider_override(config: Record<string, unknown>, overrides: Rec
   }
   // Kind change without an explicit URL/key must drop the previous kind's defaults.
   if (overrides["provider_kind"] !== undefined) {
-    apply_kind_defaults(provider, parse_provider_kind(overrides["provider_kind"]), overrides);
+    const new_kind = parse_provider_kind(overrides["provider_kind"]);
+    if (previous_kind !== new_kind) {
+      apply_kind_defaults(provider, new_kind, overrides);
+    }
   }
 }
 

@@ -77,9 +77,13 @@ export function version_relation(installed: string, registry: string): VersionRe
   return "current";
 }
 
-/** True for npm's global layout: `<prefix>/lib/node_modules/...`. */
+/** True for npm's global layout: `<prefix>/lib/node_modules/...` (Unix) or `…/npm/node_modules` (Windows). */
 function is_npm_global_node_modules(node_modules_dir: string): boolean {
-  return path.basename(path.dirname(node_modules_dir)) === "lib";
+  const parent = path.basename(path.dirname(node_modules_dir));
+  if (parent === "lib") {
+    return true;
+  }
+  return process.platform === "win32" && parent === "npm";
 }
 
 /**
@@ -96,14 +100,14 @@ export function detect_install_kind(
   }
   let dir = path.dirname(path.resolve(module_path));
   const root = path.parse(dir).root;
-  let saw_non_global_node_modules = false;
   while (dir !== root) {
     if (path.basename(dir) === "node_modules") {
       if (is_npm_global_node_modules(dir) === true) {
         return "npm";
       }
-      saw_non_global_node_modules = true;
-    } else if (has_git(dir) === true) {
+      return "local";
+    }
+    if (has_git(dir) === true) {
       return "git";
     }
     const parent = path.dirname(dir);
@@ -111,9 +115,6 @@ export function detect_install_kind(
       break;
     }
     dir = parent;
-  }
-  if (saw_non_global_node_modules === true) {
-    return "local";
   }
   return "npm";
 }

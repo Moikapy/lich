@@ -252,6 +252,37 @@ describe("lich init and bare lich", () => {
     expect(provider["base_url"]).not.toBe("http://localhost:11434");
   });
 
+  it("keeps a custom base_url when --provider-kind repeats the same kind", async () => {
+    const dir = make_temp_dir("init-kind-same");
+    write_lich_config(dir, {
+      providers: [{ kind: "ollama", name: "main", model: "llama", base_url: "http://gpu-box:11434" }],
+    });
+    tui_run.configs = [];
+    expect(await run_cli(["tui", "--work-dir", dir, "--provider-kind", "ollama"])).toBe(0);
+    const provider = tui_run.configs[0]?.providers?.[0] as Record<string, unknown> | undefined;
+    expect(provider?.["base_url"]).toBe("http://gpu-box:11434");
+  });
+
+  it("drops api_key_env when switching anthropic to ollama", async () => {
+    const dir = make_temp_dir("init-kind-to-ollama");
+    write_lich_config(dir, {
+      providers: [
+        {
+          kind: "anthropic",
+          name: "main",
+          model: "claude",
+          base_url: "https://api.anthropic.com",
+          api_key_env: "ANTHROPIC_API_KEY",
+        },
+      ],
+    });
+    tui_run.configs = [];
+    expect(await run_cli(["tui", "--work-dir", dir, "--provider-kind", "ollama"])).toBe(0);
+    const provider = tui_run.configs[0]?.providers?.[0] as Record<string, unknown> | undefined;
+    expect(provider?.["base_url"]).toBe("http://localhost:11434");
+    expect(provider?.["api_key_env"]).toBeUndefined();
+  });
+
   it("skips the wizard when .lich/config.json already exists", async () => {
     const dir = make_temp_dir("skip");
     const file = project_config_path(dir);
