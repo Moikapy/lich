@@ -2,7 +2,8 @@
  * JSONL transcript persistence for agent sessions. Each session is one
  * append-only .jsonl file; records carry either a message or arbitrary meta.
  */
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { appendFile, mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Message } from "../providers/types.js";
 import { safe_json_parse, safe_stringify } from "../util/json.js";
@@ -24,6 +25,7 @@ export interface SessionHandle {
 const counter_state = { value: 0 };
 
 const MESSAGE_ROLES: ReadonlySet<string> = new Set(["system", "user", "assistant", "tool"]);
+const CREATE_ATTEMPTS = 8;
 
 function slugify_label(label: string): string {
   const slug = label
@@ -34,17 +36,43 @@ function slugify_label(label: string): string {
   return slug.length > 0 ? `-${slug}` : "";
 }
 
+function is_eexist(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "EEXIST";
+}
+
+function next_session_id(label_part: string): string {
+  counter_state.value += 1;
+  const rand = randomBytes(3).toString("hex");
+  return `${Date.now().toString(36)}-${process.pid.toString(36)}-${rand}-${counter_state.value}${label_part}`;
+}
+
+async function create_unique_session_path(dir: string, label_part: string): Promise<{ id: string; path: string }> {
+  for (let attempt = 0; attempt < CREATE_ATTEMPTS; attempt += 1) {
+    const id = next_session_id(label_part);
+    const file_path = path.join(dir, `${id}.jsonl`);
+    try {
+      const handle = await open(file_path, "wx");
+      await handle.close();
+      return { id, path: file_path };
+    } catch (error) {
+      if (is_eexist(error) === true) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(`could not create unique session file in ${dir}`);
+}
+
 export async function open_session(dir: string, label?: string): Promise<SessionHandle> {
   await mkdir(dir, { recursive: true });
-  counter_state.value += 1;
   const label_part = label === undefined ? "" : slugify_label(label);
-  const id = `${Date.now().toString(36)}-${counter_state.value}${label_part}`;
-  const file_path = path.join(dir, `${id}.jsonl`);
+  const created = await create_unique_session_path(dir, label_part);
   return {
-    id,
-    path: file_path,
+    id: created.id,
+    path: created.path,
     append: async (record: SessionRecord): Promise<void> => {
-      await appendFile(file_path, `${safe_stringify(record)}\n`, "utf8");
+      await appendFile(created.path, `${safe_stringify(record)}\n`, "utf8");
     },
   };
 }
