@@ -43,6 +43,7 @@ export default defineConfig({
           { text: 'Providers', link: '/architecture/providers' },
           { text: 'Tools', link: '/architecture/tools' },
           { text: 'Plugins', link: '/architecture/plugins' },
+          { text: 'Serve', link: '/architecture/serve' },
           { text: 'Extending', link: '/architecture/extending' }
         ]
       }

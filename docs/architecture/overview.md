@@ -10,7 +10,8 @@ Everything else is Node/Bun built-ins.
 
 This page is the map. The follow-up pages go deep on each area:
 [agent loop](./agent-loop.md), [providers](./providers.md),
-[tools](./tools.md), [plugins](./plugins.md), and [extending](./extending.md).
+[tools](./tools.md), [plugins](./plugins.md), [serve](./serve.md), and
+[extending](./extending.md).
 
 ## Layer diagram
 
@@ -20,6 +21,7 @@ flowchart TB
         CLI["src/cli.ts<br/>one-shot, chat, tui,<br/>gateway, mcp"]
         TUI["src/tui/app.tsx<br/>ink TUI"]
         GW["src/gateway/runner.ts<br/>webhook, telegram,<br/>discord, twitch"]
+        SERVE["src/serve/protocol.ts<br/>lich serve contract<br/>(WS JSON-RPC, post-0.9)"]
         LIB["src/index.ts<br/>library exports"]
     end
     AGENT["Agent<br/>(src/agent/agent.ts)<br/>wiring, sessions, usage"]
@@ -37,6 +39,7 @@ flowchart TB
     CLI --> AGENT
     TUI --> AGENT
     GW --> AGENT
+    SERVE -.-> AGENT
     LIB --> AGENT
     AGENT --> LOOP
     LOOP --> CHATFN
@@ -51,7 +54,8 @@ flowchart TB
 ```
 
 Solid edges are direct calls; dashed edges are side services the loop and the
-agent use between turns.
+agent use between turns, or planned entry surfaces (serve protocol types exist;
+runtime listen is not wired yet — see [serve](./serve.md)).
 
 ## The dependency-inversion story
 
@@ -186,6 +190,7 @@ Walkthrough of a single `Agent.run({ input })` call
 | `src/gateway/bus.ts` | Conversation-keyed runner over one shared `Agent`. |
 | `src/gateway/runner.ts` | Adapter construction, signal handling, process lifetime. |
 | `src/gateway/{telegram,discord,twitch,webhook}.ts` | Platform adapters. |
+| `src/serve/protocol.ts` | Shared JSON-RPC types for `lich serve` (desktop contract; no listener yet). |
 | `src/tui/state.ts` | Pure TUI state machine (no ink imports). |
 | `src/tui/app.tsx` | Ink components wiring events into the state machine. |
 | `src/util/*` | `safe_json_parse`/`safe_stringify`/`truncate_text`, `sleep`, logger, JSON Schema types. |
