@@ -1,5 +1,6 @@
 import type { JsonSchemaObject } from "../../util/json_schema.js";
 import { capture_errors, clamp_output, optional_string_arg, require_string_arg } from "../guard.js";
+import { read_clamped_text } from "../read_clamped.js";
 import type { Tool, ToolResult } from "../types.js";
 import { safe_fetch } from "../url_guard.js";
 import { clamp_int_arg, compose_abort_signal, valid_http_url } from "./fetch_url.js";
@@ -8,6 +9,7 @@ const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_TIMEOUT_MS = 120000;
 const DEFAULT_MAX_CHARS = 20000;
 const MAX_MAX_CHARS = 100000;
+const MAX_BODY_BYTES = MAX_MAX_CHARS * 4;
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 const REPORTED_HEADERS = ["content-length", "ratelimit-remaining", "retry-after"];
 
@@ -78,13 +80,14 @@ async function run_http(args: Record<string, unknown>, external?: AbortSignal): 
   }
   const response = await safe_fetch(url, init);
   const content_type = response.headers.get("content-type") ?? "unknown";
-  const text = await response.text();
+  const byte_budget = Math.min(MAX_BODY_BYTES, max_chars * 4);
+  const clamped = await read_clamped_text(response, byte_budget);
   const sections = [
     `# status ${response.status}`,
     `# content-type ${content_type}`,
     ...header_lines(response),
     "",
-    clamp_output(text, max_chars),
+    clamp_output(clamped.text, max_chars),
   ];
   return { ok: true, output: sections.join("\n") };
 }
