@@ -13,6 +13,8 @@ import {
   parse_tool_message_content,
   resume_banner_count,
   resume_banner_line,
+  resume_missing_args_block,
+  resume_session_view,
   run_notice_blocks,
   session_list_block,
   split_history_blocks,
@@ -181,6 +183,12 @@ describe("parse_command", () => {
     expect(parse_command("/quit")).toEqual({ kind: "slash", name: "quit", args: "" });
     expect(parse_command("/exit")).toEqual({ kind: "slash", name: "exit", args: "" });
   });
+
+  it("parses /resume with id, latest, or empty args", () => {
+    expect(parse_command("/resume")).toEqual({ kind: "slash", name: "resume", args: "" });
+    expect(parse_command("/resume latest")).toEqual({ kind: "slash", name: "resume", args: "latest" });
+    expect(parse_command("/resume m1abc-1-tui")).toEqual({ kind: "slash", name: "resume", args: "m1abc-1-tui" });
+  });
 });
 
 describe("format_usage", () => {
@@ -280,6 +288,34 @@ describe("resume_banner_line", () => {
   });
 });
 
+describe("resume_session_view", () => {
+  it("prefixes a meta notice and seeds transcript blocks", () => {
+    const history: Message[] = [
+      { role: "system", content: "prompt" },
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ];
+    const view = resume_session_view("m1abc-1-tui", history, LICH_THEME);
+    expect(view.banner_line).toBe("resumed m1abc-1-tui (2 messages)");
+    expect(view.blocks[0]).toEqual({ role: "meta", lines: ["· resumed m1abc-1-tui (2 messages)"] });
+    expect(view.blocks).toHaveLength(3);
+    expect(view.blocks[1]?.lines[0]).toBe("mortal › hello");
+    expect(view.blocks[2]?.lines[0]).toBe("lich › hi");
+  });
+
+  it("returns only the notice when the transcript has no visible messages", () => {
+    const view = resume_session_view("empty-1", [{ role: "system", content: "prompt" }], LICH_THEME);
+    expect(view.blocks).toEqual([{ role: "meta", lines: ["· resumed empty-1 (0 messages)"] }]);
+  });
+
+  it("reports missing /resume args", () => {
+    expect(resume_missing_args_block()).toEqual({
+      role: "error",
+      lines: ["· /resume requires <id|latest>"],
+    });
+  });
+});
+
 describe("notice blocks", () => {
   it("renders budget and final for a budget-stopped run", () => {
     const blocks = run_notice_blocks({
@@ -344,6 +380,7 @@ describe("notice blocks", () => {
     expect(block.lines[0]).toBe("· phylacteries (2):");
     expect(block.lines[1]).toBe("  new.jsonl (20 bytes)");
     expect(help_block().lines.length).toBeGreaterThan(1);
+    expect(help_block().lines[0]).toContain("/resume");
   });
 });
 

@@ -6,6 +6,9 @@
   JSONL transcript into the TUI history and shows a `resumed <id> (n messages)`
   banner. Persistence is still post-run until Phase 2; one-shot, chat, and
   gateway reject `--resume`.
+- TUI `/resume <id|latest>` (Phase 3): same resolve + load path as `--resume`,
+  resets the on-screen transcript with a meta notice, seeds agent history for
+  the next turn, and updates the resume banner. Does not change persistence.
 
 ## 0.7.1
 

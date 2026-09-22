@@ -37,6 +37,7 @@ model llama3.2 · turns 2 · tokens 1,204 · [dormant] · /path/.lich/sessions/.
 | `/usage` | Show tokens used this session (cumulative across turns). |
 | `/clear` | Wipe the on-screen transcript. Does **not** reset agent memory — the next message still sees prior turns. |
 | `/sessions` | List the 10 newest `.jsonl` files in `session_dir` with sizes. The heading uses the theme sessions label (`phylacteries (n):` by default). |
+| `/resume <id\|latest>` | Load a stored transcript into agent history (exact id, unique prefix, or `latest` by mtime — same resolver as `--resume`). Resets the on-screen transcript with a `· resumed <id> (n messages)` notice and updates the header banner. Missing/ambiguous ids print an error notice. |
 | `/exit`, `/quit`, `/q` | Exit the TUI. |
 
 Unknown commands print `· unknown command: /x (try /help)`. Slash commands are handled client-side and never invoke the model.

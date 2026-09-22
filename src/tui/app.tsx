@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Box, Text } from "ink";
+import path from "node:path";
 import type { Agent, AgentRunResult } from "../agent/agent.js";
 import type { AgentEvent } from "../agent/events.js";
 import type { AgentConfig } from "../agent/config.js";
@@ -12,6 +13,8 @@ import type { Message } from "../providers/types.js";
 import { LICH_VERSION } from "../index.js";
 import type { ThemeSpec } from "../util/lore.js";
 import { readdir, stat } from "node:fs/promises";
+import { resolve_session_path } from "../session/resolve.js";
+import { read_session_messages } from "../session/store.js";
 import {
   apply_event,
   apply_run_result,
@@ -25,6 +28,8 @@ import {
   tui_banner_text,
   resume_banner_count,
   resume_banner_line,
+  resume_missing_args_block,
+  resume_session_view,
   run_notice_blocks,
   session_list_block,
   split_history_blocks,
@@ -46,6 +51,12 @@ type SlashInput = Extract<ParsedInput, { kind: "slash" }>;
 type AddBlocks = (added: readonly HistoryBlock[]) => void;
 type SetUiState = Dispatch<SetStateAction<UiState>>;
 type SetBlocks = Dispatch<SetStateAction<readonly HistoryBlock[]>>;
+type SetHistory = (messages: readonly Message[]) => void;
+
+interface AgentRunControls {
+  readonly start_message_run: (text: string) => void;
+  readonly set_history: SetHistory;
+}
 
 /** Map one agent event to optional transcript blocks (tool rows, notices). */
 function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBlock[] {
@@ -101,6 +112,26 @@ function run_error_text(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Load a transcript for `/resume`; returns view state or an error notice. */
+async function load_resume_view(
+  config: AgentConfig,
+  value: string,
+  theme: ThemeSpec,
+): Promise<
+  | { ok: true; id: string; messages: readonly Message[]; blocks: readonly HistoryBlock[]; banner_line: string }
+  | { ok: false; block: HistoryBlock }
+> {
+  try {
+    const transcript = await resolve_session_path(config.session_dir, value);
+    const messages = await read_session_messages(transcript);
+    const id = path.basename(transcript, ".jsonl");
+    const view = resume_session_view(id, messages, theme);
+    return { ok: true, id, messages, blocks: view.blocks, banner_line: view.banner_line };
+  } catch (error) {
+    return { ok: false, block: error_notice_block(run_error_text(error)) };
+  }
+}
+
 /** Runs one message exchange; owns history continuity and abort wiring. */
 function use_agent_run(
   agent: Agent,
@@ -109,9 +140,13 @@ function use_agent_run(
   set_state: SetUiState,
   set_blocks: SetBlocks,
   initial_history: readonly Message[] | undefined,
-): (text: string) => void {
+): AgentRunControls {
   const history_ref = useRef<readonly Message[]>(initial_history ?? []);
   const controller_ref = useRef<AbortController | undefined>(undefined);
+
+  const set_history = useCallback<SetHistory>((messages: readonly Message[]): void => {
+    history_ref.current = messages;
+  }, []);
 
   const finish_run = useCallback((result: AgentRunResult): void => {
     history_ref.current = result.messages;
@@ -145,7 +180,7 @@ function use_agent_run(
 
   useEffect(() => () => controller_ref.current?.abort(), []);
 
-  return start_message_run;
+  return { start_message_run, set_history };
 }
 
 /** Slash-command dispatch: pure client-side actions, never hits the agent. */
@@ -154,6 +189,8 @@ function use_slash_commands(
   theme: ThemeSpec,
   add_blocks: AddBlocks,
   set_blocks: SetBlocks,
+  set_history: SetHistory,
+  set_resume_line: Dispatch<SetStateAction<string | undefined>>,
   total_tokens: number,
 ): (parsed: SlashInput) => void {
   const handle = useCallback(
@@ -172,11 +209,25 @@ function use_slash_commands(
         set_blocks([]);
       } else if (parsed.name === "sessions") {
         void sessions_block(agent.config, theme).then((block) => add_blocks([block]));
+      } else if (parsed.name === "resume") {
+        if (parsed.args.length === 0) {
+          add_blocks([resume_missing_args_block()]);
+          return;
+        }
+        void load_resume_view(agent.config, parsed.args, theme).then((result) => {
+          if (result.ok === false) {
+            add_blocks([result.block]);
+            return;
+          }
+          set_history(result.messages);
+          set_blocks(result.blocks);
+          set_resume_line(result.banner_line);
+        });
       } else {
         add_blocks([unknown_command_block(parsed.name)]);
       }
     },
-    [agent, add_blocks, set_blocks, theme, total_tokens],
+    [agent, add_blocks, set_blocks, set_history, set_resume_line, theme, total_tokens],
   );
   return handle;
 }
@@ -195,9 +246,22 @@ function initial_blocks(history: readonly Message[] | undefined, theme: ThemeSpe
   return split_history_blocks(history, HISTORY_CAP, theme);
 }
 
+function initial_resume_line(
+  resumed_id: string | undefined,
+  history: readonly Message[] | undefined,
+): string | undefined {
+  if (resumed_id === undefined) {
+    return undefined;
+  }
+  return resume_banner_line(resumed_id, resume_banner_count(history));
+}
+
 export function TuiApp({ agent, theme, initial_history, resumed_id }: TuiAppProps): React.JSX.Element {
   const [blocks, set_blocks] = useState<readonly HistoryBlock[]>(() => initial_blocks(initial_history, theme));
   const [state, set_state] = useState(INITIAL_UI_STATE);
+  const [resume_line, set_resume_line] = useState<string | undefined>(() =>
+    initial_resume_line(resumed_id, initial_history),
+  );
 
   const add_blocks = useCallback<AddBlocks>((added: readonly HistoryBlock[]): void => {
     if (added.length === 0) {
@@ -206,8 +270,23 @@ export function TuiApp({ agent, theme, initial_history, resumed_id }: TuiAppProp
     set_blocks((current) => [...current, ...added].slice(-HISTORY_CAP));
   }, []);
 
-  const start_message_run = use_agent_run(agent, theme, add_blocks, set_state, set_blocks, initial_history);
-  const handle_slash = use_slash_commands(agent, theme, add_blocks, set_blocks, state.usage.total_tokens);
+  const { start_message_run, set_history } = use_agent_run(
+    agent,
+    theme,
+    add_blocks,
+    set_state,
+    set_blocks,
+    initial_history,
+  );
+  const handle_slash = use_slash_commands(
+    agent,
+    theme,
+    add_blocks,
+    set_blocks,
+    set_history,
+    set_resume_line,
+    state.usage.total_tokens,
+  );
 
   const submit = useCallback(
     (text: string): void => {
@@ -225,10 +304,6 @@ export function TuiApp({ agent, theme, initial_history, resumed_id }: TuiAppProp
 
   const provider = agent.config.providers[0];
   const banner = tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown");
-  const resume_line =
-    resumed_id === undefined
-      ? undefined
-      : resume_banner_line(resumed_id, resume_banner_count(initial_history));
   return (
     <Box flexDirection="column" minHeight={8}>
       <Text dimColor>{resume_line === undefined ? banner : `${banner}\n${resume_line}`}</Text>

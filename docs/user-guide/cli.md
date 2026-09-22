@@ -176,7 +176,8 @@ Each run writes `.lich/sessions/<timestamp36>-<counter>[-label].jsonl` where the
 ls -t .lich/sessions/*.jsonl | head -1
 
 # resume that session in the TUI (Phase 1: loads history; still writes a new
-# transcript after each run until Phase 2 incremental persistence)
+# transcript after each run until Phase 2 incremental persistence).
+# Inside a running TUI, `/resume <id|latest>` uses the same load path (Phase 3).
 lich --resume latest
 lich tui --resume m1abc-1-tui
 
