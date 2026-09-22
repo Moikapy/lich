@@ -118,7 +118,7 @@ function log_compression_failure(error: unknown): void {
 }
 
 /** Keep-recent cut that never starts on an orphan tool result. */
-function split_keep_recent(
+export function split_keep_recent(
   non_system: readonly Message[],
   keep_recent: number,
 ): { recent: Message[]; older: Message[] } {

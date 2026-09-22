@@ -62,12 +62,20 @@ function filter_registry(base: ToolRegistry, enabled: "all" | readonly string[])
   return filtered;
 }
 
+function add_usage(total: Usage, usage: Usage): void {
+  total.prompt_tokens += usage.prompt_tokens;
+  total.completion_tokens += usage.completion_tokens;
+  total.total_tokens += usage.total_tokens;
+}
+
 function collect_usage(total: Usage): (event: AgentEvent) => void {
   return (event: AgentEvent): void => {
     if (event.type === "llm_end") {
-      total.prompt_tokens += event.result.usage.prompt_tokens;
-      total.completion_tokens += event.result.usage.completion_tokens;
-      total.total_tokens += event.result.usage.total_tokens;
+      add_usage(total, event.result.usage);
+      return;
+    }
+    if (event.type === "compress_end" && event.usage !== undefined) {
+      add_usage(total, event.usage);
     }
   };
 }

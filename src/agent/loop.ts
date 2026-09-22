@@ -6,7 +6,7 @@
  * It depends only on narrow structural interfaces (ChatFn, ToolRunner) so the
  * loop never imports provider routers or the tool executor directly.
  */
-import { compress_messages, should_compress, type ChatFn } from "../context/compressor.js";
+import { compress_messages, should_compress, split_keep_recent, type ChatFn } from "../context/compressor.js";
 import { estimate_messages_tokens } from "../context/tokens.js";
 import type {
   AssistantMessage,
@@ -15,6 +15,7 @@ import type {
   ToolCall,
   ToolDefinition,
   ToolMessage,
+  Usage,
 } from "../providers/types.js";
 import { ProviderError } from "../providers/types.js";
 import type { ToolContext, ToolResult } from "../tools/types.js";
@@ -161,6 +162,23 @@ function replace_history(history: Message[], next: readonly Message[]): void {
   }
 }
 
+/** True when the compressor's kept-recent window alone still exceeds budget. */
+function kept_tail_over_budget(
+  history: readonly Message[],
+  budget_tokens: number,
+  threshold: number,
+): boolean {
+  const system_messages = history.filter((message) => message.role === "system");
+  const non_system = history.filter((message) => message.role !== "system");
+  const { recent } = split_keep_recent(non_system, KEEP_RECENT_TURNS);
+  return should_compress([...system_messages, ...recent], budget_tokens, threshold);
+}
+
+function schedule_compress_backoff(backoff: CompressBackoff, turn: number): void {
+  // turn < skip_until_turn skips COMPRESS_BACKOFF_TURNS subsequent turns.
+  backoff.skip_until_turn = turn + COMPRESS_BACKOFF_TURNS + 1;
+}
+
 async function compress_if_needed(
   deps: LoopDeps,
   history: Message[],
@@ -186,9 +204,10 @@ async function compress_if_needed(
     return;
   }
   emitter?.emit({ type: "compress_start", estimated_tokens: estimate_messages_tokens(history) });
+  let summarizer_usage: Usage | undefined;
   const counting_chat: ChatFn = async (messages, tools, options) => {
     const result = await deps.chat(messages, tools, options);
-    emitter?.emit({ type: "llm_end", turn, result });
+    summarizer_usage = result.usage;
     return result;
   };
   const outcome = await compress_messages(
@@ -197,15 +216,25 @@ async function compress_if_needed(
     { budget_tokens, keep_recent: KEEP_RECENT_TURNS, signal: params.signal },
   );
   replace_history(history, outcome.messages);
-  emitter?.emit({ type: "compress_end", summary_chars: outcome.summary_chars });
+  emitter?.emit({
+    type: "compress_end",
+    summary_chars: outcome.summary_chars,
+    usage: summarizer_usage,
+  });
   if (outcome.summary_chars === 0) {
-    backoff.skip_until_turn = turn + COMPRESS_BACKOFF_TURNS;
+    schedule_compress_backoff(backoff, turn);
     return;
   }
-  if (should_compress(history, budget_tokens, threshold) === true) {
-    // Kept window alone still overflows; further compress attempts cannot help.
-    backoff.skip_until_turn = Number.POSITIVE_INFINITY;
+  if (should_compress(history, budget_tokens, threshold) !== true) {
+    return;
   }
+  if (kept_tail_over_budget(history, budget_tokens, threshold) === true) {
+    // Kept tail alone still overflows; further compress attempts cannot help.
+    backoff.skip_until_turn = Number.POSITIVE_INFINITY;
+    return;
+  }
+  // Full history (summary + recent) still high; retry after backoff so huge turns can age out.
+  schedule_compress_backoff(backoff, turn);
 }
 
 function find_last_assistant(messages: readonly Message[]): AssistantMessage | undefined {
