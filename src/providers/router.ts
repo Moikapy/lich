@@ -94,8 +94,9 @@ function build_provider(config: ProviderConfig): LLMProvider {
 /**
  * Walk providers in config order: auth errors fail over immediately,
  * rate_limit/network get bounded retries on the current provider first,
- * overflow/bad_request fail over immediately. The last error is rethrown
- * when every provider fails.
+ * overflow/bad_request fail over immediately. When every provider fails,
+ * prefer the first non-transient (hard) error over a later network failure
+ * so the root cause is not discarded.
  */
 export async function chat_with_failover(
   router: ProviderRouter,
@@ -104,9 +105,10 @@ export async function chat_with_failover(
   options?: ChatOptions,
 ): Promise<ChatResult> {
   let last_error: ProviderError | undefined;
+  let first_hard_error: ProviderError | undefined;
   for (const provider of router.list()) {
     if (options?.signal?.aborted === true) {
-      throw last_error ?? make_router_abort_error();
+      throw first_hard_error ?? last_error ?? make_router_abort_error();
     }
     const result = await attempt_provider(provider, messages, tools, options);
     if (result.ok === true) {
@@ -116,16 +118,26 @@ export async function chat_with_failover(
       throw result.error;
     }
     last_error = result.error;
+    if (first_hard_error === undefined && is_hard_error(result.error) === true) {
+      first_hard_error = result.error;
+    }
     log_fail_over(result.error);
   }
-  throw last_error ?? new Error("no providers configured for failover");
+  throw first_hard_error ?? last_error ?? new Error("no providers configured for failover");
+}
+
+function is_hard_error(error: ProviderError): boolean {
+  return error.kind === "auth" || error.kind === "overflow" || error.kind === "bad_request";
 }
 
 function log_fail_over(error: ProviderError): void {
   if (error.kind === "rate_limit" || error.kind === "network") {
     return; // retry delays were already logged via on_retry
   }
-  logger.warn(`provider "${error.provider_name}" failed with ${error.kind}; failing over to next provider`);
+  const status_part = error.status !== undefined ? ` status=${error.status}` : "";
+  logger.warn(
+    `provider "${error.provider_name}" failed with ${error.kind}${status_part}: ${error.message}; failing over to next provider`,
+  );
 }
 
 function make_router_abort_error(): ProviderError {
