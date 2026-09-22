@@ -170,13 +170,38 @@ describe("detect_install_kind", () => {
     expect(detect_install_kind(entry, {}, (dir) => dir === root)).toBe("git");
   });
 
-  it("treats a package under node_modules as npm even if a parent is a git repo", () => {
-    const root = make_temp_dir("npm-install");
+  it("treats npm global lib/node_modules as npm even under a git parent", () => {
+    const root = make_temp_dir("npm-global");
+    mkdirSync(path.join(root, ".git"));
+    const entry = path.join(root, "lib", "node_modules", "@moikapy", "lich", "dist", "cli.js");
+    mkdirSync(path.dirname(entry), { recursive: true });
+    writeFileSync(entry, "");
+    expect(detect_install_kind(entry, {}, (dir) => existsSync(path.join(dir, ".git")))).toBe("npm");
+  });
+
+  it("treats a project-local node_modules copy as local, not npm global", () => {
+    const root = make_temp_dir("npm-local");
+    const entry = path.join(root, "node_modules", "@moikapy", "lich", "dist", "cli.js");
+    mkdirSync(path.dirname(entry), { recursive: true });
+    writeFileSync(entry, "");
+    expect(detect_install_kind(entry, {}, () => false)).toBe("local");
+  });
+
+  it("treats a project-local node_modules copy under a git repo as local", () => {
+    const root = make_temp_dir("local-in-git");
     mkdirSync(path.join(root, ".git"));
     const entry = path.join(root, "node_modules", "@moikapy", "lich", "dist", "cli.js");
     mkdirSync(path.dirname(entry), { recursive: true });
     writeFileSync(entry, "");
-    expect(detect_install_kind(entry, {}, (dir) => existsSync(path.join(dir, ".git")))).toBe("npm");
+    expect(detect_install_kind(entry, {}, (dir) => existsSync(path.join(dir, ".git")))).toBe("local");
+  });
+
+  it("treats a bun global path as local so npm install -g is not run", () => {
+    const root = make_temp_dir("bun-global");
+    const entry = path.join(root, ".bun", "install", "global", "node_modules", "@moikapy", "lich", "dist", "cli.js");
+    mkdirSync(path.dirname(entry), { recursive: true });
+    writeFileSync(entry, "");
+    expect(detect_install_kind(entry, {}, () => false)).toBe("local");
   });
 
   it("treats an npx cache path or npm_command=exec as npx", () => {
@@ -186,5 +211,14 @@ describe("detect_install_kind", () => {
     writeFileSync(entry, "");
     expect(detect_install_kind(entry, {}, () => true)).toBe("npx");
     expect(detect_install_kind(path.join(root, "dist", "cli.js"), { npm_command: "exec" }, () => false)).toBe("npx");
+  });
+});
+
+describe("lich update local install", () => {
+  it("hints without looking up or installing for a local install kind", async () => {
+    const result = await run_update_case("0.4.0", { exit_code: 0, stdout: "9.9.9\n", stderr: "" }, "local");
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("not an npm global install");
+    expect(result.calls).toEqual([]);
   });
 });
