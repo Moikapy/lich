@@ -279,7 +279,7 @@ describe("ollama provider", () => {
     expect(result.message.content).toBe("working");
   });
 
-  it("falls back to empty args plus a note on unparseable string arguments", async () => {
+  it("omits executable tool calls on unparseable string arguments", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,
       body: ok_body({
@@ -292,8 +292,20 @@ describe("ollama provider", () => {
     }));
     const provider = new OllamaProvider(ollama_config({ fetch_fn }));
     const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
-    expect(result.message.tool_calls?.[0]?.args).toEqual({});
+    expect(result.message.tool_calls).toBeUndefined();
     expect(result.message.content).toContain("[unparseable tool arguments]");
+  });
+
+  it("sends num_ctx from provider config in options", async () => {
+    const { fetch_fn, requests } = mock_fetch(() => ({ status: 200, body: ok_body() }));
+    const provider = new OllamaProvider(ollama_config({ fetch_fn, num_ctx: 100000 }));
+    await provider.chat([{ role: "user", content: "hi" }], [], { temperature: 0.1, max_tokens: 64 });
+    const body = request_json(requests[0]!);
+    expect(as_record(body["options"])).toEqual({
+      temperature: 0.1,
+      num_predict: 64,
+      num_ctx: 100000,
+    });
   });
 
   it("defaults usage to zeros and unknown finish reasons", async () => {

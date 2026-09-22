@@ -18,12 +18,14 @@ const DEFAULT_BASE_URL = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY";
 const MAX_ERROR_BODY_CHARS = 500;
-const OVERFLOW_BODY_PATTERN = /context|token|maximum/i;
+const OVERFLOW_BODY_PATTERN =
+  /context.?length|maximum context|prompt.?(too long|too large)|token.?limit|context window|too many tokens/i;
 const OVERLOADED_STATUS = 529;
 const UNPARSEABLE_ARGS_NOTE = "[unparseable tool arguments]";
+const TRUNCATED_TOOL_CALLS_NOTE = "[truncated tool call omitted]";
 const EMPTY_TEXT_PLACEHOLDER = "(empty)";
-const MAX_TOKENS_FLOOR = 1;
-const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_MAX_TOKENS = 16384;
+const ANTHROPIC_TEMP_MAX = 1;
 
 /**
  * Wire DTOs for the Anthropic Messages API (2023-06-01).
@@ -50,7 +52,9 @@ type AnthropicContentBlockDto =
       tool_use_id: string;
       content: Array<{ type: "text"; text: string }>;
       is_error?: boolean;
-    };
+    }
+  | { type: "thinking"; thinking: string; signature?: string }
+  | { type: "redacted_thinking"; data: string };
 
 interface AnthropicToolDto {
   name: string;
@@ -112,7 +116,7 @@ export class AnthropicProvider implements LLMProvider {
       build_endpoint(this.config),
       build_request_init(
         api_key,
-        safe_stringify(build_request_body(this.config.model, messages, tools, options)),
+        safe_stringify(build_request_body(this.config.model, messages, tools, options, this.config)),
         build_abort_signal(options, this.config.timeout_ms),
       ),
       this.config.name,
@@ -170,6 +174,7 @@ function build_request_body(
   messages: readonly Message[],
   tools: readonly ToolDefinition[],
   options: ChatOptions | undefined,
+  config: ProviderConfig,
 ): AnthropicChatRequestDto {
   const body: AnthropicChatRequestDto = {
     model,
@@ -183,8 +188,8 @@ function build_request_body(
   if (tools.length > 0) {
     body.tools = to_anthropic_tools(tools);
   }
-  if (options?.temperature !== undefined) {
-    body.temperature = options.temperature;
+  if (config.send_temperature === true && options?.temperature !== undefined) {
+    body.temperature = Math.min(options.temperature, ANTHROPIC_TEMP_MAX);
   }
   return body;
 }
@@ -249,6 +254,9 @@ function tool_message_to_block(message: Extract<Message, { role: "tool" }>): Ant
 }
 
 function assistant_to_blocks(message: AssistantMessage): AnthropicContentBlockDto[] {
+  if (message.provider_content !== undefined && message.provider_content.length > 0) {
+    return message.provider_content as AnthropicContentBlockDto[];
+  }
   const blocks: AnthropicContentBlockDto[] = [];
   if (message.content.length > 0) {
     blocks.push({ type: "text", text: message.content });
@@ -338,7 +346,7 @@ function status_to_error_kind(status: number, body_text: string): ProviderErrorK
   if (status === 429 || status === OVERLOADED_STATUS || status >= 500) {
     return "rate_limit";
   }
-  if (status === 400 && OVERFLOW_BODY_PATTERN.test(body_text) === true) {
+  if (status === 413 || (status === 400 && OVERFLOW_BODY_PATTERN.test(body_text) === true)) {
     return "overflow";
   }
   return "bad_request";
@@ -357,42 +365,74 @@ async function to_http_error(response: Response, provider_name: string): Promise
 }
 
 function parse_chat_response(dto: AnthropicChatResponseDto, config: ProviderConfig): ChatResult {
+  const finish_reason = map_stop_reason(dto.stop_reason);
   return {
-    message: parse_assistant_message(dto.content ?? []),
+    message: parse_assistant_message(dto.content ?? [], finish_reason),
     usage: parse_usage(dto.usage),
-    finish_reason: map_stop_reason(dto.stop_reason),
+    finish_reason,
     model: dto.model ?? config.model,
     provider_name: config.name,
   };
 }
 
-function parse_assistant_message(blocks: AnthropicContentBlockResponseDto[]): AssistantMessage {
+function parse_assistant_message(
+  blocks: AnthropicContentBlockResponseDto[],
+  finish_reason: FinishReason,
+): AssistantMessage {
   const text_parts: string[] = [];
   const tool_calls: ToolCall[] = [];
+  const provider_content: Record<string, unknown>[] = [];
+  let has_thinking = false;
   for (const block of blocks) {
+    if (block.type === "thinking" || block.type === "redacted_thinking") {
+      has_thinking = true;
+      provider_content.push({ ...block });
+      continue;
+    }
     if (block.type === "text") {
       text_parts.push(block.text ?? "");
-    } else if (block.type === "tool_use") {
-      tool_calls.push(tool_use_to_call(block, text_parts));
+      provider_content.push({ type: "text", text: block.text ?? "" });
+      continue;
+    }
+    if (block.type === "tool_use") {
+      const call = tool_use_to_call(block, text_parts);
+      if (call !== undefined) {
+        tool_calls.push(call);
+        provider_content.push({
+          type: "tool_use",
+          id: call.id,
+          name: call.name,
+          input: call.args,
+        });
+      }
     }
   }
+  const safe_calls = finish_reason === "length" ? [] : tool_calls;
+  if (finish_reason === "length" && tool_calls.length > 0) {
+    text_parts.push(TRUNCATED_TOOL_CALLS_NOTE);
+  }
+  const safe_provider =
+    finish_reason === "length"
+      ? provider_content.filter((block) => block["type"] !== "tool_use")
+      : provider_content;
   return {
     role: "assistant",
     content: text_parts.filter((part) => part.length > 0).join("\n"),
-    ...(tool_calls.length > 0 ? { tool_calls } : {}),
+    ...(safe_calls.length > 0 ? { tool_calls: safe_calls } : {}),
+    ...(has_thinking === true ? { provider_content: safe_provider } : {}),
   };
 }
 
 function tool_use_to_call(
   block: AnthropicContentBlockResponseDto,
   text_parts: string[],
-): ToolCall {
+): ToolCall | undefined {
   const args = block.input;
   if (is_record(args) === true) {
     return { id: block.id ?? "", name: block.name ?? "", args };
   }
   text_parts.push(UNPARSEABLE_ARGS_NOTE);
-  return { id: block.id ?? "", name: block.name ?? "", args: {} };
+  return undefined;
 }
 
 function parse_usage(dto: AnthropicUsageDto | undefined): Usage {
