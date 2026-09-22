@@ -1,13 +1,13 @@
 ---
-description: Route Cursor Tasks (impl/test), Herdr→Claude (review), Hermes (docs) for lich
+description: Route Cursor Tasks (impl/test), Herdr→Claude (review), Lich (docs) for lich
 alwaysApply: true
 ---
 
-# Delegate: Cursor + Herdr→Claude + Hermes
+# Delegate: Cursor + Herdr→Claude + Lich
 
 Lich-scoped coordinator routing. Do not apply this loop to other repos.
 
-**Sources:** `herdr --skill` / [herdr v0.9.1 SKILL.md](https://raw.githubusercontent.com/herdrdev/herdr/v0.9.1/skills/herdr/SKILL.md); plan `.cursor/plans/delegate_herdr_hermes.plan.md`.
+**Sources:** `herdr --skill` / [herdr v0.9.1 SKILL.md](https://raw.githubusercontent.com/herdrdev/herdr/v0.9.1/skills/herdr/SKILL.md); plan `.cursor/plans/delegate_herdr_lich.plan.md`.
 
 ## Roles
 
@@ -16,21 +16,23 @@ Lich-scoped coordinator routing. Do not apply this loop to other repos.
 | Parent coordinator | This chat | Routing, worktrees, accepting verdicts, PRs when asked |
 | Implement / investigate / test | Cursor `Task` workers (+ shells in worktrees) | Code, tests, repro, CI diagnosis |
 | Review (diff/PR/council) | **Existing** Herdr Claude agent | Actionable findings + PASS/FAIL; not primary impl |
-| Documentation | **Existing** Herdr Hermes agent, else `hermes` CLI | Docs/README/changelog staging only |
+| Documentation | **Lich** CLI / shell pane (`lich` or `bun src/cli.ts`) | Docs/README/changelog staging only |
 | Optional cheap review | Bugbot / Security Review skills | Local-diff review without Herdr |
 
-**Assumptions:** Herdr, Claude, and Hermes are already running. Do **not** `herdr integration install`, start/stop Herdr, or kill panes unless the user asks.
+**Assumptions:** Herdr and Claude are already running. Do **not** `herdr integration install`, start/stop Herdr, or kill panes unless the user asks.
+
+**Why not `herdr agent start --kind lich`:** Herdr’s installed kinds include `hermes` but **not** `lich`. Docs dogfood path is a shell pane (or Cursor Task shell) running Lich against a docs-only prompt — not a Herdr agent kind.
 
 ## Decision (short)
 
-- Spec unclear / multi-file design → Cursor Task (investigate) or ask user — **not** Hermes
+- Spec unclear / multi-file design → Cursor Task (investigate) or ask user — **not** Lich-as-docs
 - Implementation → Cursor Task
 - Tests red → fix first; **do not** call Claude review yet
 - Impl + tests green + user wants Claude review → Herdr→Claude (existing agent)
 - Review FAIL → Cursor Task fix → re-test
-- Review PASS / skip + docs lag → Hermes docs
-- Docs-only ask → Hermes directly
-- Security-sensitive → Security Review and/or Claude; never Hermes as security reviewer
+- Review PASS / skip + docs lag → Lich docs (shell pane / CLI)
+- Docs-only ask → Lich directly
+- Security-sensitive → Security Review and/or Claude; never Lich-docs path as security reviewer
 - Typo / one-line → prefer Cursor alone; skip Claude
 - Publish / merge / release → human only
 
@@ -46,8 +48,8 @@ If that fails: you are **not** inside Herdr. **Stop** Herdr control. Do not insp
 
 Outside Herdr:
 
-- Hand the review/docs prompt to a Herdr-resident agent or the user (list → prompt → read recipe below), **or**
-- Use Cursor Task / Hermes CLI for work that does not need Herdr control.
+- Hand the Claude review prompt to a Herdr-resident agent or the user (list → prompt → read recipe below), **or**
+- Use Cursor Task / Lich CLI for work that does not need Herdr control.
 
 Prefer unique agent name, explicit pane ID, or `--current`. Never rely on another client's focused pane. Never put tokens/API keys in prompts or this rule.
 
@@ -88,35 +90,55 @@ On `blocked` / timeout / `agent_prompt_stalled`: `get`/`read` before re-prompt; 
 
 Paste captured review into `REVIEW.md` or `docs/design/council/<topic>-review.md`. Do **not** delete `REVIEW.md`. Do **not** auto-create or auto-close issues from reviews unless the user asks.
 
-### Hermes docs (Herdr preferred)
+### Lich docs (shell pane preferred when inside Herdr)
+
+Herdr has no `--kind lich`. Use an ordinary shell pane (cwd = repo), then run Lich one-shot:
 
 ```bash
-herdr agent prompt <HERMES_AGENT> "$(cat <<'EOF'
+# Prefer installed binary; from a clone use bun src/cli.ts
+lich "$(cat <<'EOF'
 Docs-only task for this repo.
 Update user-facing docs to match the changed behavior below.
 Do not change runtime source except docs/, changelog staging, or README.
 Do not commit or push. Summarize files you would change.
 Context: PR #<PR> or branch <BRANCH>; behavior bullets: ...
 EOF
-)" --wait --timeout 120000
-
-herdr agent read <HERMES_AGENT> --source recent-unwrapped --lines 120
+)"
 ```
 
-### Hermes CLI fallback (outside Herdr or no Hermes pane)
+Optional Herdr shell helpers (not `agent prompt`):
 
 ```bash
-hermes -z "$(cat <<'EOF'
+herdr pane run <SHELL_PANE_ID> 'lich "Docs-only: …"'
+herdr pane wait-output <SHELL_PANE_ID> --match "Docs-only\|changed\|files" --timeout 120000
+herdr pane read <SHELL_PANE_ID> --source recent-unwrapped --lines 120
+```
+
+### Lich CLI fallback (outside Herdr or no shell pane)
+
+```bash
+# Installed:
+lich "$(cat <<'EOF'
 Docs-only task for this repo.
 Update user-facing docs to match the changed behavior described below.
 Do not change runtime source except docs/, changelog staging, or README.
 Do not commit or push. Summarize files you would change.
 Context: PR #<PR> or branch <BRANCH>; bullets: ...
 EOF
-)" --in "$PWD" --safe-mode
+)"
+
+# From a clone (same args as the binary):
+bun src/cli.ts "$(cat <<'EOF'
+Docs-only task for this repo.
+Update user-facing docs to match the changed behavior described below.
+Do not change runtime source except docs/, changelog staging, or README.
+Do not commit or push. Summarize files you would change.
+Context: PR #<PR> or branch <BRANCH>; bullets: ...
+EOF
+)"
 ```
 
-Quiet: `hermes chat -q "Docs-only: …" --oneshot -Q --in "$PWD" --safe-mode`.
+Quiet / short form: `lich "Docs-only: sync guides for <FEATURE>; list file edits; do not commit."` (or `bun src/cli.ts "…"`).
 
 ## Forbidden
 
@@ -127,5 +149,6 @@ Quiet: `hermes chat -q "Docs-only: …" --oneshot -Q --in "$PWD" --safe-mode`.
 - Closing topology you did not create unless the user asked
 - Requiring `herdr integration install claude` for this loop
 - Putting secrets in agent prompts; pasting `.env` / tokens
-- Hermes as implementer or security reviewer; Claude as primary builder (unless user asks)
+- Treating Hermes as the docs agent; `herdr agent start --kind lich` as the docs path
+- Lich docs path as implementer or security reviewer; Claude as primary builder (unless user asks)
 - Bare `herdr` for CLI discovery (attaches TUI); use `herdr --help` then group help (`herdr agent`, …)
