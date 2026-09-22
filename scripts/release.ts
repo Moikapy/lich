@@ -3,7 +3,7 @@
 // usage: bun release <patch|minor|major>
 //
 // bumps the version, runs pre-flight checks (clean tree, main branch,
-// typecheck, tests), builds, packs + audits test/.tmp/lich-<version>.tgz,
+// typecheck, build, tests), packs + audits test/.tmp/lich-<version>.tgz,
 // then commits, tags v<version>, and pushes origin main. it never
 // publishes — local runs leave publish interactive (OTP); CI publishes
 // the packed tarball with NODE_AUTH_TOKEN after this script exits.
@@ -33,8 +33,8 @@ function usage_text(): string {
   return [
     "usage: bun release <patch|minor|major>",
     "",
-    "stages a release: bumps the version, typechecks, runs the tests,",
-    "builds, packs + audits test/.tmp/lich-<version>.tgz, then commits,",
+    "stages a release: bumps the version, typechecks, builds, runs the",
+    "tests, packs + audits test/.tmp/lich-<version>.tgz, then commits,",
     "tags v<version>, and pushes origin main. publish stays manual",
     "(or CI): npm publish test/.tmp/lich-<version>.tgz",
   ].join("\n");
@@ -209,13 +209,18 @@ function main(): void {
   ensure_main_branch();
   log("running typecheck");
   run_cmd("bun", ["run", "typecheck"]);
+  // build before tests so dist smokes (e.g. game_bridge) find dist/cli.js —
+  // same order as .github/workflows/ci.yml.
+  log("building dist");
+  run_cmd("bun", ["run", "build"]);
   log("running tests");
   run_cmd("bun", ["run", "test"]);
   const version = bump_version(kind);
   log(`bumped to v${version}`);
-  // build/pack/audit before commit/tag so a failed pack does not leave a
-  // half-cut release commit on main.
-  log("building dist");
+  // pack/audit before commit/tag so a failed pack does not leave a
+  // half-cut release commit on main. rebuild so the tarball matches the
+  // bumped package.json version string baked into dist.
+  log("rebuilding dist for pack");
   run_cmd("bun", ["run", "build"]);
   const tarball = pack_tarball(version);
   const { sha512, size_bytes } = report_tarball(tarball);
