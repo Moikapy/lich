@@ -3,7 +3,7 @@
 Lich is a small TypeScript AI agent harness: it drives a chat model in a
 think-act-observe loop, lets the model call tools, compresses history when the
 context budget demands it, and persists transcripts. The published npm package
-is 0.7.0, including editor MCP (`mcp_servers`, `lich mcp`). It runs on
+is 0.8.0, including editor MCP (`mcp_servers`, `lich mcp`). It runs on
 Node >= 20 and on Bun, is ESM with NodeNext resolution, and its runtime
 dependencies are `zod` (config validation), `ink`, and `react` (the TUI).
 Everything else is Node/Bun built-ins.
@@ -100,7 +100,7 @@ Walkthrough of a single `Agent.run({ input })` call
    are connected (`initialize`, `notifications/initialized`, then `tools/list`)
    and registered as `mcp_<server>_<tool>`. An empty `tools_enabled` never
    connects. Disabled servers are skipped. A connect failure logs a warning
-   and the run continues. This client ships in 0.7.0.
+   and the run continues. This client has shipped since 0.7.0 (current package 0.8.0).
 2. **Usage collector attached.** `run()` subscribes a `collect_usage` handler
    on `agent.events`; every `llm_end` event adds the call's token usage into a
    per-run `Usage` total. The subscription is removed in a `finally` block.

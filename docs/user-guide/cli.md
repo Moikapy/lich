@@ -19,7 +19,7 @@ lich mcp enable <name> # set enabled true
 lich mcp disable <name>
 lich mcp remove <name>
 lich --help            # usage text
-lich --version         # package.json version (published package and this tree: 0.7.0)
+lich --version         # package.json version (published package and this tree: 0.8.0)
 ```
 
 - **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if neither `.lich/config.json` nor `~/.config/lich/config.json` exists, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. An existing config in that chain skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
@@ -29,9 +29,9 @@ lich --version         # package.json version (published package and this tree: 
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
 - **Gateway** runs platform adapters (defaults to `webhook` when no platform is given). See the [Gateway guide](gateway.md). Unknown platform names are skipped with a warning; if none remain, the CLI exits `1`.
 - **Update** compares the installed version to the npm registry and, when a newer release exists, runs `npm install -g @moikapy/lich@latest`. Exit any running TUI or gateway first; npm cannot replace the package while those processes are running. A git clone is told to `git pull`. See [Updating](../getting-started.md#updating).
-- **MCP** ships in 0.7.0 (`lich mcp`). It edits only `mcp_servers` in `<work-dir>/.lich/config.json` through the same writer as `lich init` (`update` mode, so other keys stay). A missing file lists as empty; `add` creates the file if needed. New entries stay disabled until `enable`. Names must match `^[a-z][a-z0-9_]*$`. Catalog names use `optional-mcps/`; otherwise pass `--command` and repeatable `--arg`, or `--url` (loopback only), not both. Redot still needs `--project-path` for the catalog args, and the command basename must be `redot`. No prompts. See the [Redot guide](redot.md).
+- **MCP** (`lich mcp`) edits only `mcp_servers` in `<work-dir>/.lich/config.json` through the same writer as `lich init` (`update` mode, so other keys stay). A missing file lists as empty; `add` creates the file if needed. New entries stay disabled until `enable`. Names must match `^[a-z][a-z0-9_]*$`. Catalog names use `optional-mcps/`; otherwise pass `--command` and repeatable `--arg`, or `--url` (loopback only), not both. Redot still needs `--project-path` for the catalog args, and the command basename must be `redot`. No prompts. See the [Redot guide](redot.md).
 
-A repository clone's `bun src/cli.ts` matches that checkout. The published 0.7.0 binary includes `lich mcp`.
+A repository clone's `bun src/cli.ts` matches that checkout. The published 0.8.0 binary includes `lich mcp`.
 
 ## Flags
 
@@ -85,7 +85,7 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
     {
       "kind": "openai_compat",
       "name": "openrouter",
-      "model": "anthropic/claude-sonnet-4",
+      "model": "anthropic/claude-sonnet-4-20250514",
       "base_url": "https://openrouter.ai/api/v1",
       "api_key_env": "OPENROUTER_API_KEY"
     },
@@ -128,7 +128,7 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `theme` | string | `lich` | Display theme name. See [Themes](https://github.com/Moikapy/lich/blob/main/README.md#themes). |
 | `gateway` | object | omitted | Optional. `platforms` (`webhook` \| `telegram` \| `discord` \| `twitch`) and `token_envs` (platform → env-var name). Secrets stay in the environment. |
 | `plugins` | string array | `[]` | Module paths relative to `work_dir` or absolute. Bare `lich`, one-shot, chat, tui, and gateway load them through `create_agent_with_plugins`. `run_agent` does too. `create_agent` does not. See the [plugins guide](plugins.md). |
-| `mcp_servers` | object | omitted | Optional. Closed record of named servers. Each entry is stdio `{command, args, env?}` or loopback http `{url}`. `enabled` defaults to false. Unknown keys are rejected. Ships in 0.7.0. See the [Redot guide](redot.md). |
+| `mcp_servers` | object | omitted | Optional. Closed record of named servers. Each entry is stdio `{command, args, env?}` or loopback http `{url}`. `enabled` defaults to false. Unknown keys are rejected. See the [Redot guide](redot.md). |
 | `system_prompt` | string | built-in | Replaces the default system prompt. |
 | `max_turns` | int >= 1 | `25` | Turn budget per run. |
 | `work_dir` | string | cwd | Root for all file tools; paths outside are rejected. |
@@ -138,7 +138,7 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `context_budget_tokens` | positive int | `100000` | Estimated budget before compression triggers. |
 | `compress_threshold` | 0.1–0.95 | `0.8` | Compress when usage >= this fraction of the budget. |
 | `session_dir` | string | `<work_dir>/.lich/sessions` | Transcript directory. |
-| `terminal_timeout_ms` | positive int | `60000` | Default timeout injected into the `terminal` tool. |
+| `terminal_timeout_ms` | positive int | `60000` | Written into tool context as `LICH_TERMINAL_TIMEOUT_MS`. The `terminal` tool does **not** read it yet; pass `timeout_ms` on the tool call (default 60000, max 300000). |
 | `log_level` | enum | `info` | Logger verbosity. |
 
 Minimal per-provider examples:
@@ -148,7 +148,7 @@ Minimal per-provider examples:
 ```
 
 ```json
-{ "providers": [{ "kind": "anthropic", "name": "main", "model": "claude-sonnet-4", "api_key_env": "ANTHROPIC_API_KEY" }] }
+{ "providers": [{ "kind": "anthropic", "name": "main", "model": "claude-sonnet-4-20250514", "api_key_env": "ANTHROPIC_API_KEY" }] }
 ```
 
 Listed providers form a failover chain: the router walks them in order, retrying `rate_limit`/`network` errors (bounded backoff) on the current provider before moving on, and failing over immediately on `auth`, `overflow`, and `bad_request`.
@@ -163,6 +163,8 @@ never accepted as a config passthrough.
 | `LICH_ALLOW_SELF_COMMIT` | Set to `1` to allow one gated `git_commit` per run. Unset or any other value is fail-closed. Read at agent construction. |
 | `LICH_ALLOW_PRIVATE_URLS` | Set to exactly `1` to let `fetch_url` / `http_request` reach private or loopback URLs. Unset or any other value is fail-closed (they are blocked). |
 | `LICH_TEST_COMMAND` | Command `run_tests` runs in `work_dir` (default `node node_modules/vitest/vitest.mjs run`). An optional `filter` argument is appended. |
+| `LICH_DOCS_DIR` | Optional docs root for `docs_read` / `docs_search` (dir with `index.md`, or a parent containing `docs/`). Else `<work_dir>/docs` or package docs. |
+| `LICH_TERMINAL_TIMEOUT_MS` | Injected from config `terminal_timeout_ms` into tool context. Unused by `terminal` today — use the tool's `timeout_ms` arg. |
 
 Veto reasons, the terminal git denylist, skills, and `MEMORY.md` are in the
 [plugins guide](plugins.md#self-improvement-loop).

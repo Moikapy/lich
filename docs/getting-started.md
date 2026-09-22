@@ -10,7 +10,7 @@
 
 ```sh
 npm install -g @moikapy/lich
-lich --version   # -> 0.7.0 (reads package.json)
+lich --version   # -> 0.8.0 (reads package.json)
 ```
 
 ## Choose a configuration path
@@ -23,11 +23,11 @@ Lich needs exactly one thing before it runs: a model. You can provide it three w
 # ollama — no api key needed
 LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich "Reply with ok"
 
-# openai-compatible (api.openai.com/v1 by default)
-LICH_PROVIDER_KIND=openai_compat LICH_MODEL=gpt-4.1-mini lich "Reply with ok"
+# openai-compatible (api.openai.com/v1 by default; use a model id your provider accepts)
+LICH_PROVIDER_KIND=openai_compat LICH_MODEL=gpt-4o-mini lich "Reply with ok"
 
 # anthropic
-LICH_PROVIDER_KIND=anthropic LICH_MODEL=claude-sonnet-4 lich "Reply with ok"
+LICH_PROVIDER_KIND=anthropic LICH_MODEL=claude-sonnet-4-20250514 lich "Reply with ok"
 ```
 
 Defaults per kind when `LICH_BASE_URL`/`LICH_API_KEY_ENV` are unset: `openai_compat` uses `https://api.openai.com/v1` and reads `OPENAI_API_KEY`; `anthropic` uses `https://api.anthropic.com` and reads `ANTHROPIC_API_KEY`; `ollama` uses `http://localhost:11434` and needs no key.
@@ -76,7 +76,7 @@ lich        # TUI; first run on a TTY opens the setup wizard
 lich tui    # same TUI, no wizard
 ```
 
-Type a message and press Enter. The transcript shows your line, live tool-call rows while the agent works, and the reply; the status bar at the bottom tracks turns, tokens, and the session file path. Slash commands: `/help`, `/model`, `/usage`, `/clear`, `/sessions`, `/exit`. Details in [the TUI guide](user-guide/tui.md).
+Type a message and press Enter. The transcript shows your line, live tool-call rows while the agent works, and the reply; the status bar at the bottom tracks turns, tokens, and the session file path. Slash commands: `/help`, `/model`, `/usage`, `/clear`, `/sessions`, `/resume`, `/exit`. Details in [the TUI guide](user-guide/tui.md).
 
 ## Your first gateway webhook
 
@@ -153,7 +153,7 @@ To hack on Lich itself, run the CLI straight from a clone instead of the npm pac
 ```sh
 git clone https://github.com/Moikapy/lich.git && cd lich
 bun install
-bun src/cli.ts --version   # -> 0.7.0 (package.json)
+bun src/cli.ts --version   # -> 0.8.0 (package.json)
 ```
 
 `bun src/cli.ts` accepts the same arguments as the installed `lich` binary, so every command on this page works unchanged.
