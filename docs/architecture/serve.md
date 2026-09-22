@@ -10,7 +10,7 @@ and abort.
 This page documents the shared contract in
 [`src/serve/protocol.ts`](../../src/serve/protocol.ts) and the loopback
 WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts).
-Session/prompt RPC and the `lich serve` CLI land in follow-up issues.
+Prompt RPC and the `lich serve` CLI land in follow-up issues.
 
 ## Role in the system
 
@@ -45,6 +45,7 @@ method `event` (no `id`).
 | `session.create` | `{ label?, source }` | `{ session_id }` |
 | `session.list` | `{}` | `{ sessions: [{ id, mtime_ms }, ...] }` |
 | `session.clear` | `{ session_id }` | `{ session_id }` |
+| `session.resume` | `{ id }` | `{ session_id, message_count }` |
 | `prompt.submit` | `{ session_id, text }` | reply, usage, `session_path`, `stopped_reason`, … |
 | `prompt.abort` | `{ session_id }` | `{ session_id, aborted }` |
 
@@ -55,6 +56,12 @@ allows omitting `params`; serve handlers accept that omission the same as `{}`.
 `session.resume` and other session RPCs may extend this map in later issues;
 clients must not invent method names outside the locked set above until those
 land.
+
+`session.create` opens one `SessionHandle` and an empty in-memory history bag.
+`session.clear` resets that bag (handle stays). `session.list` / `session.resume`
+reuse [`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
+semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds history
+from disk and opens a fresh `SessionHandle` for later `prompt.submit` (#83).
 
 ## Notifications
 
@@ -83,5 +90,5 @@ semantics without embedding `Agent` in Electron.
 ## Not in this layer yet
 
 - No `lich serve` CLI entry (#84).
-- No `session.*` / `prompt.*` handlers (#82 / #83) — locked names return method-not-found until implemented.
-- No Agent construction or session file I/O.
+- No `prompt.*` handlers (#83) — locked names return method-not-found until implemented.
+- No Agent construction yet (also #83).

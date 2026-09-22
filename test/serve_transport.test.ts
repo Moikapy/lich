@@ -2,28 +2,44 @@
  * Serve transport tests: loopback WS JSON-RPC, health, and token rejection.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as net_connect } from "node:net";
+import path from "node:path";
 import { Writable } from "node:stream";
 import WebSocket from "ws";
 import { LICH_VERSION } from "../src/index.js";
 import { handle_serve_rpc_message } from "../src/serve/rpc.js";
 import { create_serve_server, type ServeServer } from "../src/serve/server.js";
+import { create_serve_session_store } from "../src/serve/sessions.js";
+import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const servers: ServeServer[] = [];
+const created: string[] = [];
+
+async function make_temp_dir(prefix: string): Promise<string> {
+  await mkdir(TMP_BASE, { recursive: true });
+  const dir = await mkdtemp(path.join(TMP_BASE, `${prefix}-`));
+  created.push(dir);
+  return dir;
+}
 
 afterEach(async () => {
   while (servers.length > 0) {
     const server = servers.pop();
     await server?.stop();
   }
+  for (const dir of created.splice(0)) {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 describe("serve rpc health", () => {
-  it("returns status and version for health", () => {
-    const raw = handle_serve_rpc_message(
+  it("returns status and version for health", async () => {
+    const sessions = create_serve_session_store(path.join(await make_temp_dir("serve-health"), "s"));
+    const raw = await handle_serve_rpc_message(
       JSON.stringify({ jsonrpc: "2.0", id: 1, method: "health", params: {} }),
-      "9.9.9",
+      { version: "9.9.9", sessions },
     );
     expect(JSON.parse(raw ?? "")).toEqual({
       jsonrpc: "2.0",
@@ -32,15 +48,16 @@ describe("serve rpc health", () => {
     });
   });
 
-  it("returns method-not-found for session.create until later issues", () => {
-    const raw = handle_serve_rpc_message(
+  it("returns method-not-found for prompt.submit until #83", async () => {
+    const sessions = create_serve_session_store(path.join(await make_temp_dir("serve-stub"), "s"));
+    const raw = await handle_serve_rpc_message(
       JSON.stringify({
         jsonrpc: "2.0",
         id: 2,
-        method: "session.create",
-        params: { source: "test" },
+        method: "prompt.submit",
+        params: { session_id: "s1", text: "hi" },
       }),
-      "9.9.9",
+      { version: "9.9.9", sessions },
     );
     const body = JSON.parse(raw ?? "") as { error?: { code?: number } };
     expect(body.error?.code).toBe(-32601);

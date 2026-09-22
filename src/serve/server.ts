@@ -4,9 +4,11 @@
  */
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import path from "node:path";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { LICH_VERSION } from "../version.js";
 import { handle_serve_rpc_message } from "./rpc.js";
+import { create_serve_session_store, type ServeSessionStore } from "./sessions.js";
 
 export const DEFAULT_SERVE_HOST = "127.0.0.1";
 export const DEFAULT_SERVE_PORT = 0;
@@ -28,6 +30,8 @@ export interface ServeOptions {
   token?: string;
   /** Reported by `health`; defaults to `LICH_VERSION`. */
   version?: string;
+  /** Transcript directory for session.list / resume / create. */
+  session_dir?: string;
   /** Boot JSON line sink. Default `process.stdout`; `null` skips emission. */
   boot_stdout?: NodeJS.WritableStream | null;
   on_listening?: (info: ServeBootInfo) => void;
@@ -37,6 +41,7 @@ export interface ServeServer {
   start(): Promise<ServeBootInfo>;
   stop(): Promise<void>;
   readonly boot: ServeBootInfo | undefined;
+  readonly sessions: ServeSessionStore;
 }
 
 export function create_serve_server(options: ServeOptions = {}): ServeServer {
@@ -44,6 +49,8 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   const want_port = options.port ?? DEFAULT_SERVE_PORT;
   const token = options.token ?? randomBytes(TOKEN_BYTES).toString("hex");
   const version = options.version ?? LICH_VERSION;
+  const session_dir = options.session_dir ?? path.join(process.cwd(), ".lich", "sessions");
+  const sessions = create_serve_session_store(session_dir);
   assert_loopback_host(host);
 
   let http_server: Server | undefined;
@@ -53,6 +60,9 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   return {
     get boot() {
       return boot;
+    },
+    get sessions() {
+      return sessions;
     },
     start: async () => {
       if (http_server !== undefined) {
@@ -86,7 +96,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
         }
         wss?.handleUpgrade(request, socket, head, (client) => {
           socket.off("error", on_socket_error);
-          attach_client(client, version);
+          attach_client(client, version, sessions);
         });
       });
       try {
@@ -116,13 +126,22 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   };
 }
 
-function attach_client(client: WebSocket, version: string): void {
+function attach_client(client: WebSocket, version: string, sessions: ServeSessionStore): void {
   client.on("message", (data) => {
-    const reply = handle_serve_rpc_message(raw_data_to_string(data), version);
-    if (reply !== undefined && client.readyState === client.OPEN) {
-      client.send(reply);
-    }
+    void handle_client_message(client, data, version, sessions);
   });
+}
+
+async function handle_client_message(
+  client: WebSocket,
+  data: RawData,
+  version: string,
+  sessions: ServeSessionStore,
+): Promise<void> {
+  const reply = await handle_serve_rpc_message(raw_data_to_string(data), { version, sessions });
+  if (reply !== undefined && client.readyState === client.OPEN) {
+    client.send(reply);
+  }
 }
 
 function raw_data_to_string(data: RawData): string {

@@ -17,7 +17,8 @@ function is_enoent(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT";
 }
 
-async function list_session_files(dir: string): Promise<SessionFileInfo[]> {
+/** List `.jsonl` transcripts under `dir`, newest mtime first. Missing dir → []. */
+export async function list_session_files(dir: string): Promise<SessionFileInfo[]> {
   let names: string[];
   try {
     names = await readdir(dir);
