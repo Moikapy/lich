@@ -300,13 +300,13 @@ describe("dist cli loads the .mjs plugin", () => {
     expect(existsSync(CLI), "build dist first (package.json build script) so node dist/cli.js exists").toBe(true);
     const work_dir = await make_temp_dir();
     const config_path = path.join(work_dir, "config.json");
-    const game_dir = path.join(REPO, ".lich", "game");
     const mock = await start_mock_chat();
+    // Absolute plugin path + TMP_BASE work_dir: never touch <repo>/.lich/game.
     await writeFile(
       config_path,
       JSON.stringify({
         providers: [{ kind: "openai_compat", name: "mock", model: "mock-model", base_url: mock.url }],
-        plugins: [PLUGIN_REL],
+        plugins: [PLUGIN_ABS],
         max_turns: 4,
         log_level: "error",
       }),
@@ -314,18 +314,27 @@ describe("dist cli loads the .mjs plugin", () => {
     );
     try {
       const result = await run_node(
-        [CLI, "--config", config_path, "--work-dir", REPO, "--session-dir", path.join(work_dir, "sessions"), "plan the round"],
-        REPO,
+        [
+          CLI,
+          "--config",
+          config_path,
+          "--work-dir",
+          work_dir,
+          "--session-dir",
+          path.join(work_dir, "sessions"),
+          "plan the round",
+        ],
+        work_dir,
       );
       expect(result.code).toBe(0);
       expect(result.stderr).toContain("enemy_actions: ok");
       expect(result.stderr).not.toContain("plugin load errors");
       expect(result.stdout).toContain("queued");
       expect(mock.bodies[0]).toContain("enemy_actions");
-      expect(await orders_text(REPO)).toContain('"action":"attack"');
+      expect(await orders_text(work_dir)).toContain('"action":"attack"');
+      expect(existsSync(path.join(REPO, ".lich", "game"))).toBe(false);
     } finally {
       await mock.close();
-      await rm(game_dir, { recursive: true, force: true });
     }
   });
 });
