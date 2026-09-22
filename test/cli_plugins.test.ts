@@ -23,6 +23,7 @@ vi.mock("node:readline", () => {
     once: () => void;
     removeListener: () => void;
     close: () => void;
+    [Symbol.asyncIterator]: () => AsyncIterator<string>;
   } => ({
     question: (_prompt, callback) => {
       callback("");
@@ -30,6 +31,9 @@ vi.mock("node:readline", () => {
     once: () => undefined,
     removeListener: () => undefined,
     close: () => undefined,
+    async *[Symbol.asyncIterator]() {
+      // empty stdin: chat returns without a turn
+    },
   });
   return { createInterface, default: { createInterface } };
 });
