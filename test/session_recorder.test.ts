@@ -142,6 +142,37 @@ describe("session recorder", () => {
     expect(records.some((record) => record.meta?.event === "run_end")).toBe(false);
   });
 
+  it("does not append an assistant line for compression usage", async () => {
+    const dir = await make_temp_dir();
+    const handle = await open_session(dir, "compress-usage");
+    const recorder = create_session_recorder(handle);
+    await recorder.seed({
+      input: "go",
+      history: [],
+      system_prompt: "sys",
+      owned: true,
+    });
+    recorder.on_event(llm_end("real reply"));
+    recorder.on_event({
+      type: "compress_end",
+      summary_chars: 20,
+      usage: { prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 },
+    });
+    await recorder.flush();
+
+    const messages = await read_session_messages(handle.path);
+    expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+    expect(messages.at(-1)).toMatchObject({ role: "assistant", content: "real reply" });
+    const records = await read_records(handle.path);
+    expect(records.some((record) => record.meta?.event === "compress_end")).toBe(true);
+    expect(
+      records.some(
+        (record) =>
+          record.message?.role === "assistant" && record.message.content !== "real reply",
+      ),
+    ).toBe(false);
+  });
+
   it("shared handle seeds history once across runs", async () => {
     const dir = await make_temp_dir();
     const handle = await open_session(dir, "shared");

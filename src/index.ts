@@ -22,8 +22,11 @@ export { parse_agent_config } from "./agent/config.js";
 export { catalog_client_entry } from "./mcp/mcp_catalog_entry.js";
 export { AgentEmitter } from "./agent/events.js";
 export type { AgentEvent, AgentEventHandler, AgentEvents } from "./agent/events.js";
-export type { LoopOutcome, LoopParams } from "./agent/loop.js";
+export { run_conversation } from "./agent/loop.js";
+export type { LoopDeps, LoopOutcome, LoopParams, ToolRunner } from "./agent/loop.js";
+export { open_session, read_session_messages } from "./session/store.js";
 export type {
+  AssistantMessage,
   ChatOptions,
   ChatResult,
   Message,
@@ -33,6 +36,7 @@ export type {
   Usage,
 } from "./providers/types.js";
 export { ProviderError } from "./providers/types.js";
+export type { JsonSchemaObject } from "./util/json_schema.js";
 export { ToolExecutor } from "./tools/executor.js";
 export { ToolRegistry } from "./tools/registry.js";
 export type { Tool, ToolContext, ToolResult } from "./tools/types.js";

@@ -1,11 +1,22 @@
-/** Catalog pins. A custom server name is not pinned. */
+/** Catalog pins. A custom server name is not pinned unless the command basename matches. */
 import path from "node:path";
-import { catalog_by_name } from "./mcp_catalog.js";
+import { catalog_by_basename, catalog_by_name, type CatalogManifest } from "./mcp_catalog.js";
 import { refuse_stdio_arg, refuse_stdio_command, type McpEntryShape } from "./mcp_refuse.js";
 import { refuse_http_url } from "./mcp_url.js";
 
+export function pin_for(name: string, command?: string): CatalogManifest | undefined {
+  const by_name = catalog_by_name(name);
+  if (by_name?.command_basename !== undefined) {
+    return by_name;
+  }
+  if (command === undefined) {
+    return by_name;
+  }
+  return catalog_by_basename(path.basename(command)) ?? by_name;
+}
+
 export function refuse_catalog_stdio(name: string, command: string, args: readonly string[]): string | undefined {
-  const pin = catalog_by_name(name);
+  const pin = pin_for(name, command);
   if (pin?.command_basename === undefined) {
     return undefined;
   }
@@ -14,11 +25,11 @@ export function refuse_catalog_stdio(name: string, command: string, args: readon
   }
   const prefix = pin.args_prefix ?? [];
   if (args.length !== prefix.length + 1) {
-    return `refused ${name} args; expected ${prefix.join(" ")} <project>`;
+    return `refused ${pin.name} args; expected ${prefix.join(" ")} <project>`;
   }
   for (let index = 0; index < prefix.length; index += 1) {
     if (args[index] !== prefix[index]) {
-      return `refused ${name} args; expected ${prefix.join(" ")} <project>`;
+      return `refused ${pin.name} args; expected ${prefix.join(" ")} <project>`;
     }
   }
   const project = args[prefix.length];
@@ -47,5 +58,9 @@ export function refuse_mcp_entry(name: string, entry: McpEntryShape): string | u
     return "refused mcp entry";
   }
   const args = entry.args ?? [];
-  return refuse_stdio_command(entry.command) ?? refuse_catalog_stdio(name, entry.command, args) ?? refuse_arg_list(args);
+  return (
+    refuse_stdio_command(entry.command, args) ??
+    refuse_catalog_stdio(name, entry.command, args) ??
+    refuse_arg_list(args)
+  );
 }

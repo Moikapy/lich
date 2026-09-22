@@ -62,12 +62,20 @@ function filter_registry(base: ToolRegistry, enabled: "all" | readonly string[])
   return filtered;
 }
 
+function add_usage(total: Usage, usage: Usage): void {
+  total.prompt_tokens += usage.prompt_tokens;
+  total.completion_tokens += usage.completion_tokens;
+  total.total_tokens += usage.total_tokens;
+}
+
 function collect_usage(total: Usage): (event: AgentEvent) => void {
   return (event: AgentEvent): void => {
     if (event.type === "llm_end") {
-      total.prompt_tokens += event.result.usage.prompt_tokens;
-      total.completion_tokens += event.result.usage.completion_tokens;
-      total.total_tokens += event.result.usage.total_tokens;
+      add_usage(total, event.result.usage);
+      return;
+    }
+    if (event.type === "compress_end" && event.usage !== undefined) {
+      add_usage(total, event.usage);
     }
   };
 }
@@ -148,6 +156,15 @@ export class Agent {
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
     await this.attach_mcp_once();
+    const body = (): Promise<AgentRunResult> => this.run_body(options);
+    // Per-run ALS scope so concurrent Agent.run calls do not share gatekeeper state (M-6).
+    if (this.hook_runner !== undefined) {
+      return this.hook_runner.run_scope(body);
+    }
+    return body();
+  }
+
+  private async run_body(options: AgentRunOptions): Promise<AgentRunResult> {
     const usage_total: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     const run_events = new AgentEmitter();
     const stop_forwarding = run_events.on((event) => this.events.emit(event));

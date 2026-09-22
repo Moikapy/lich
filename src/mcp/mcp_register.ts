@@ -2,8 +2,8 @@ import type { AgentConfig } from "../agent/config.js";
 import { capture_errors } from "../tools/guard.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { Tool, ToolContext } from "../tools/types.js";
-import { catalog_by_name } from "./mcp_catalog.js";
 import { mcp_tool_name } from "./mcp_names.js";
+import { pin_for } from "./mcp_pin.js";
 import type { ListedTool } from "./mcp_result.js";
 import type { McpSession } from "./mcp_session.js";
 
@@ -24,7 +24,7 @@ function run_call(
     if (context.signal?.aborted === true) {
       throw new Error("cancelled");
     }
-    return { ok: true, output: await session.call_tool(wire_name, args) };
+    return { ok: true, output: await session.call_tool(wire_name, args, context.signal) };
   });
 }
 
@@ -44,8 +44,9 @@ export function register_listed(
   listed: readonly ListedTool[],
   enabled: AgentConfig["tools_enabled"],
   session: McpSession,
+  command?: string,
 ): void {
-  const excluded = new Set(catalog_by_name(server)?.exclude_tools ?? []);
+  const excluded = new Set(pin_for(server, command)?.exclude_tools ?? []);
   for (const spec of listed) {
     if (excluded.has(spec.name) === true) {
       continue;
