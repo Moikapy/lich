@@ -180,6 +180,7 @@ async function search_file(
   work_dir: string,
   relative_root: string,
   regex: RegExp,
+  pattern: string,
   collected: string[],
   max_results: number,
   signal?: AbortSignal,
@@ -197,7 +198,7 @@ async function search_file(
     return false;
   }
   const relative = path.relative(relative_root, safe);
-  for (const hit of match_lines(lines, regex)) {
+  for (const hit of match_lines(lines, regex, pattern)) {
     collected.push(`${relative}:${hit.line_no}: ${hit.text}`);
     if (collected.length >= max_results) {
       return true;
@@ -210,6 +211,7 @@ async function search_tree(
   root: string,
   work_dir: string,
   regex: RegExp,
+  pattern: string,
   matcher: (name: string) => boolean,
   max_results: number,
   signal?: AbortSignal,
@@ -224,7 +226,7 @@ async function search_tree(
     }
     const found = await scan_dir(frame, matcher);
     for (const file of found.files) {
-      const hit_cap = await search_file(file, work_dir, root, regex, collected, max_results, signal);
+      const hit_cap = await search_file(file, work_dir, root, regex, pattern, collected, max_results, signal);
       if (hit_cap === true) {
         break;
       }
@@ -249,6 +251,7 @@ function search_file_direct(
   file_path: string,
   work_dir: string,
   regex: RegExp,
+  pattern: string,
   collected: string[],
   max_results: number,
   signal?: AbortSignal,
@@ -258,6 +261,7 @@ function search_file_direct(
     work_dir,
     path.dirname(file_path),
     regex,
+    pattern,
     collected,
     max_results,
     signal,
@@ -268,13 +272,14 @@ async function collect_file_matches(
   root: string,
   work_dir: string,
   regex: RegExp,
+  pattern: string,
   matcher: (name: string) => boolean,
   max_results: number,
   signal?: AbortSignal,
 ): Promise<string[]> {
   const collected: string[] = [];
   if (matcher(path.basename(root)) === true) {
-    await search_file_direct(root, work_dir, regex, collected, max_results, signal);
+    await search_file_direct(root, work_dir, regex, pattern, collected, max_results, signal);
   }
   return collected;
 }
@@ -301,8 +306,8 @@ async function run_grep(args: Record<string, unknown>, work_dir: string, signal?
   const cap = max_results + 1;
   const matches =
     root_stat.isDirectory() === true
-      ? await search_tree(root, work_dir, regex, matcher, cap, signal)
-      : await collect_file_matches(root, work_dir, regex, matcher, cap, signal);
+      ? await search_tree(root, work_dir, regex, pattern, matcher, cap, signal)
+      : await collect_file_matches(root, work_dir, regex, pattern, matcher, cap, signal);
   return finalize_output(matches, max_results);
 }
 

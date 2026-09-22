@@ -44,9 +44,7 @@ async function read_stream(
   let truncated = false;
   while (bytes_read < max_bytes) {
     const { done, value } = await reader.read();
-    if (done === true || value === undefined) {
-      break;
-    }
+    if (done === true || value === undefined) break;
     const room = max_bytes - bytes_read;
     const take = value.byteLength > room ? value.subarray(0, room) : value;
     chunks.push(Buffer.from(take));
