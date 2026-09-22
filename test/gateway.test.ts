@@ -13,10 +13,10 @@ import {
   gateway_tools_enabled,
   is_gateway_sender_allowed,
 } from "../src/gateway/access.js";
-import { assert_bind_allowed, create_webhook_adapter } from "../src/gateway/webhook.js";
+import { assert_bind_allowed, create_webhook_adapter, MAX_WEBHOOK_BODY_BYTES } from "../src/gateway/webhook.js";
 import { format_agent_reply, split_text } from "../src/gateway/format.js";
 import { create_telegram_adapter } from "../src/gateway/telegram.js";
-import { parse_irc_line } from "../src/gateway/twitch.js";
+import { parse_irc_line, sanitize_twitch_outbound, TWITCH_MESSAGE_CAP } from "../src/gateway/twitch.js";
 import { GatewayBus } from "../src/gateway/bus.js";
 import type { Agent, AgentRunResult } from "../src/agent/agent.js";
 import type { Message, Usage } from "../src/providers/types.js";
@@ -168,6 +168,22 @@ describe("gateway bus", () => {
       expect(seen[0]?.role).toBe("user");
       expect(seen[0]?.content).toBe("keep-me");
       expect(seen.some((message) => message.role === "tool")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("releases settled promise chains so the chains map stays bounded (G-6)", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const bus = new GatewayBus({
+        config: config_for(work_dir),
+        agent_factory: () => recording_agent([]),
+      });
+      await bus.handle("webhook", "c1", "u1", "one");
+      await bus.handle("webhook", "c2", "u1", "two");
+      const chains = (bus as unknown as { chains: Map<string, Promise<void>> }).chains;
+      expect(chains.size).toBe(0);
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
@@ -414,6 +430,30 @@ describe("webhook adapter", () => {
     }
   });
 
+  it("rejects oversized POST bodies with 413 (G-6)", async () => {
+    const work_dir = temp_work_dir();
+    let port: number | undefined;
+    const adapter = make_adapter(work_dir, "echo", (seen) => {
+      port = seen;
+    });
+    try {
+      await adapter.start();
+      if (port === undefined) {
+        throw new Error("webhook did not report a listening port");
+      }
+      const oversized = "x".repeat(MAX_WEBHOOK_BODY_BYTES + 1);
+      const response = await fetch(`http://127.0.0.1:${port}/message`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: oversized,
+      });
+      expect(response.status).toBe(413);
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a non-loopback bind when no token is set", () => {
     expect(() => assert_bind_allowed("0.0.0.0", undefined)).toThrow(/refuses non-loopback/);
     expect(() => assert_bind_allowed("0.0.0.0", "")).toThrow(/refuses non-loopback/);
@@ -507,8 +547,8 @@ describe("twitch irc parsing", () => {
     expect(parsed.kind).toBe("ping");
   });
 
-  it("ignores non-matching lines", () => {
-    expect(parse_irc_line(":tmi.twitch.tv 001 nick :Welcome").kind).toBe("other");
+  it("recognizes IRC welcome and ignores other noise", () => {
+    expect(parse_irc_line(":tmi.twitch.tv 001 nick :Welcome").kind).toBe("welcome");
     expect(parse_irc_line("@tags :nick!nick@nick.tmi.twitch.tv JOIN #chan").kind).toBe("other");
   });
 
@@ -518,5 +558,12 @@ describe("twitch irc parsing", () => {
     expect(parse_irc_line(usernotice).kind).toBe("other");
     const whisper = ":evil!evil@evil.tmi.twitch.tv WHISPER victim :x!owner@o PRIVMSG #chan :pwned";
     expect(parse_irc_line(whisper).kind).toBe("other");
+  });
+
+  it("sanitizes outbound IRC control chars and chat-command prefixes (G-8)", () => {
+    expect(sanitize_twitch_outbound("hello\r\nPRIVMSG #x :pwn")).toBe("hello PRIVMSG #x :pwn");
+    expect(sanitize_twitch_outbound("/me waves")).toBe("me waves");
+    expect(sanitize_twitch_outbound(".timeout someone")).toBe("timeout someone");
+    expect(TWITCH_MESSAGE_CAP).toBeLessThanOrEqual(450);
   });
 });
