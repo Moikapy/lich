@@ -5,7 +5,7 @@ import { open_session } from "../src/session/store.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 describe("open_session", () => {
-  it("embeds pid and random entropy in the session id and creates wx-exclusive files", async () => {
+  it("embeds pid and random entropy in the session id without creating empty files", async () => {
     await mkdir(TMP_BASE, { recursive: true });
     const dir = await mkdtemp(path.join(TMP_BASE, "session-id-"));
     try {
@@ -17,8 +17,11 @@ describe("open_session", () => {
       expect(a.id).not.toBe(b.id);
       expect(a.path).not.toBe(b.path);
       expect(a.id).toMatch(/-[0-9a-f]{6}-\d+-alpha$/);
+      await expect(stat(a.path)).rejects.toMatchObject({ code: "ENOENT" });
+      await a.append({ ts: new Date().toISOString(), kind: "meta", meta: { hello: true } });
       const info = await stat(a.path);
       expect(info.isFile()).toBe(true);
+      expect(info.size).toBeGreaterThan(0);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
