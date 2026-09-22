@@ -547,8 +547,8 @@ describe("twitch irc parsing", () => {
     expect(parsed.kind).toBe("ping");
   });
 
-  it("ignores non-matching lines", () => {
-    expect(parse_irc_line(":tmi.twitch.tv 001 nick :Welcome").kind).toBe("other");
+  it("recognizes IRC welcome and ignores other noise", () => {
+    expect(parse_irc_line(":tmi.twitch.tv 001 nick :Welcome").kind).toBe("welcome");
     expect(parse_irc_line("@tags :nick!nick@nick.tmi.twitch.tv JOIN #chan").kind).toBe("other");
   });
 
