@@ -55,14 +55,24 @@ export class GatewayBus {
     const key = conversation_key(platform, chat_id);
     const previous = this.chains.get(key) ?? Promise.resolve();
     const run = previous.then(() => this.run_once(key, platform, chat_id, user_id, text));
-    this.chains.set(
-      key,
-      run.then(
-        () => undefined,
-        () => undefined,
-      ),
+    let tracked: Promise<void> = Promise.resolve();
+    tracked = run.then(
+      () => {
+        this.release_chain(key, tracked);
+      },
+      () => {
+        this.release_chain(key, tracked);
+      },
     );
+    this.chains.set(key, tracked);
     return run;
+  }
+
+  /** Drops a settled chain entry unless a newer message re-queued the key. */
+  private release_chain(key: string, tracked: Promise<void>): void {
+    if (this.chains.get(key) === tracked) {
+      this.chains.delete(key);
+    }
   }
 
   /** Unsubscribes the debug tool logger (bus owns no other resources). */
