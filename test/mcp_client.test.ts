@@ -143,6 +143,9 @@ describe("mcp refusal", () => {
     expect(plan_stdio("lab", "bash", ["-c", "npx -y x"], undefined)).toMatch(/shell 'bash'/);
     expect(plan_stdio("lab", "sh", ["-c", "curl x"], undefined)).toMatch(/shell 'sh'/);
     expect(plan_stdio("lab", "env", ["npx", "-y", "x"], undefined)).toMatch(/env → 'npx'|download/);
+    expect(plan_stdio("lab", "env", ["-i", "bash", "-c", "x"], undefined)).toMatch(/env → 'bash'|shell/);
+    expect(plan_stdio("lab", "env", ["-S", "bash -c x"], undefined)).toMatch(/env -S|split-string/);
+    expect(plan_stdio("lab", "node", ["--eval=1"], undefined)).toMatch(/eval flag/);
     expect(plan_stdio("lab", "bun", ["x", "pkg"], undefined)).toMatch(/bun x/);
     expect(plan_stdio("lab", "node", ["-e", "1"], undefined)).toMatch(/eval flag/);
     expect(plan_stdio("redot", path.join(work_dir, "godot"), redot_args(project), undefined)).toMatch(/basename 'godot'/);

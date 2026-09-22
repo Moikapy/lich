@@ -31,7 +31,7 @@ const SHELLS = new Set([
   "pwsh",
 ]);
 const INTERPRETERS = new Set(["node", "nodejs", "python", "python3", "python2", "ruby", "perl", "php"]);
-const EVAL_FLAGS = new Set(["-c", "-e", "--eval", "-Command", "-c ", "-EncodedCommand"]);
+const EVAL_FLAGS = new Set(["-c", "-e", "--eval", "-Command", "-EncodedCommand"]);
 
 export interface McpEntryShape {
   command?: string;
@@ -43,12 +43,17 @@ function base_of(command: string): string {
   return path.basename(command).toLowerCase();
 }
 
+function flag_name(arg: string): string {
+  return arg.split("=")[0] ?? arg;
+}
+
 function refuse_eval_args(base: string, args: readonly string[]): string | undefined {
   if (INTERPRETERS.has(base) === false && base !== "bun") {
     return undefined;
   }
   for (const arg of args) {
-    if (EVAL_FLAGS.has(arg) === true) {
+    const name = flag_name(arg);
+    if (EVAL_FLAGS.has(name) === true) {
       return `refused ${base} eval flag '${arg}'`;
     }
   }
@@ -79,6 +84,12 @@ function refuse_pkg_dlx(base: string, args: readonly string[]): string | undefin
 
 function refuse_env_chain(args: readonly string[]): string | undefined {
   for (const arg of args) {
+    if (arg.startsWith("-") === true) {
+      if (arg === "-S" || arg.startsWith("-S") === true || arg === "--split-string" || arg.startsWith("--split-string=") === true) {
+        return "refused env -S / --split-string";
+      }
+      continue;
+    }
     if (arg.includes("=") === true) {
       continue;
     }
@@ -101,6 +112,9 @@ function refuse_arg_downloaders(args: readonly string[]): string | undefined {
     const base = base_of(arg);
     if (DOWNLOADERS.has(base) === true) {
       return `refused download command '${base}' in args`;
+    }
+    if (SHELLS.has(base) === true) {
+      return `refused shell '${base}' in args`;
     }
   }
   return undefined;

@@ -63,6 +63,28 @@ describe("mcp_pipe id map (M-2)", () => {
     await expect(pending).rejects.toThrow(/cancelled/);
     pipe.close();
   });
+
+  it("rejects later requests after the child closes the pipe", async () => {
+    let reads = 0;
+    const child: LineChild = {
+      write_line(): void {
+        return undefined;
+      },
+      read_line: async () => {
+        reads += 1;
+        return undefined;
+      },
+      stop(): void {
+        return undefined;
+      },
+      failed: () => undefined,
+    };
+    const pipe = stdio_pipe(child);
+    await expect(pipe.request("first", {})).rejects.toThrow(/mcp closed the pipe/);
+    await expect(pipe.request("second", {})).rejects.toThrow(/mcp closed the pipe/);
+    expect(reads).toBe(1);
+    pipe.close();
+  });
 });
 
 describe("mcp metadata bounds (M-9)", () => {

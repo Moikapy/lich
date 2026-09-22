@@ -50,16 +50,22 @@ function settle_response(pending: Map<number, Pending>, parsed: JsonRpcMessage):
   waiter.resolve(parsed.result);
 }
 
-function start_pump(child: LineChild, pending: Map<number, Pending>): Promise<void> {
+function start_pump(
+  child: LineChild,
+  pending: Map<number, Pending>,
+  mark_dead: (message: string) => void,
+): Promise<void> {
   return (async () => {
     for (;;) {
       const line = await child.read_line();
       const failure = child.failed();
       if (failure !== undefined) {
+        mark_dead(failure);
         reject_all(pending, failure);
         return;
       }
       if (line === undefined) {
+        mark_dead("mcp closed the pipe");
         reject_all(pending, "mcp closed the pipe");
         return;
       }
@@ -105,10 +111,17 @@ export function stdio_pipe(child: LineChild): McpPipe {
   let next_id = 1;
   const pending = new Map<number, Pending>();
   let pump: Promise<void> | undefined;
+  let dead: string | undefined;
+  const mark_dead = (message: string): void => {
+    dead = message;
+  };
   return {
     request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
       if (aborted(signal) === true) {
         return Promise.reject(new Error("cancelled"));
+      }
+      if (dead !== undefined) {
+        return Promise.reject(new Error(dead));
       }
       const id = next_id;
       next_id += 1;
@@ -116,13 +129,14 @@ export function stdio_pipe(child: LineChild): McpPipe {
         pending.set(id, { resolve, reject });
       });
       child.write_line(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-      pump ??= start_pump(child, pending);
+      pump ??= start_pump(child, pending, mark_dead);
       return with_signal(wait, signal);
     },
     notify(method: string): void {
       child.write_line(JSON.stringify({ jsonrpc: "2.0", method }));
     },
     close(): void {
+      mark_dead("mcp closed the pipe");
       reject_all(pending, "mcp closed the pipe");
       child.stop();
     },
