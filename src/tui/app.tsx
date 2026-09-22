@@ -13,6 +13,7 @@ import type { SessionHandle } from "../session/store.js";
 import { LICH_VERSION } from "../index.js";
 import type { ThemeSpec } from "../util/lore.js";
 import { readdir, stat } from "node:fs/promises";
+import { load_resume_view } from "./load_resume.js";
 import {
   apply_event,
   apply_run_result,
@@ -26,6 +27,7 @@ import {
   tui_banner_text,
   resume_banner_count,
   resume_banner_line,
+  resume_missing_args_block,
   run_notice_blocks,
   session_list_block,
   split_history_blocks,
@@ -47,6 +49,12 @@ type SlashInput = Extract<ParsedInput, { kind: "slash" }>;
 type AddBlocks = (added: readonly HistoryBlock[]) => void;
 type SetUiState = Dispatch<SetStateAction<UiState>>;
 type SetBlocks = Dispatch<SetStateAction<readonly HistoryBlock[]>>;
+type SetHistory = (messages: readonly Message[]) => void;
+
+interface AgentRunControls {
+  readonly start_message_run: (text: string) => void;
+  readonly set_history: SetHistory;
+}
 
 /** Map one agent event to optional transcript blocks (tool rows, notices). */
 function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBlock[] {
@@ -115,9 +123,13 @@ function use_agent_run(
   set_blocks: SetBlocks,
   initial_history: readonly Message[] | undefined,
   session: SessionHandle | undefined,
-): (text: string) => void {
+): AgentRunControls {
   const history_ref = useRef<readonly Message[]>(initial_history ?? []);
   const controller_ref = useRef<AbortController | undefined>(undefined);
+
+  const set_history = useCallback<SetHistory>((messages: readonly Message[]): void => {
+    history_ref.current = messages;
+  }, []);
 
   const finish_run = useCallback((result: AgentRunResult): void => {
     history_ref.current = result.messages;
@@ -151,7 +163,7 @@ function use_agent_run(
 
   useEffect(() => () => controller_ref.current?.abort(), []);
 
-  return start_message_run;
+  return { start_message_run, set_history };
 }
 
 /** Slash-command dispatch: pure client-side actions, never hits the agent. */
@@ -160,6 +172,10 @@ function use_slash_commands(
   theme: ThemeSpec,
   add_blocks: AddBlocks,
   set_blocks: SetBlocks,
+  set_history: SetHistory,
+  set_resume_line: Dispatch<SetStateAction<string | undefined>>,
+  begin_resume_load: () => void,
+  end_resume_load: () => void,
   total_tokens: number,
 ): (parsed: SlashInput) => void {
   const handle = useCallback(
@@ -178,11 +194,40 @@ function use_slash_commands(
         set_blocks([]);
       } else if (parsed.name === "sessions") {
         void sessions_block(agent.config, theme).then((block) => add_blocks([block]));
+      } else if (parsed.name === "resume") {
+        if (parsed.args.length === 0) {
+          add_blocks([resume_missing_args_block()]);
+          return;
+        }
+        begin_resume_load();
+        void load_resume_view(agent.config.session_dir, parsed.args, theme)
+          .then((result) => {
+            if (result.ok === false) {
+              add_blocks([result.block]);
+              return;
+            }
+            set_history(result.messages);
+            set_blocks(result.blocks);
+            set_resume_line(result.banner_line);
+          })
+          .finally(() => {
+            end_resume_load();
+          });
       } else {
         add_blocks([unknown_command_block(parsed.name)]);
       }
     },
-    [agent, add_blocks, set_blocks, theme, total_tokens],
+    [
+      agent,
+      add_blocks,
+      begin_resume_load,
+      end_resume_load,
+      set_blocks,
+      set_history,
+      set_resume_line,
+      theme,
+      total_tokens,
+    ],
   );
   return handle;
 }
@@ -202,9 +247,34 @@ function initial_blocks(history: readonly Message[] | undefined, theme: ThemeSpe
   return split_history_blocks(history, HISTORY_CAP, theme);
 }
 
+function initial_resume_line(
+  resumed_id: string | undefined,
+  history: readonly Message[] | undefined,
+): string | undefined {
+  if (resumed_id === undefined) {
+    return undefined;
+  }
+  return resume_banner_line(resumed_id, resume_banner_count(history));
+}
+
 export function TuiApp({ agent, theme, session, initial_history, resumed_id }: TuiAppProps): React.JSX.Element {
   const [blocks, set_blocks] = useState<readonly HistoryBlock[]>(() => initial_blocks(initial_history, theme));
   const [state, set_state] = useState(INITIAL_UI_STATE);
+  const [resume_line, set_resume_line] = useState<string | undefined>(() =>
+    initial_resume_line(resumed_id, initial_history),
+  );
+  const resume_loading_ref = useRef(false);
+  const [resume_loading, set_resume_loading] = useState(false);
+
+  const begin_resume_load = useCallback((): void => {
+    resume_loading_ref.current = true;
+    set_resume_loading(true);
+  }, []);
+
+  const end_resume_load = useCallback((): void => {
+    resume_loading_ref.current = false;
+    set_resume_loading(false);
+  }, []);
 
   const add_blocks = useCallback<AddBlocks>((added: readonly HistoryBlock[]): void => {
     if (added.length === 0) {
@@ -213,11 +283,32 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
     set_blocks((current) => [...current, ...added].slice(-HISTORY_CAP));
   }, []);
 
-  const start_message_run = use_agent_run(agent, theme, add_blocks, set_state, set_blocks, initial_history, session);
-  const handle_slash = use_slash_commands(agent, theme, add_blocks, set_blocks, state.usage.total_tokens);
+  const { start_message_run, set_history } = use_agent_run(
+    agent,
+    theme,
+    add_blocks,
+    set_state,
+    set_blocks,
+    initial_history,
+    session,
+  );
+  const handle_slash = use_slash_commands(
+    agent,
+    theme,
+    add_blocks,
+    set_blocks,
+    set_history,
+    set_resume_line,
+    begin_resume_load,
+    end_resume_load,
+    state.usage.total_tokens,
+  );
 
   const submit = useCallback(
     (text: string): void => {
+      if (resume_loading_ref.current === true) {
+        return;
+      }
       const parsed = parse_command(text);
       if (parsed.kind === "message") {
         if (parsed.text.length > 0) {
@@ -232,16 +323,12 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
 
   const provider = agent.config.providers[0];
   const banner = tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown");
-  const resume_line =
-    resumed_id === undefined
-      ? undefined
-      : resume_banner_line(resumed_id, resume_banner_count(initial_history));
   return (
     <Box flexDirection="column" minHeight={8}>
       <Text dimColor>{resume_line === undefined ? banner : `${banner}\n${resume_line}`}</Text>
       <MessageView blocks={blocks} state={state} />
       <StatusBar state={state} model={provider?.model ?? "unknown"} theme={theme} />
-      <CommandBar busy={state.phase !== "idle"} on_submit={submit} />
+      <CommandBar busy={state.phase !== "idle" || resume_loading} on_submit={submit} />
     </Box>
   );
 }

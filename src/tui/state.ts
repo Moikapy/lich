@@ -125,7 +125,7 @@ export function resume_banner_count(messages: readonly Message[] | undefined): n
   return messages.filter((message) => message.role !== "system").length;
 }
 
-/** Second banner line when a session transcript was loaded via `--resume`. */
+/** Second banner line when a session transcript was loaded via `--resume` or `/resume`. */
 export function resume_banner_line(id: string, message_count: number): string {
   return `resumed ${id} (${message_count} messages)`;
 }
@@ -184,6 +184,24 @@ export function split_history_blocks(messages: readonly Message[], cap: number, 
   const visible = messages.filter((message) => message.role !== "system");
   const start = Math.max(0, visible.length - cap);
   return visible.slice(start).map((message) => format_message_block(message, theme));
+}
+
+/** Meta notice + transcript blocks after a successful in-TUI `/resume`. */
+export function resume_session_view(
+  id: string,
+  messages: readonly Message[],
+  theme: ThemeSpec,
+  cap: number = HISTORY_CAP,
+): { blocks: readonly HistoryBlock[]; banner_line: string } {
+  const banner_line = resume_banner_line(id, resume_banner_count(messages));
+  const notice: HistoryBlock = { role: "meta", lines: [`\u00b7 ${banner_line}`] };
+  const history_cap = Math.max(0, cap - 1);
+  return { blocks: [notice, ...split_history_blocks(messages, history_cap, theme)], banner_line };
+}
+
+/** Missing `/resume` argument notice. */
+export function resume_missing_args_block(): HistoryBlock {
+  return { role: "error", lines: ["\u00b7 /resume requires <id|latest>"] };
 }
 
 function assistant_result_block(message: AssistantMessage, theme: ThemeSpec): HistoryBlock | undefined {
@@ -291,9 +309,10 @@ export const SLASH_COMMAND_NAMES: readonly string[] = [
   "usage",
   "clear",
   "sessions",
+  "resume",
 ];
 
 export const HELP_LINES: readonly string[] = [
-  "commands: /help /model /usage /clear /sessions /exit (aliases: /quit /q)",
+  "commands: /help /model /usage /clear /sessions /resume /exit (aliases: /quit /q)",
   "enter submits \u00b7 backspace deletes \u00b7 up/down recalls history \u00b7 pasted newlines become spaces",
 ];

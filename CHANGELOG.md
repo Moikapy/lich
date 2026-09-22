@@ -11,6 +11,9 @@
   `SessionHandle` per launch and passes it into every `agent.run`; one-shot,
   chat, and gateway keep per-run files. Append failures warn and never fail
   the run.
+- TUI `/resume <id|latest>` (Phase 3): same resolve + load path as `--resume`,
+  resets the on-screen transcript with a meta notice, seeds agent history for
+  the next turn, and updates the resume banner. Does not change persistence.
 
 ## 0.7.1
 
