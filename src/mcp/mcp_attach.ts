@@ -9,14 +9,37 @@ import { default_line_spawner } from "./mcp_stdio.js";
 import type { McpRuntime } from "./mcp_tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
+/** Attach deadline so a silent server cannot block Agent.run forever. */
+const ATTACH_TIMEOUT_MS = 15000;
+
+function with_timeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ATTACH_TIMEOUT_MS}ms`));
+    }, ATTACH_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 async function open_and_register(
   registry: ToolRegistry,
   name: string,
   enabled: AgentConfig["tools_enabled"],
   session: McpSession,
+  command?: string,
 ): Promise<McpSession | undefined> {
   try {
-    register_listed(registry, name, await session.list_tools(), enabled, session);
+    const listed = await with_timeout(session.list_tools(), `mcp ${name} attach`);
+    register_listed(registry, name, listed, enabled, session, command);
     return session;
   } catch (error) {
     session.close();
@@ -40,7 +63,7 @@ export async function attach_stdio(
   }
   const spawn = runtime?.spawn ?? default_line_spawner;
   const session = new McpSession(stdio_pipe(spawn(planned.command, planned.args, entry.env)));
-  return open_and_register(registry, name, config.tools_enabled, session);
+  return open_and_register(registry, name, config.tools_enabled, session, planned.command);
 }
 
 export async function attach_http(

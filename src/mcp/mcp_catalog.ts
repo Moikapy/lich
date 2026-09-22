@@ -56,3 +56,9 @@ export function load_catalog(): readonly CatalogManifest[] {
 export function catalog_by_name(name: string): CatalogManifest | undefined {
   return load_catalog().find((entry) => entry.name === name);
 }
+
+/** Pin lookup by command basename when the config name is a custom alias. */
+export function catalog_by_basename(command_basename: string): CatalogManifest | undefined {
+  const base = command_basename.toLowerCase();
+  return load_catalog().find((entry) => entry.command_basename?.toLowerCase() === base);
+}

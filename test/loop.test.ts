@@ -82,6 +82,7 @@ describe("run_conversation", () => {
       "llm_end",
       "tool_call_start",
       "tool_call_end",
+      "turn_end",
       "turn_start",
       "llm_start",
       "llm_end",
@@ -113,6 +114,7 @@ describe("run_conversation", () => {
     expect(outcome.turns_used).toBe(3);
     expect(outcome.final?.tool_calls).toHaveLength(1);
     expect(event_types(events).filter((type) => type === "turn_start")).toHaveLength(3);
+    expect(event_types(events).filter((type) => type === "turn_end")).toHaveLength(3);
     expect(events.at(-2)?.type).toBe("budget_exhausted");
     expect(events.at(-1)?.type).toBe("turn_end");
   });
@@ -265,7 +267,11 @@ describe("run_conversation", () => {
     const chat: ChatFn = async (messages) => {
       const system_message = messages[0];
       if (system_message?.role === "system" && system_message.content.includes("compress")) {
-        return { ...result("TERSE SUMMARY CONTENT"), finish_reason: "stop" };
+        return {
+          ...result("TERSE SUMMARY CONTENT"),
+          usage: { prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 },
+          finish_reason: "stop",
+        };
       }
       return result("thinking again", [{ id: "t2", name: "noop", args: {} }]);
     };
@@ -281,6 +287,16 @@ describe("run_conversation", () => {
     expect(outcome.stopped_reason).toBe("budget");
     expect(events.some((event) => event.type === "compress_start")).toBe(true);
     expect(events.some((event) => event.type === "compress_end")).toBe(true);
+    const compress_usage = events.find((event) => event.type === "compress_end");
+    expect(compress_usage?.type).toBe("compress_end");
+    if (compress_usage?.type === "compress_end") {
+      expect(compress_usage.usage?.total_tokens).toBe(50);
+    }
+    const summarizer_as_llm = events.find(
+      (event) =>
+        event.type === "llm_end" && event.result.message.content === "TERSE SUMMARY CONTENT",
+    );
+    expect(summarizer_as_llm).toBeUndefined();
     const summary_message = outcome.messages.find(
       (message) => message.role === "user" && message.content.includes("[context summary"),
     );
@@ -288,6 +304,75 @@ describe("run_conversation", () => {
     if (summary_message?.role === "user") {
       expect(summary_message.content).toContain("TERSE SUMMARY CONTENT");
     }
+  });
+
+  it("backs off when compression cannot get under the threshold", async () => {
+    const pad = "y".repeat(2000);
+    const seed: Message[] = Array.from({ length: 12 }, (_unused, index) => ({
+      role: "user" as const,
+      content: `keep-${index} ${pad}`,
+    }));
+    let compress_calls = 0;
+    const chat: ChatFn = async (messages) => {
+      const system_message = messages[0];
+      if (system_message?.role === "system" && system_message.content.includes("compress")) {
+        compress_calls += 1;
+        return result("tiny");
+      }
+      return result("again", [{ id: `c${compress_calls}`, name: "noop", args: {} }]);
+    };
+    const deps: LoopDeps = {
+      chat,
+      tools: make_tool_runner("ok").runner,
+      definitions: () => [],
+    };
+
+    await run_conversation(deps, seed, {
+      max_turns: 4,
+      context_budget_tokens: 50,
+      compress_threshold: 0.5,
+    });
+
+    expect(compress_calls).toBe(1);
+  });
+
+  it("retries compression after backoff when the kept tail can still shrink", async () => {
+    const huge = "y".repeat(2000);
+    const small = "x".repeat(36);
+    const seed: Message[] = [
+      ...Array.from({ length: 4 }, (_unused, index) => ({
+        role: "user" as const,
+        content: `early-${index} ${huge}`,
+      })),
+      ...Array.from({ length: 8 }, (_unused, index) => ({
+        role: "user" as const,
+        content: `r${index} ${small}`,
+      })),
+    ];
+    let compress_calls = 0;
+    const chat: ChatFn = async (messages) => {
+      const system_message = messages[0];
+      if (system_message?.role === "system" && system_message.content.includes("compress")) {
+        compress_calls += 1;
+        // Long enough that summary + recent stays over budget while recent alone stays under.
+        return result("t".repeat(80));
+      }
+      return result("again", [{ id: `c${compress_calls}`, name: "noop", args: {} }]);
+    };
+    const deps: LoopDeps = {
+      chat,
+      tools: make_tool_runner("ok").runner,
+      definitions: () => [],
+    };
+
+    await run_conversation(deps, seed, {
+      max_turns: 5,
+      context_budget_tokens: 200,
+      compress_threshold: 0.5,
+    });
+
+    // Fail on turn 1 (summary+recent still over, kept tail alone under), skip 2–4, retry on 5.
+    expect(compress_calls).toBe(2);
   });
 
   it("seeds system prompt only when missing, replaces when different", async () => {

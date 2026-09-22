@@ -32,6 +32,11 @@ export function node_line_child(command: string, args: readonly string[], env?: 
     queue.close();
   });
   child.stderr?.resume();
+  child.stdin?.on("error", () => {
+    // EPIPE when the child exits mid-write must not become an uncaught exception.
+    failure ??= "mcp closed the pipe";
+    queue.close();
+  });
   child.on("error", (error: NodeJS.ErrnoException) => {
     failure = spawn_failure(error.code);
     queue.close();

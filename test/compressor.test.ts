@@ -3,6 +3,8 @@ import {
   COMPRESSION_SYSTEM_PROMPT,
   compress_messages,
   should_compress,
+  transcript_char_budget,
+  truncate_head_tail,
   type ChatFn,
 } from "../src/context/compressor.js";
 import { estimate_text_tokens } from "../src/context/tokens.js";
@@ -76,6 +78,37 @@ describe("compress_messages", () => {
     if (request_user?.role === "user") {
       expect(request_user.content).toContain("user turn 0");
       expect(request_user.content).not.toContain("user turn 9");
+    }
+  });
+
+  it("scales transcript budget and keeps head+tail of long older turns", async () => {
+    expect(transcript_char_budget(100000)).toBe(24000);
+    expect(transcript_char_budget(1000)).toBe(8000);
+    expect(truncate_head_tail("abcdefghij", 6).length).toBeLessThanOrEqual(6);
+
+    const requests: Message[][] = [];
+    const chat: ChatFn = async (messages) => {
+      requests.push([...messages]);
+      return fixed_chat_result("ok");
+    };
+    const early = user_message(`START_GOAL ${"a".repeat(12000)}`);
+    const mid = user_message(`MIDDLE ${"b".repeat(12000)}`);
+    const late = user_message(`LATE_OPEN ${"c".repeat(12000)}`);
+    const recent = [user_message("r0"), user_message("r1")];
+    await compress_messages({ chat }, [early, mid, late, ...recent], {
+      budget_tokens: 1000,
+      keep_recent: 2,
+      model_hint: "mock-model",
+    });
+
+    const request_user = requests[0]?.[1];
+    expect(request_user?.role).toBe("user");
+    if (request_user?.role === "user") {
+      expect(request_user.content).toContain("START_GOAL");
+      expect(request_user.content).toContain("LATE_OPEN");
+      expect(request_user.content).toContain("[...");
+      expect(request_user.content).toContain("(Continuing agent run as model: mock-model)");
+      expect(request_user.content.length).toBeLessThan(9000);
     }
   });
 

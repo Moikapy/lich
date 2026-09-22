@@ -6,7 +6,7 @@
  * It depends only on narrow structural interfaces (ChatFn, ToolRunner) so the
  * loop never imports provider routers or the tool executor directly.
  */
-import { compress_messages, should_compress, type ChatFn } from "../context/compressor.js";
+import { compress_messages, should_compress, split_keep_recent, type ChatFn } from "../context/compressor.js";
 import { estimate_messages_tokens } from "../context/tokens.js";
 import type {
   AssistantMessage,
@@ -15,6 +15,7 @@ import type {
   ToolCall,
   ToolDefinition,
   ToolMessage,
+  Usage,
 } from "../providers/types.js";
 import { ProviderError } from "../providers/types.js";
 import type { ToolContext, ToolResult } from "../tools/types.js";
@@ -23,6 +24,8 @@ import type { AgentEmitter } from "./events.js";
 
 const DEFAULT_COMPRESS_THRESHOLD = 0.8;
 const KEEP_RECENT_TURNS = 8;
+/** After a failed or ineffective compress, skip this many subsequent turns. */
+const COMPRESS_BACKOFF_TURNS = 3;
 
 export interface ToolRunner {
   execute(name: string, args: Record<string, unknown>, context?: ToolContext): Promise<ToolResult>;
@@ -53,6 +56,10 @@ export interface LoopOutcome {
   result: ChatResult | undefined;
   turns_used: number;
   stopped_reason: "final" | "budget" | "aborted";
+}
+
+interface CompressBackoff {
+  skip_until_turn: number;
 }
 
 function turn_range(max_turns: number): readonly number[] {
@@ -148,14 +155,43 @@ async function call_chat(
   }
 }
 
+function replace_history(history: Message[], next: readonly Message[]): void {
+  history.length = 0;
+  for (const message of next) {
+    history.push(message);
+  }
+}
+
+/** True when the compressor's kept-recent window alone still exceeds budget. */
+function kept_tail_over_budget(
+  history: readonly Message[],
+  budget_tokens: number,
+  threshold: number,
+): boolean {
+  const system_messages = history.filter((message) => message.role === "system");
+  const non_system = history.filter((message) => message.role !== "system");
+  const { recent } = split_keep_recent(non_system, KEEP_RECENT_TURNS);
+  return should_compress([...system_messages, ...recent], budget_tokens, threshold);
+}
+
+function schedule_compress_backoff(backoff: CompressBackoff, turn: number): void {
+  // turn < skip_until_turn skips COMPRESS_BACKOFF_TURNS subsequent turns.
+  backoff.skip_until_turn = turn + COMPRESS_BACKOFF_TURNS + 1;
+}
+
 async function compress_if_needed(
   deps: LoopDeps,
   history: Message[],
   params: LoopParams,
   emitter: AgentEmitter | undefined,
+  turn: number,
+  backoff: CompressBackoff,
 ): Promise<void> {
   const budget_tokens = params.context_budget_tokens;
   if (budget_tokens === undefined) {
+    return;
+  }
+  if (turn < backoff.skip_until_turn) {
     return;
   }
   const threshold = params.compress_threshold ?? DEFAULT_COMPRESS_THRESHOLD;
@@ -164,19 +200,41 @@ async function compress_if_needed(
   }
   const non_system_count = history.filter((message) => message.role !== "system").length;
   if (non_system_count <= KEEP_RECENT_TURNS) {
+    schedule_compress_backoff(backoff, turn);
     return;
   }
   emitter?.emit({ type: "compress_start", estimated_tokens: estimate_messages_tokens(history) });
+  let summarizer_usage: Usage | undefined;
+  const counting_chat: ChatFn = async (messages, tools, options) => {
+    const result = await deps.chat(messages, tools, options);
+    summarizer_usage = result.usage;
+    return result;
+  };
   const outcome = await compress_messages(
-    { chat: deps.chat },
+    { chat: counting_chat },
     history,
     { budget_tokens, keep_recent: KEEP_RECENT_TURNS, signal: params.signal },
   );
-  history.length = 0;
-  for (const message of outcome.messages) {
-    history.push(message);
+  replace_history(history, outcome.messages);
+  emitter?.emit({
+    type: "compress_end",
+    summary_chars: outcome.summary_chars,
+    usage: summarizer_usage,
+  });
+  if (outcome.summary_chars === 0) {
+    schedule_compress_backoff(backoff, turn);
+    return;
   }
-  emitter?.emit({ type: "compress_end", summary_chars: outcome.summary_chars });
+  if (should_compress(history, budget_tokens, threshold) !== true) {
+    return;
+  }
+  if (kept_tail_over_budget(history, budget_tokens, threshold) === true) {
+    // Kept tail alone still overflows; retry after backoff so huge turns can age out.
+    schedule_compress_backoff(backoff, turn);
+    return;
+  }
+  // Full history (summary + recent) still high; retry after backoff so huge turns can age out.
+  schedule_compress_backoff(backoff, turn);
 }
 
 function find_last_assistant(messages: readonly Message[]): AssistantMessage | undefined {
@@ -205,12 +263,13 @@ export async function run_conversation(
 ): Promise<LoopOutcome> {
   const history = seed_system_prompt(messages, params.system_prompt);
   const emitter = deps.emitter;
+  const compress_backoff: CompressBackoff = { skip_until_turn: 0 };
   for (const turn of turn_range(params.max_turns)) {
     if (signal_aborted(params.signal) === true) {
       return aborted_outcome(history, turn - 1, emitter);
     }
     emitter?.emit({ type: "turn_start", turn });
-    await compress_if_needed(deps, history, params, emitter);
+    await compress_if_needed(deps, history, params, emitter, turn, compress_backoff);
     emitter?.emit({ type: "llm_start", turn });
     let result: ChatResult;
     try {
@@ -232,6 +291,9 @@ export async function run_conversation(
     const tool_status = await run_tool_calls(deps, history, turn, calls, emitter, params.signal);
     if (tool_status === "aborted") {
       return aborted_outcome(history, turn, emitter);
+    }
+    if (turn < params.max_turns) {
+      emitter?.emit({ type: "turn_end", turn });
     }
   }
   emitter?.emit({ type: "budget_exhausted", turns_used: params.max_turns });
