@@ -76,10 +76,14 @@ describe("resolve_session_path", () => {
 
   it("errors for latest when the session dir is empty and includes dir", async () => {
     const dir = await make_session_dir();
-    await expect(resolve_session_path(dir, "latest")).rejects.toSatisfy((error: unknown) => {
+    try {
+      await resolve_session_path(dir, "latest");
+      expect.unreachable("expected resolve_session_path to throw");
+    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return message.includes(`session not found: "latest" in ${dir}`) && message.includes("candidates: (none)");
-    });
+      expect(message.includes(`session not found: "latest" in ${dir}`)).toBe(true);
+      expect(message.includes("candidates: (none)")).toBe(true);
+    }
   });
 
   it("propagates non-ENOENT readdir errors", async () => {
