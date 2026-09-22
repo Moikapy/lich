@@ -1,5 +1,6 @@
 import type { JsonSchemaObject } from "../../util/json_schema.js";
 import { capture_errors, require_string_arg } from "../guard.js";
+import { read_clamped_text } from "../read_clamped.js";
 import type { Tool, ToolResult } from "../types.js";
 import { clamp_int_arg, compose_abort_signal, USER_AGENT } from "./fetch_url.js";
 
@@ -7,6 +8,8 @@ const DEFAULT_MAX_RESULTS = 8;
 const MAX_RESULTS = 20;
 const DEFAULT_TIMEOUT_MS = 20000;
 const MAX_TIMEOUT_MS = 60000;
+/** Cap DuckDuckGo HTML before regex parsing so a huge page cannot inflate RSS. */
+const MAX_SEARCH_BODY_BYTES = 512_000;
 const SEARCH_ENDPOINT = "https://html.duckduckgo.com/html/?q=";
 const REDIRECT_PREFIXES = ["//duckduckgo.com/l/?", "/l/?"];
 const RESULT_PATTERN = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
@@ -109,7 +112,8 @@ async function run_search(args: Record<string, unknown>, external?: AbortSignal)
     if (response.ok === false) {
       return { ok: false, output: "", error: `search_failed: http_${response.status}` };
     }
-    const hits = parse_results(await response.text(), max_results);
+    const clamped = await read_clamped_text(response, MAX_SEARCH_BODY_BYTES);
+    const hits = parse_results(clamped.text, max_results);
     return { ok: true, output: hits.length === 0 ? "no results" : format_results(hits) };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

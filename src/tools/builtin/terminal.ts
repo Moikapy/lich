@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { DEFAULT_GATEWAY_TOKEN_ENVS } from "../../gateway/token_env.js";
 import type { JsonSchemaObject } from "../../util/json_schema.js";
 import {
@@ -10,6 +10,7 @@ import {
   ToolTimeoutError,
   with_timeout,
 } from "../guard.js";
+import { kill_process_group } from "../process_group.js";
 import type { Tool } from "../types.js";
 import { SECRET_PATTERN } from "./env_get.js";
 
@@ -74,14 +75,15 @@ export function scrub_spawn_env(
   return scrubbed;
 }
 
-function wire_kill(child: ChildProcessWithoutNullStreams, timeout_signal: AbortSignal, external?: AbortSignal): void {
-  timeout_signal.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
-  external?.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
+function wire_kill(child: ChildProcess, timeout_signal: AbortSignal, external?: AbortSignal): void {
+  const kill = (): void => kill_process_group(child, "SIGKILL");
+  timeout_signal.addEventListener("abort", kill, { once: true });
+  external?.addEventListener("abort", kill, { once: true });
 }
 
-function wait_close(child: ChildProcessWithoutNullStreams): Promise<number> {
+function wait_exit(child: ChildProcess): Promise<number> {
   return new Promise<number>((resolve) => {
-    child.on("close", (code) => resolve(code ?? -1));
+    child.on("exit", (code) => resolve(code ?? -1));
     child.on("error", () => resolve(-1));
   });
 }
@@ -98,21 +100,24 @@ async function run_command(
   const child = spawn("bash", ["-lc", command], {
     cwd: work_dir,
     env: scrub_spawn_env(process.env, env),
-  }) as ChildProcessWithoutNullStreams;
-  child.stdout.on("data", (chunk: Buffer) => stream_chunk(stdout, chunk));
-  child.stderr.on("data", (chunk: Buffer) => stream_chunk(stderr, chunk));
-  const close_promise = wait_close(child);
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout?.on("data", (chunk: Buffer) => stream_chunk(stdout, chunk));
+  child.stderr?.on("data", (chunk: Buffer) => stream_chunk(stderr, chunk));
+  const exit_promise = wait_exit(child);
   let timed_out = false;
   let exit_code: number;
   try {
     exit_code = await with_timeout((timeout_signal) => {
       wire_kill(child, timeout_signal, external);
-      return close_promise;
+      return exit_promise;
     }, timeout_ms, "terminal");
   } catch (err) {
     if (err instanceof ToolTimeoutError === true) {
       timed_out = true;
-      exit_code = await close_promise;
+      kill_process_group(child, "SIGKILL");
+      exit_code = await exit_promise;
     } else {
       throw err;
     }
@@ -123,7 +128,7 @@ async function run_command(
 
 function terminal_result(outcome: RunOutcome): { ok: boolean; output: string; error?: string } {
   const result: { ok: boolean; output: string; error?: string } = {
-    ok: outcome.exit_code === 0 && outcome.cancelled === false,
+    ok: outcome.exit_code === 0 && outcome.cancelled === false && outcome.timed_out === false,
     output: clamp_output(outcome.output),
   };
   if (outcome.cancelled === true) {
