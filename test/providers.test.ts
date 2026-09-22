@@ -232,16 +232,17 @@ describe("openai compat provider", () => {
   it("sends max_completion_tokens for reasoning models", async () => {
     const { fetch_fn, requests } = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
     const provider = new OpenAICompatProvider(openai_config({ model: "o3-mini", fetch_fn }));
-    await provider.chat([{ role: "user", content: "hi" }], [], { max_tokens: 128 });
+    await provider.chat([{ role: "user", content: "hi" }], [], { max_tokens: 128, temperature: 0.2 });
     const body = request_json(requests[0]!);
     expect(body["max_completion_tokens"]).toBe(128);
     expect(body["max_tokens"]).toBeUndefined();
+    expect(body["temperature"]).toBeUndefined();
   });
 
   it("maps 413 and tight context overflow, not bare token mentions", async () => {
     const overflow_mock = mock_fetch(() => ({
       status: 400,
-      text_body: "prompt too long: context length exceeded",
+      text_body: "prompt is too long: 200000 tokens > 200000 maximum",
     }));
     const overflow_provider = new OpenAICompatProvider(openai_config({ fetch_fn: overflow_mock.fetch_fn }));
     const overflow_failure = await overflow_provider.chat([{ role: "user", content: "go" }], []).catch((e: unknown) => e);
@@ -295,7 +296,7 @@ describe("openai compat provider", () => {
 
     const overflow_mock = mock_fetch(() => ({
       status: 400,
-      text_body: "prompt too long: context length exceeded",
+      text_body: "prompt is too long: 200000 tokens > 200000 maximum",
     }));
     const overflow_provider = new OpenAICompatProvider(openai_config({ fetch_fn: overflow_mock.fetch_fn }));
     const overflow_failure = await overflow_provider.chat([{ role: "user", content: "go" }], []).catch((e: unknown) => e);
@@ -470,6 +471,24 @@ describe("anthropic provider", () => {
     expect(result.message.content).toContain("[truncated tool call omitted]");
   });
 
+  it("maps real Anthropic overflow bodies on 400", async () => {
+    const prompt_mock = mock_fetch(() => ({
+      status: 400,
+      text_body: "prompt is too long: 200000 tokens > 200000 maximum",
+    }));
+    const prompt_provider = new AnthropicProvider(anthropic_config({ fetch_fn: prompt_mock.fetch_fn }));
+    const prompt_failure = await prompt_provider.chat([{ role: "user", content: "go" }], []).catch((e: unknown) => e);
+    expect((prompt_failure as ProviderError).kind).toBe("overflow");
+
+    const limit_mock = mock_fetch(() => ({
+      status: 400,
+      text_body: "input length and max_tokens exceed context limit: 190000 + 16384 > 200000",
+    }));
+    const limit_provider = new AnthropicProvider(anthropic_config({ fetch_fn: limit_mock.fetch_fn }));
+    const limit_failure = await limit_provider.chat([{ role: "user", content: "go" }], []).catch((e: unknown) => e);
+    expect((limit_failure as ProviderError).kind).toBe("overflow");
+  });
+
   it("preserves thinking blocks on round-trip via provider_content", async () => {
     const thinking_block = {
       type: "thinking",
@@ -503,6 +522,53 @@ describe("anthropic provider", () => {
     const replay = as_array(request_json(requests[1]!)["messages"]);
     const assistant_turn = as_record(replay[1]);
     expect(as_array(assistant_turn["content"])[0]).toEqual(thinking_block);
+  });
+
+  it("drops whitespace-only text from provider_content while keeping thinking", async () => {
+    const thinking_block = {
+      type: "thinking",
+      thinking: "plan",
+      signature: "sig_ws",
+    };
+    const { fetch_fn, requests } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        content: [thinking_block, { type: "text", text: "  \n" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], []);
+    expect(result.message.provider_content).toEqual([thinking_block]);
+    await provider.chat([{ role: "user", content: "go" }, result.message, { role: "user", content: "again" }], []);
+    const replay = as_array(request_json(requests[1]!)["messages"]);
+    const assistant_turn = as_record(replay[1]);
+    expect(as_array(assistant_turn["content"])).toEqual([thinking_block]);
+  });
+
+  it("keeps thinking in provider_content when max_tokens drops tool_use", async () => {
+    const thinking_block = {
+      type: "thinking",
+      thinking: "plan",
+      signature: "sig_len",
+    };
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        content: [
+          thinking_block,
+          { type: "tool_use", id: "tu_len", name: "list_dir", input: { path: "/" } },
+        ],
+        stop_reason: "max_tokens",
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.finish_reason).toBe("length");
+    expect(result.message.tool_calls).toBeUndefined();
+    expect(result.message.provider_content).toEqual([thinking_block]);
+    expect(result.message.content).toContain("[truncated tool call omitted]");
   });
 
   it("throws auth without calling fetch when no api key is configured", async () => {

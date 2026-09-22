@@ -20,7 +20,7 @@ const WELL_KNOWN_HOST = "api.openai.com";
 const WELL_KNOWN_KEY_ENV = "OPENAI_API_KEY";
 const MAX_ERROR_BODY_CHARS = 500;
 const OVERFLOW_BODY_PATTERN =
-  /context.?length|maximum context|prompt.?(too long|too large)|token.?limit|context window|too many tokens/i;
+  /context.?length|maximum context|prompt(?: is)? too (?:long|large)|token.?limit|context window|too many tokens|exceed.{0,30}context limit/i;
 const UNPARSEABLE_ARGS_NOTE = "[unparseable tool arguments]";
 const TRUNCATED_TOOL_CALLS_NOTE = "[truncated tool call omitted]";
 const REASONING_MODEL_PATTERN = /^(o[1-9]|o[1-9]-|gpt-5)/i;
@@ -238,7 +238,7 @@ function build_request_body(
   if (wire_tools.length > 0) {
     body.tools = wire_tools;
   }
-  if (options?.temperature !== undefined) {
+  if (options?.temperature !== undefined && is_reasoning_model(model) === false) {
     body.temperature = options.temperature;
   }
   if (options?.max_tokens !== undefined) {

@@ -19,7 +19,7 @@ const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY";
 const MAX_ERROR_BODY_CHARS = 500;
 const OVERFLOW_BODY_PATTERN =
-  /context.?length|maximum context|prompt.?(too long|too large)|token.?limit|context window|too many tokens/i;
+  /context.?length|maximum context|prompt(?: is)? too (?:long|large)|token.?limit|context window|too many tokens|exceed.{0,30}context limit/i;
 const OVERLOADED_STATUS = 529;
 const UNPARSEABLE_ARGS_NOTE = "[unparseable tool arguments]";
 const TRUNCATED_TOOL_CALLS_NOTE = "[truncated tool call omitted]";
@@ -391,7 +391,10 @@ function parse_assistant_message(
     }
     if (block.type === "text") {
       text_parts.push(block.text ?? "");
-      provider_content.push({ type: "text", text: block.text ?? "" });
+      const trimmed_text = (block.text ?? "").trim();
+      if (trimmed_text.length > 0) {
+        provider_content.push({ type: "text", text: block.text ?? "" });
+      }
       continue;
     }
     if (block.type === "tool_use") {

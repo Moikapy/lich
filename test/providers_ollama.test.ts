@@ -331,7 +331,7 @@ describe("ollama provider", () => {
   it("maps 400 context text to overflow and 429 to rate_limit with retry-after", async () => {
     const overflow_mock = mock_fetch(() => ({
       status: 400,
-      text_body: "prompt too long: context length exceeded",
+      text_body: "prompt is too long: 200000 tokens > 200000 maximum",
     }));
     const overflow_provider = new OllamaProvider(ollama_config({ fetch_fn: overflow_mock.fetch_fn }));
     const overflow_failure = await overflow_provider.chat([{ role: "user", content: "go" }], []).catch(

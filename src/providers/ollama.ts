@@ -18,7 +18,7 @@ import type {
 const DEFAULT_BASE_URL = "http://localhost:11434";
 const MAX_ERROR_BODY_CHARS = 500;
 const OVERFLOW_BODY_PATTERN =
-  /context.?length|maximum context|prompt.?(too long|too large)|token.?limit|context window|too many tokens|too long/i;
+  /context.?length|maximum context|prompt(?: is)? too (?:long|large)|token.?limit|context window|too many tokens|too long|exceed.{0,30}context limit/i;
 const UNPARSEABLE_ARGS_NOTE = "[unparseable tool arguments]";
 const TRUNCATED_TOOL_CALLS_NOTE = "[truncated tool call omitted]";
 
