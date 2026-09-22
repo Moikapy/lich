@@ -12,8 +12,9 @@ export interface HookContext {
   work_dir: string;
   /**
    * This plugin's own per-run state sub-map. Every hook invocation receives
-   * a ctx exposing only the invoking plugin's bag; the bag is swapped fresh
-   * at each run start. Absent only on hand-built contexts outside the runner.
+   * a ctx exposing only the invoking plugin's bag; the bag is scoped per
+   * Agent.run via AsyncLocalStorage (and swapped fresh at each run start).
+   * Absent only on hand-built contexts outside the runner.
    */
   state?: Map<string, unknown>;
 }

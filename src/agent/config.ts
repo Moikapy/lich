@@ -78,13 +78,31 @@ const provider_schema = z
   })
   .passthrough();
 
+const providers_schema = z
+  .array(provider_schema)
+  .min(1)
+  .superRefine((providers, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, provider] of providers.entries()) {
+      if (seen.has(provider.name) === true) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, "name"],
+          message: `duplicate provider name "${provider.name}"`,
+        });
+        continue;
+      }
+      seen.add(provider.name);
+    }
+  });
+
 const agent_config_schema = z
   .object({
     /** Wizard label. The TUI banner uses the active theme welcome string. */
     agent_name: z.string().min(1).default("lich"),
     system_prompt: z.string().optional(),
     max_turns: z.number().int().min(1).default(25),
-    providers: z.array(provider_schema).min(1),
+    providers: providers_schema,
     work_dir: z.string().optional(),
     tools_enabled: z.union([z.literal("all"), z.array(z.string())]).default("all"),
     temperature: z.number().min(0).max(2).optional(),
@@ -118,6 +136,13 @@ function freeze_config(config: AgentConfig): AgentConfig {
   Object.freeze(config.providers);
   for (const provider of config.providers) {
     Object.freeze(provider);
+  }
+  Object.freeze(config.plugins);
+  for (const plugin of config.plugins) {
+    Object.freeze(plugin);
+  }
+  if (Array.isArray(config.tools_enabled) === true) {
+    Object.freeze(config.tools_enabled);
   }
   if (config.gateway !== undefined) {
     Object.freeze(config.gateway.platforms);

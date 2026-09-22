@@ -83,9 +83,26 @@ describe("parse_agent_config", () => {
   });
 
   it("returns a deep-frozen config object", () => {
-    const config = parse_agent_config({ providers: minimal_providers });
+    const config = parse_agent_config({
+      providers: minimal_providers,
+      tools_enabled: ["read_file"],
+      plugins: ["./plugin.js"],
+    });
     expect(Object.isFrozen(config)).toBe(true);
     expect(Object.isFrozen(config.providers)).toBe(true);
     expect(Object.isFrozen(config.providers[0])).toBe(true);
+    expect(Object.isFrozen(config.plugins)).toBe(true);
+    expect(Object.isFrozen(config.tools_enabled)).toBe(true);
+  });
+
+  it("rejects duplicate provider names", () => {
+    expect(() =>
+      parse_agent_config({
+        providers: [
+          { kind: "openai_compat", name: "main", model: "a" },
+          { kind: "anthropic", name: "main", model: "b" },
+        ],
+      }),
+    ).toThrow(/duplicate provider name/);
   });
 });
