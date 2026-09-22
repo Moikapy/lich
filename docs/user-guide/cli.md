@@ -48,6 +48,7 @@ Flags work before or after the subcommand. Every value flag can also be set via 
 | `--api-key-env <NAME>` | Env var holding the api key for `providers[0]`. | `LICH_API_KEY_ENV`, else per-kind default |
 | `--system-prompt <s>` | Replaces the default system prompt. | built-in concise-assistant prompt |
 | `--session-dir <path>` | Transcript directory. | `<work_dir>/.lich/sessions` |
+| `--resume <id\|latest>` | TUI only: load an existing session transcript into history. Exact id, unique filename prefix, or `latest` (newest by mtime). | – |
 | `--log-level <level>` | `debug` \| `info` \| `warn` \| `error`. | `info` |
 | `--theme <name>` | Display theme loaded once at startup. `lich` is built-in; other names read `~/.lich/themes/<name>.json`. | `lich` |
 | `--command <bin>` | `lich mcp add` only: local stdio binary. | – |
@@ -55,7 +56,7 @@ Flags work before or after the subcommand. Every value flag can also be set via 
 | `--url <url>` | `lich mcp add` only: loopback HTTP MCP URL. | – |
 | `--project-path <path>` | `lich mcp add` only: catalog `${project_path}` substitute. | – |
 
-Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a positive integer`. Unknown flags fail with `unknown flag: --foo`. A flag missing its value fails with `<flag> requires a value`.
+Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a positive integer`. Unknown flags fail with `unknown flag: --foo`. A flag missing its value fails with `<flag> requires a value`. `--resume` outside the TUI (one-shot, `chat`, `gateway`) fails with `--resume is only supported in TUI mode (not <mode>)`.
 
 ## Provider resolution
 
@@ -173,6 +174,11 @@ Each run writes `.lich/sessions/<timestamp36>-<counter>[-label].jsonl` where the
 ```sh
 # follow the newest session
 ls -t .lich/sessions/*.jsonl | head -1
+
+# resume that session in the TUI (Phase 1: loads history; still writes a new
+# transcript after each run until Phase 2 incremental persistence)
+lich --resume latest
+lich tui --resume m1abc-1-tui
 
 # print the conversation
 jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content // "(tool call)")"' .lich/sessions/<file>.jsonl

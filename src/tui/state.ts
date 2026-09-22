@@ -114,6 +114,11 @@ export function tui_banner_text(theme: ThemeSpec, version: string, model: string
   return fill_template(theme.welcome, { version, model, kind });
 }
 
+/** Second banner line when a session transcript was loaded via `--resume`. */
+export function resume_banner_line(id: string, message_count: number): string {
+  return `resumed ${id} (${message_count} messages)`;
+}
+
 /** 1234567 -> "1,234,567" (US grouping, matching the status bar style). */
 export function format_usage(total_tokens: number): string {
   return total_tokens.toLocaleString("en-US");

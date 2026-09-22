@@ -198,6 +198,12 @@ JSON-parses leniently, accepts only records with a `kind: "message"`-shaped
 `message` whose `role` is one of the four known roles, and silently skips
 everything else. Missing files parse to an empty array.
 
+**Resume (Phase 1):** `lich --resume <id|latest>` resolves a path with
+`src/session/resolve.ts` (`latest` = newest `.jsonl` by mtime; otherwise exact
+`<id>.jsonl` or a unique filename-prefix match), then loads messages via
+`read_session_messages` into the TUI history. Persistence is still the
+post-run `persist_session` path above; incremental appends are Phase 2.
+
 ## Error propagation
 
 The loop has an explicit asymmetry between provider errors and tool errors:

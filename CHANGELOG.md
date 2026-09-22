@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0 (unreleased)
+
+- TUI session resume (Phase 1): `lich --resume <id|latest>` loads an existing
+  JSONL transcript into the TUI history and shows a `resumed <id> (n messages)`
+  banner. Persistence is still post-run until Phase 2; one-shot, chat, and
+  gateway reject `--resume`.
+
 ## 0.7.1
 
 - close agent-core review must-fixes A-1–A-4: multi-turn runs stop

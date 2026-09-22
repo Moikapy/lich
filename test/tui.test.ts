@@ -11,6 +11,7 @@ import {
   model_label_block,
   parse_command,
   parse_tool_message_content,
+  resume_banner_line,
   run_notice_blocks,
   session_list_block,
   split_history_blocks,
@@ -253,6 +254,25 @@ describe("split_history_blocks", () => {
   it("returns fewer blocks when under the cap and drops system messages", () => {
     const blocks = split_history_blocks([user_message(1), { role: "system", content: "s" }, user_message(2)], 50, LICH_THEME);
     expect(blocks).toHaveLength(2);
+  });
+
+  it("seeds resume transcript blocks from prior history", () => {
+    const history: Message[] = [
+      { role: "system", content: "prompt" },
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ];
+    const blocks = split_history_blocks(history, 50, LICH_THEME);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.lines[0]).toBe("mortal › hello");
+    expect(blocks[1]?.lines[0]).toBe("lich › hi");
+  });
+});
+
+describe("resume_banner_line", () => {
+  it("formats resumed id and message count", () => {
+    expect(resume_banner_line("m1abc-1-tui", 4)).toBe("resumed m1abc-1-tui (4 messages)");
+    expect(resume_banner_line("latest-id", 0)).toBe("resumed latest-id (0 messages)");
   });
 });
 
