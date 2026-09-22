@@ -11,6 +11,8 @@ import type { AdapterParams, PlatformAdapter } from "./types.js";
 
 export const DEFAULT_GATEWAY_PORT = 8089;
 export const DEFAULT_GATEWAY_HOST = "127.0.0.1";
+/** Reject POST bodies larger than this (G-6). */
+export const MAX_WEBHOOK_BODY_BYTES = 1_000_000;
 
 interface WebhookAdapterParams extends AdapterParams {
   port?: number;
@@ -82,7 +84,16 @@ async function handle_message_post(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  const body = await read_body(request);
+  if (content_length_exceeds(request, MAX_WEBHOOK_BODY_BYTES) === true) {
+    request.resume();
+    send_json(response, 413, { error: "payload too large" });
+    return;
+  }
+  const body = await read_body(request, MAX_WEBHOOK_BODY_BYTES);
+  if (body === undefined) {
+    send_json(response, 413, { error: "payload too large" });
+    return;
+  }
   const payload = parse_payload(body);
   const text = payload.text;
   if (text === undefined) {
@@ -97,13 +108,34 @@ async function handle_message_post(
   respond_json_text(response, 200, format_agent_reply(reply ?? "", undefined, "webhook"));
 }
 
-function read_body(request: IncomingMessage): Promise<string> {
+function content_length_exceeds(request: IncomingMessage, max_bytes: number): boolean {
+  const raw = request.headers["content-length"];
+  if (raw === undefined) {
+    return false;
+  }
+  const length = Number(raw);
+  return Number.isFinite(length) === true && length > max_bytes;
+}
+
+/** Reads the request body; returns undefined when the stream exceeds max_bytes. */
+function read_body(request: IncomingMessage, max_bytes: number): Promise<string | undefined> {
   return new Promise((resolve, reject) => {
     let body = "";
+    let size = 0;
+    let too_large = false;
     request.on("data", (chunk: Buffer) => {
+      if (too_large === true) {
+        return;
+      }
+      size += chunk.length;
+      if (size > max_bytes) {
+        too_large = true;
+        body = "";
+        return;
+      }
       body += chunk.toString("utf8");
     });
-    request.on("end", () => resolve(body));
+    request.on("end", () => resolve(too_large === true ? undefined : body));
     request.on("error", reject);
   });
 }
