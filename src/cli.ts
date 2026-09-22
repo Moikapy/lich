@@ -22,6 +22,7 @@ type ProviderKind = "openai_compat" | "anthropic" | "ollama";
 
 interface CliOptions {
   config_path?: string;
+  resume?: string;
   help?: boolean;
   version?: boolean;
   overrides: Record<string, string>;
@@ -83,6 +84,7 @@ function usage_text(): string {
     "  --api-key-env <NAME>   env var holding the api key (default LICH_API_KEY_ENV; unused by ollama)",
     "  --system-prompt <s>    system prompt override",
     "  --session-dir <path>   session transcript directory",
+    "  --resume <id|latest>   TUI only: load an existing session transcript",
     "  --log-level <level>    debug | info | warn | error",
     "  --theme <name>         display theme (default lich; files in ~/.lich/themes)",
     "  --command <bin>        mcp add: local stdio binary",
@@ -94,6 +96,32 @@ function usage_text(): string {
 
 function error_message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** --resume only applies to the TUI (including bare `lich`); reject other modes. */
+function reject_resume_outside_tui(resume: string | undefined, mode: string): void {
+  if (resume === undefined) {
+    return;
+  }
+  throw new Error(`--resume is only supported in TUI mode (not ${mode})`);
+}
+
+/** Mode label for the resume guard; undefined means TUI is allowed. */
+function non_tui_resume_mode(first: string | undefined): string | undefined {
+  if (first === undefined || first === "tui") {
+    return undefined;
+  }
+  if (
+    first === "init" ||
+    first === "config" ||
+    first === "mcp" ||
+    first === "update" ||
+    first === "chat" ||
+    first === "gateway"
+  ) {
+    return first;
+  }
+  return "one-shot";
 }
 
 /** Mode-aware config failure message; one-shot keeps the generic variant. */
@@ -110,7 +138,7 @@ function error_for_mode(mode: string, base_message: string): string {
   return base_message;
 }
 
-function parse_args(argv: string[]): CliOptions {
+export function parse_args(argv: string[]): CliOptions {
   const options: CliOptions = { overrides: {}, positionals: [], mcp_flags: empty_mcp_flags() };
   const mcp = argv.includes("mcp");
   for (let index = 0; index < argv.length; index += 1) {
@@ -132,6 +160,15 @@ function parse_args(argv: string[]): CliOptions {
         throw new Error("--config requires a path");
       }
       options.config_path = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--resume") {
+      const value = argv[index + 1];
+      if (value === undefined) {
+        throw new Error("--resume requires a value");
+      }
+      options.resume = value;
       index += 1;
       continue;
     }
@@ -425,7 +462,7 @@ async function run_bare(options: CliOptions): Promise<number> {
   if (stopped !== undefined) {
     return stopped;
   }
-  return run_tui_entry(build_config_for(options, "tui"));
+  return run_tui_entry(build_config_for(options, "tui"), options.resume);
 }
 
 function model_still_placeholder(config: Record<string, unknown>): boolean {
@@ -451,9 +488,17 @@ function run_init(options: CliOptions): number {
   return 0;
 }
 
-async function run_tui_entry(config: ReturnType<typeof build_config>): Promise<number> {
+async function run_tui_entry(config: ReturnType<typeof build_config>, resume?: string): Promise<number> {
   const { run_tui } = await import("./tui.js");
-  return run_tui(config);
+  if (resume === undefined) {
+    return run_tui(config);
+  }
+  const { resolve_session_path } = await import("./session/resolve.js");
+  const { read_session_messages } = await import("./session/store.js");
+  const transcript = await resolve_session_path(config.session_dir, resume);
+  const initial_history = await read_session_messages(transcript);
+  const resumed_id = path.basename(transcript, ".jsonl");
+  return run_tui(config, { initial_history, resumed_id });
 }
 
 function gateway_platforms(config: AgentConfig, cli_platforms: readonly string[]): readonly string[] {
@@ -522,6 +567,10 @@ export async function run_cli(argv: string[]): Promise<number> {
     return 0;
   }
   const [first] = options.positionals;
+  const blocked_resume_mode = non_tui_resume_mode(first);
+  if (blocked_resume_mode !== undefined) {
+    reject_resume_outside_tui(options.resume, blocked_resume_mode);
+  }
   if (first === undefined) {
     return run_bare(options);
   }
@@ -548,7 +597,7 @@ export async function run_cli(argv: string[]): Promise<number> {
     return run_chat(build_config_for(options, first));
   }
   if (first === "tui") {
-    return run_tui_entry(build_config_for(options, first));
+    return run_tui_entry(build_config_for(options, first), options.resume);
   }
   if (first === "gateway") {
     return run_gateway_entry(build_config_for(options, first), options.positionals.slice(1));

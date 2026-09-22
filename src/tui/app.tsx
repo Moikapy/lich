@@ -23,8 +23,11 @@ import {
   model_label_block,
   parse_command,
   tui_banner_text,
+  resume_banner_count,
+  resume_banner_line,
   run_notice_blocks,
   session_list_block,
+  split_history_blocks,
   tool_result_block,
   unknown_command_block,
   usage_notice_block,
@@ -105,8 +108,9 @@ function use_agent_run(
   add_blocks: AddBlocks,
   set_state: SetUiState,
   set_blocks: SetBlocks,
+  initial_history: readonly Message[] | undefined,
 ): (text: string) => void {
-  const history_ref = useRef<readonly Message[]>([]);
+  const history_ref = useRef<readonly Message[]>(initial_history ?? []);
   const controller_ref = useRef<AbortController | undefined>(undefined);
 
   const finish_run = useCallback((result: AgentRunResult): void => {
@@ -180,10 +184,19 @@ function use_slash_commands(
 interface TuiAppProps {
   readonly agent: Agent;
   readonly theme: ThemeSpec;
+  readonly initial_history?: readonly Message[];
+  readonly resumed_id?: string;
 }
 
-export function TuiApp({ agent, theme }: TuiAppProps): React.JSX.Element {
-  const [blocks, set_blocks] = useState<readonly HistoryBlock[]>([]);
+function initial_blocks(history: readonly Message[] | undefined, theme: ThemeSpec): readonly HistoryBlock[] {
+  if (history === undefined || history.length === 0) {
+    return [];
+  }
+  return split_history_blocks(history, HISTORY_CAP, theme);
+}
+
+export function TuiApp({ agent, theme, initial_history, resumed_id }: TuiAppProps): React.JSX.Element {
+  const [blocks, set_blocks] = useState<readonly HistoryBlock[]>(() => initial_blocks(initial_history, theme));
   const [state, set_state] = useState(INITIAL_UI_STATE);
 
   const add_blocks = useCallback<AddBlocks>((added: readonly HistoryBlock[]): void => {
@@ -193,7 +206,7 @@ export function TuiApp({ agent, theme }: TuiAppProps): React.JSX.Element {
     set_blocks((current) => [...current, ...added].slice(-HISTORY_CAP));
   }, []);
 
-  const start_message_run = use_agent_run(agent, theme, add_blocks, set_state, set_blocks);
+  const start_message_run = use_agent_run(agent, theme, add_blocks, set_state, set_blocks, initial_history);
   const handle_slash = use_slash_commands(agent, theme, add_blocks, set_blocks, state.usage.total_tokens);
 
   const submit = useCallback(
@@ -211,9 +224,14 @@ export function TuiApp({ agent, theme }: TuiAppProps): React.JSX.Element {
   );
 
   const provider = agent.config.providers[0];
+  const banner = tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown");
+  const resume_line =
+    resumed_id === undefined
+      ? undefined
+      : resume_banner_line(resumed_id, resume_banner_count(initial_history));
   return (
     <Box flexDirection="column" minHeight={8}>
-      <Text dimColor>{tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown")}</Text>
+      <Text dimColor>{resume_line === undefined ? banner : `${banner}\n${resume_line}`}</Text>
       <MessageView blocks={blocks} state={state} />
       <StatusBar state={state} model={provider?.model ?? "unknown"} theme={theme} />
       <CommandBar busy={state.phase !== "idle"} on_submit={submit} />
