@@ -129,11 +129,11 @@ describe("serve session rpc", () => {
     ]);
   });
 
-  it("keeps prompt.submit unimplemented (-32601)", async () => {
+  it("rejects prompt.submit without an agent (-32000)", async () => {
     const session_dir = path.join(await make_temp_dir("serve-prompt"), "sessions");
     const context = rpc_context(session_dir);
     const response = await rpc(context, "prompt.submit", { session_id: "x", text: "hi" });
-    expect(response.error).toMatchObject({ code: -32601 });
+    expect(response.error).toMatchObject({ code: -32000, message: /agent not configured/ });
   });
 
   it("rejects create without source and clear of unknown id", async () => {

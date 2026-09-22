@@ -7,8 +7,11 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { LICH_VERSION } from "../version.js";
+import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
+import { create_serve_prompt_service, type ServePromptService } from "./prompts.js";
 import { handle_serve_rpc_message } from "./rpc.js";
 import { create_serve_session_store, type ServeSessionStore } from "./sessions.js";
+import type { ServeEventNotification } from "./protocol.js";
 
 export const DEFAULT_SERVE_HOST = "127.0.0.1";
 export const DEFAULT_SERVE_PORT = 0;
@@ -32,6 +35,10 @@ export interface ServeOptions {
   version?: string;
   /** Transcript directory for session.list / resume / create. */
   session_dir?: string;
+  /** Injected Agent (tests). Takes precedence over `agent_config`. */
+  agent?: Agent;
+  /** Parsed like CLI config; used when `agent` is omitted. Creates via create_agent_with_plugins. */
+  agent_config?: unknown;
   /** Boot JSON line sink. Default `process.stdout`; `null` skips emission. */
   boot_stdout?: NodeJS.WritableStream | null;
   on_listening?: (info: ServeBootInfo) => void;
@@ -42,6 +49,7 @@ export interface ServeServer {
   stop(): Promise<void>;
   readonly boot: ServeBootInfo | undefined;
   readonly sessions: ServeSessionStore;
+  readonly prompts: ServePromptService | undefined;
 }
 
 export function create_serve_server(options: ServeOptions = {}): ServeServer {
@@ -56,6 +64,8 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   let http_server: Server | undefined;
   let wss: WebSocketServer | undefined;
   let boot: ServeBootInfo | undefined;
+  let prompts: ServePromptService | undefined;
+  let owned_agent: Agent | undefined;
 
   return {
     get boot() {
@@ -64,10 +74,18 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
     get sessions() {
       return sessions;
     },
+    get prompts() {
+      return prompts;
+    },
     start: async () => {
       if (http_server !== undefined) {
         throw new Error("lich serve already started");
       }
+      const agent = await resolve_agent(options);
+      if (agent !== undefined && options.agent === undefined) {
+        owned_agent = agent;
+      }
+      prompts = agent === undefined ? undefined : create_serve_prompt_service(agent, sessions);
       http_server = createServer((_req, res) => {
         res.statusCode = 404;
         res.end();
@@ -96,7 +114,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
         }
         wss?.handleUpgrade(request, socket, head, (client) => {
           socket.off("error", on_socket_error);
-          attach_client(client, version, sessions);
+          attach_client(client, version, sessions, prompts);
         });
       });
       try {
@@ -122,13 +140,31 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       await close_http(http_server);
       http_server = undefined;
       boot = undefined;
+      prompts = undefined;
+      owned_agent?.close();
+      owned_agent = undefined;
     },
   };
 }
 
-function attach_client(client: WebSocket, version: string, sessions: ServeSessionStore): void {
+async function resolve_agent(options: ServeOptions): Promise<Agent | undefined> {
+  if (options.agent !== undefined) {
+    return options.agent;
+  }
+  if (options.agent_config !== undefined) {
+    return create_agent_with_plugins(options.agent_config);
+  }
+  return undefined;
+}
+
+function attach_client(
+  client: WebSocket,
+  version: string,
+  sessions: ServeSessionStore,
+  prompts: ServePromptService | undefined,
+): void {
   client.on("message", (data) => {
-    void handle_client_message(client, data, version, sessions);
+    void handle_client_message(client, data, version, sessions, prompts);
   });
 }
 
@@ -137,8 +173,19 @@ async function handle_client_message(
   data: RawData,
   version: string,
   sessions: ServeSessionStore,
+  prompts: ServePromptService | undefined,
 ): Promise<void> {
-  const reply = await handle_serve_rpc_message(raw_data_to_string(data), { version, sessions });
+  const notify = (notification: ServeEventNotification): void => {
+    if (client.readyState === client.OPEN) {
+      client.send(JSON.stringify(notification));
+    }
+  };
+  const reply = await handle_serve_rpc_message(raw_data_to_string(data), {
+    version,
+    sessions,
+    prompts,
+    notify,
+  });
   if (reply !== undefined && client.readyState === client.OPEN) {
     client.send(reply);
   }

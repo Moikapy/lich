@@ -8,9 +8,10 @@ Twitch, or an HTTP webhook; serve owns sessions, live `AgentEvent` streaming,
 and abort.
 
 This page documents the shared contract in
-[`src/serve/protocol.ts`](../../src/serve/protocol.ts) and the loopback
-WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts).
-Prompt RPC and the `lich serve` CLI land in follow-up issues.
+[`src/serve/protocol.ts`](../../src/serve/protocol.ts), the loopback
+WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts),
+and prompt/event handling in [`src/serve/prompts.ts`](../../src/serve/prompts.ts).
+The `lich serve` CLI lands in #84.
 
 ## Role in the system
 
@@ -61,7 +62,13 @@ land.
 `session.clear` resets that bag (handle stays). `session.list` / `session.resume`
 reuse [`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
 semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds history
-from disk and opens a fresh `SessionHandle` for later `prompt.submit` (#83).
+from disk and opens a fresh `SessionHandle` for later `prompt.submit`.
+
+`prompt.submit` runs the server Agent with that bag's history and
+`AgentRunOptions.session` (one JSONL file per serve session). Runs are serialized
+so AgentEvent fan-out stays correctly tagged with `session_id`. While a run is
+in flight, `prompt.abort` aborts it via `AbortSignal`. The submit result mirrors
+`AgentRunResult` (`reply`, `usage`, `session_path`, `turns_used`, `stopped_reason`).
 
 ## Notifications
 
@@ -71,7 +78,8 @@ from disk and opens a fresh `SessionHandle` for later `prompt.submit` (#83).
 
 Events are 1:1 with the in-process emitter — `turn_start`, `llm_*`,
 `tool_call_*`, `final`, `error`, and the rest — so a Chat pane can mirror TUI
-semantics without embedding `Agent` in Electron.
+semantics without embedding `Agent` in Electron. Notifications are pushed on the
+same WebSocket that issued `prompt.submit` while the call is still in flight.
 
 ## Transport (loopback)
 
@@ -86,9 +94,9 @@ semantics without embedding `Agent` in Electron.
   do not assume `file://` / `app://` behavior here.
 - Frame size capped at ~1 MiB (`maxPayload`).
 - `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
+- Pass `agent` or `agent_config` (same shape as CLI / `create_agent_with_plugins`) so
+  `prompt.*` is available; without an agent, those methods return an application error.
 
 ## Not in this layer yet
 
 - No `lich serve` CLI entry (#84).
-- No `prompt.*` handlers (#83) — locked names return method-not-found until implemented.
-- No Agent construction yet (also #83).
