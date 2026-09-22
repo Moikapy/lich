@@ -116,7 +116,6 @@ export class GatewayBus {
         break;
       }
       this.histories.delete(oldest.value);
-      this.chains.delete(oldest.value);
     }
     return this.histories.get(key) ?? [];
   }

@@ -23,7 +23,7 @@ interface TwitchConfig {
 }
 
 interface ParsedLine {
-  kind: "ping" | "privmsg" | "other";
+  kind: "ping" | "privmsg" | "welcome" | "other";
   channel: string;
   user: string;
   text: string;
@@ -38,16 +38,19 @@ export function create_twitch_adapter(params: AdapterParams): PlatformAdapter {
   }
   let running = false;
   let socket: RawSocket | undefined;
+  let stop_controller = new AbortController();
   return {
     name: "twitch",
     start: async () => {
       running = true;
+      stop_controller = new AbortController();
       void irc_loop(params, twitch, () => running, (opened) => {
         socket = opened;
-      });
+      }, stop_controller.signal);
     },
     stop: async () => {
       running = false;
+      stop_controller.abort();
       socket?.close();
       socket = undefined;
     },
@@ -77,29 +80,35 @@ async function irc_loop(
   twitch: TwitchConfig,
   keep_running: () => boolean,
   set_socket: (socket: RawSocket) => void,
+  signal: AbortSignal,
 ): Promise<void> {
   let backoff_index = 0;
   while (keep_running()) {
     let close_code: number | undefined;
-    let connected = false;
+    let welcomed = false;
     try {
       const socket = await open_socket(TWITCH_IRC_URL);
       set_socket(socket);
-      connected = true;
-      close_code = await irc_session(params, twitch, socket);
+      const session = await irc_session(params, twitch, socket);
+      close_code = session.close_code;
+      welcomed = session.welcomed;
     } catch (error) {
       logger.warn("gateway twitch connection failed", error);
     }
     if (keep_running() === false) {
       return;
     }
-    if (connected === true) {
+    if (welcomed === true) {
       backoff_index = 0;
     }
     const delay = TWITCH_BACKOFF_MS[backoff_index] ?? 30000;
     const close_note = close_code === undefined ? "" : ` (close ${close_code})`;
     logger.warn(`gateway twitch reconnecting in ${delay}ms${close_note}`);
-    await sleep(delay);
+    try {
+      await sleep(delay, signal);
+    } catch {
+      return;
+    }
     backoff_index = Math.min(backoff_index + 1, TWITCH_BACKOFF_MS.length - 1);
   }
 }
@@ -108,7 +117,8 @@ async function irc_session(
   params: AdapterParams,
   twitch: TwitchConfig,
   socket: RawSocket,
-): Promise<number> {
+): Promise<{ close_code: number; welcomed: boolean }> {
+  let welcomed = false;
   const closed = new Promise<number>((resolve) => {
     socket.onclose = ((event?: { code?: number }) => {
       resolve(typeof event?.code === "number" ? event.code : 1000);
@@ -116,7 +126,11 @@ async function irc_session(
   });
   socket.onmessage = (event) => {
     for (const line of String(event.data).split("\r\n")) {
-      void handle_irc_line(params, twitch, socket, line);
+      void handle_irc_line(params, twitch, socket, line, (ok) => {
+        if (ok === true) {
+          welcomed = true;
+        }
+      });
     }
   };
   socket.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
@@ -125,7 +139,8 @@ async function irc_session(
   for (const channel of twitch.channels) {
     socket.send(`JOIN #${channel}`);
   }
-  return closed;
+  const close_code = await closed;
+  return { close_code, welcomed };
 }
 
 async function handle_irc_line(
@@ -133,11 +148,16 @@ async function handle_irc_line(
   twitch: TwitchConfig,
   socket: RawSocket,
   line: string,
+  on_welcome: (ok: boolean) => void,
 ): Promise<void> {
   if (line.length === 0) {
     return;
   }
   const parsed = parse_irc_line(line);
+  if (parsed.kind === "welcome") {
+    on_welcome(true);
+    return;
+  }
   if (parsed.kind === "ping") {
     socket.send("PONG :tmi.twitch.tv");
     return;
@@ -166,7 +186,11 @@ async function send_twitch_message(socket: RawSocket, channel: string, text: str
     if (chunk === undefined) {
       continue;
     }
-    socket.send(`PRIVMSG #${channel} :${chunk}`);
+    const sanitized_chunk = sanitize_twitch_outbound(chunk);
+    if (sanitized_chunk.length === 0) {
+      continue;
+    }
+    socket.send(`PRIVMSG #${channel} :${sanitized_chunk}`);
     if (index + 1 < chunks.length) {
       await sleep(TWITCH_CHUNK_GAP_MS);
     }
@@ -185,6 +209,9 @@ export function sanitize_twitch_outbound(text: string): string {
 export function parse_irc_line(line: string): ParsedLine {
   if (line.startsWith("PING") === true) {
     return { kind: "ping", channel: "", user: "", text: "" };
+  }
+  if (/:\S+ 001 /.test(line) === true || line.includes(" GLOBALUSERSTATE ") === true) {
+    return { kind: "welcome", channel: "", user: "", text: "" };
   }
   const privmsg = match_privmsg(line);
   if (privmsg === undefined) {

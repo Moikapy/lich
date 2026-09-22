@@ -14,8 +14,8 @@ const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
 /** Guild messages + message content + direct messages. */
 const INTENTS = 512 | 32768 | 4096;
 export const DISCORD_BACKOFF_MS = [5000, 10000, 20000, 30000] as const;
-/** Auth failure / missing privileged intents — reconnecting cannot recover. */
-const DISCORD_FATAL_CLOSE = new Set([4004, 4014]);
+/** Auth / sharding / API-version failures — reconnecting cannot recover. */
+const DISCORD_FATAL_CLOSE = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
 /** Live heartbeat timers keyed by socket, cleared when the session ends. */
 const heartbeat_timers = new WeakMap<RawSocket, ReturnType<typeof setInterval>>();
 
@@ -35,6 +35,7 @@ interface DiscordMessageData {
 interface DiscordSessionState {
   last_seq: number | null;
   identified: boolean;
+  ack_pending: boolean;
 }
 
 export function create_discord_adapter(params: AdapterParams): PlatformAdapter {
@@ -44,16 +45,19 @@ export function create_discord_adapter(params: AdapterParams): PlatformAdapter {
   }
   let running = false;
   let socket: RawSocket | undefined;
+  let stop_controller = new AbortController();
   return {
     name: "discord",
     start: async () => {
       running = true;
+      stop_controller = new AbortController();
       void connect_loop(params, token, () => running, (opened) => {
         socket = opened;
-      });
+      }, stop_controller.signal);
     },
     stop: async () => {
       running = false;
+      stop_controller.abort();
       socket?.close();
       socket = undefined;
     },
@@ -65,6 +69,7 @@ async function connect_loop(
   token: string,
   keep_running: () => boolean,
   set_socket: (socket: RawSocket) => void,
+  signal: AbortSignal,
 ): Promise<void> {
   let backoff_index = 0;
   while (keep_running()) {
@@ -92,7 +97,11 @@ async function connect_loop(
     const delay = DISCORD_BACKOFF_MS[backoff_index] ?? 30000;
     const close_note = close_code === undefined ? "" : ` (close ${close_code})`;
     logger.warn(`gateway discord reconnecting in ${delay}ms${close_note}`);
-    await sleep(delay);
+    try {
+      await sleep(delay, signal);
+    } catch {
+      return;
+    }
     backoff_index = Math.min(backoff_index + 1, DISCORD_BACKOFF_MS.length - 1);
   }
 }
@@ -102,7 +111,7 @@ async function socket_session(
   token: string,
   params: AdapterParams,
 ): Promise<{ close_code: number; identified: boolean }> {
-  const state: DiscordSessionState = { last_seq: null, identified: false };
+  const state: DiscordSessionState = { last_seq: null, identified: false, ack_pending: false };
   const done = new Promise<number>((resolve) => {
     socket.onclose = ((event?: { code?: number }) => {
       resolve(typeof event?.code === "number" ? event.code : 1000);
@@ -130,8 +139,12 @@ function handle_discord_payload(
   if (typeof payload.s === "number") {
     state.last_seq = payload.s;
   }
+  if (payload.op === 11) {
+    state.ack_pending = false;
+    return;
+  }
   if (payload.op === 1) {
-    send_heartbeat(socket, state.last_seq);
+    send_heartbeat(socket, state);
     return;
   }
   if (payload.op === 7 || payload.op === 9) {
@@ -140,8 +153,11 @@ function handle_discord_payload(
   }
   if (payload.op === 10 && is_hello(payload.d)) {
     socket.send(JSON.stringify({ op: 2, d: identify_body(token) }));
+    schedule_heartbeat(socket, payload.d.heartbeat_interval, state);
+    return;
+  }
+  if (payload.t === "READY") {
     state.identified = true;
-    schedule_heartbeat(socket, payload.d.heartbeat_interval, () => state.last_seq);
     return;
   }
   if (payload.t === "MESSAGE_CREATE") {
@@ -152,18 +168,23 @@ function handle_discord_payload(
 function schedule_heartbeat(
   socket: RawSocket,
   interval_ms: unknown,
-  get_seq: () => number | null,
+  state: DiscordSessionState,
 ): void {
   clear_heartbeat(socket);
   const interval = typeof interval_ms === "number" ? interval_ms : 45000;
   const timer = setInterval(() => {
-    send_heartbeat(socket, get_seq());
+    if (state.ack_pending === true) {
+      socket.close();
+      return;
+    }
+    send_heartbeat(socket, state);
   }, Math.max(1000, interval - 1000));
   heartbeat_timers.set(socket, timer);
 }
 
-function send_heartbeat(socket: RawSocket, seq: number | null): void {
-  socket.send(JSON.stringify({ op: 1, d: seq }));
+function send_heartbeat(socket: RawSocket, state: DiscordSessionState): void {
+  state.ack_pending = true;
+  socket.send(JSON.stringify({ op: 1, d: state.last_seq }));
 }
 
 function clear_heartbeat(socket: RawSocket): void {
