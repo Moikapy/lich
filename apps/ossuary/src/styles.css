@@ -28,3 +28,16 @@ body,
   letter-spacing: 0.08em;
   text-transform: lowercase;
 }
+
+.hello .status,
+.hello .health,
+.hello .error {
+  margin: 0.75rem 0 0;
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+
+.hello .error {
+  color: #f88;
+  opacity: 1;
+}
