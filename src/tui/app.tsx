@@ -9,6 +9,7 @@ import type { Agent, AgentRunResult } from "../agent/agent.js";
 import type { AgentEvent } from "../agent/events.js";
 import type { AgentConfig } from "../agent/config.js";
 import type { Message } from "../providers/types.js";
+import type { SessionHandle } from "../session/store.js";
 import { LICH_VERSION } from "../index.js";
 import type { ThemeSpec } from "../util/lore.js";
 import { readdir, stat } from "node:fs/promises";
@@ -50,6 +51,9 @@ type SetBlocks = Dispatch<SetStateAction<readonly HistoryBlock[]>>;
 /** Map one agent event to optional transcript blocks (tool rows, notices). */
 function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBlock[] {
   if (event.type === "tool_call_end") {
+    if (event.cancelled === true) {
+      return [];
+    }
     return [tool_result_block(event.call, event.result.ok === true, event.result.output)];
   }
   if (event.type === "compress_end") {
@@ -69,10 +73,11 @@ async function run_agent_turn(
   on_event: (event: AgentEvent) => void,
   on_done: (result: AgentRunResult) => void,
   signal: AbortSignal,
+  session: SessionHandle | undefined,
 ): Promise<void> {
   const stop_listening = agent.events.on(on_event);
   try {
-    const result = await agent.run({ input, history, signal, label: "tui" });
+    const result = await agent.run({ input, history, signal, label: "tui", session });
     on_done(result);
   } finally {
     stop_listening();
@@ -109,6 +114,7 @@ function use_agent_run(
   set_state: SetUiState,
   set_blocks: SetBlocks,
   initial_history: readonly Message[] | undefined,
+  session: SessionHandle | undefined,
 ): (text: string) => void {
   const history_ref = useRef<readonly Message[]>(initial_history ?? []);
   const controller_ref = useRef<AbortController | undefined>(undefined);
@@ -129,7 +135,7 @@ function use_agent_run(
         set_state((current) => apply_event(current, event));
         set_blocks((current) => [...current, ...event_blocks(event, theme)].slice(-HISTORY_CAP));
       };
-      void run_agent_turn(agent, history_ref.current, text, on_event, finish_run, controller.signal)
+      void run_agent_turn(agent, history_ref.current, text, on_event, finish_run, controller.signal, session)
         .catch((error: unknown) => {
           add_blocks([error_notice_block(run_error_text(error))]);
           set_state((current) => ({ ...current, phase: "idle" }));
@@ -140,7 +146,7 @@ function use_agent_run(
           }
         });
     },
-    [agent, add_blocks, finish_run, set_blocks, set_state, theme],
+    [agent, add_blocks, finish_run, session, set_blocks, set_state, theme],
   );
 
   useEffect(() => () => controller_ref.current?.abort(), []);
@@ -184,6 +190,7 @@ function use_slash_commands(
 interface TuiAppProps {
   readonly agent: Agent;
   readonly theme: ThemeSpec;
+  readonly session?: SessionHandle;
   readonly initial_history?: readonly Message[];
   readonly resumed_id?: string;
 }
@@ -195,7 +202,7 @@ function initial_blocks(history: readonly Message[] | undefined, theme: ThemeSpe
   return split_history_blocks(history, HISTORY_CAP, theme);
 }
 
-export function TuiApp({ agent, theme, initial_history, resumed_id }: TuiAppProps): React.JSX.Element {
+export function TuiApp({ agent, theme, session, initial_history, resumed_id }: TuiAppProps): React.JSX.Element {
   const [blocks, set_blocks] = useState<readonly HistoryBlock[]>(() => initial_blocks(initial_history, theme));
   const [state, set_state] = useState(INITIAL_UI_STATE);
 
@@ -206,7 +213,7 @@ export function TuiApp({ agent, theme, initial_history, resumed_id }: TuiAppProp
     set_blocks((current) => [...current, ...added].slice(-HISTORY_CAP));
   }, []);
 
-  const start_message_run = use_agent_run(agent, theme, add_blocks, set_state, set_blocks, initial_history);
+  const start_message_run = use_agent_run(agent, theme, add_blocks, set_state, set_blocks, initial_history, session);
   const handle_slash = use_slash_commands(agent, theme, add_blocks, set_blocks, state.usage.total_tokens);
 
   const submit = useCallback(

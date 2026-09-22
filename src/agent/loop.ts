@@ -77,11 +77,26 @@ function seed_system_prompt(messages: readonly Message[], system_prompt: string 
   return [...history.slice(0, system_index), replaced, ...history.slice(system_index + 1)];
 }
 
-function format_tool_result_content(result: ToolResult): string {
+/** Format a tool result the same way the loop stores it on the tool message. */
+export function format_tool_result_content(result: ToolResult): string {
   if (result.error !== undefined) {
     return JSON.stringify({ ok: false, output: result.output, error: result.error });
   }
   return result.output;
+}
+
+/** Rebuild the tool message that run_tool_calls would push for this call/result. */
+export function tool_message_from_result(call: ToolCall, result: ToolResult): ToolMessage {
+  const tool_message: ToolMessage = {
+    role: "tool",
+    tool_call_id: call.id,
+    name: call.name,
+    content: format_tool_result_content(result),
+  };
+  if (result.ok !== true) {
+    tool_message.is_error = true;
+  }
+  return tool_message;
 }
 
 async function run_tool_calls(
@@ -94,34 +109,17 @@ async function run_tool_calls(
 ): Promise<"continued" | "aborted"> {
   for (const call of calls) {
     if (signal_aborted(signal) === true) {
-      history.push(cancelled_tool_message(call));
+      const cancelled: ToolResult = { ok: false, output: "", error: "cancelled" };
+      history.push(tool_message_from_result(call, cancelled));
+      emitter?.emit({ type: "tool_call_end", turn, call, result: cancelled, cancelled: true });
       continue;
     }
     emitter?.emit({ type: "tool_call_start", turn, call });
     const result = await deps.tools.execute(call.name, call.args, deps.tool_context);
-    const tool_message: ToolMessage = {
-      role: "tool",
-      tool_call_id: call.id,
-      name: call.name,
-      content: format_tool_result_content(result),
-    };
-    if (result.ok !== true) {
-      tool_message.is_error = true;
-    }
-    history.push(tool_message);
+    history.push(tool_message_from_result(call, result));
     emitter?.emit({ type: "tool_call_end", turn, call, result });
   }
   return signal_aborted(signal) === true ? "aborted" : "continued";
-}
-
-function cancelled_tool_message(call: ToolCall): ToolMessage {
-  return {
-    role: "tool",
-    tool_call_id: call.id,
-    name: call.name,
-    content: format_tool_result_content({ ok: false, output: "", error: "cancelled" }),
-    is_error: true,
-  };
 }
 
 async function call_chat(

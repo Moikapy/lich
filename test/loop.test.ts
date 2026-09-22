@@ -144,6 +144,8 @@ describe("run_conversation", () => {
     }
     expect(events.some((event) => event.type === "error")).toBe(true);
     expect(event_types(events).at(-1)).toBe("error");
+    expect(event_types(events).filter((type) => type === "tool_call_end")).toHaveLength(1);
+    expect(events.some((event) => event.type === "tool_call_end" && event.cancelled === true)).toBe(true);
   });
 
   it("returns aborted when chat throws after the signal aborts mid-call", async () => {
@@ -208,6 +210,43 @@ describe("run_conversation", () => {
       expect(tool_messages[1].content).toContain("cancelled");
       expect(tool_messages[1].tool_call_id).toBe("t2");
     }
+  });
+
+  it("emits cancelled tool_call_end for skipped tool calls so persistence stays paired", async () => {
+    const controller = new AbortController();
+    const emitter = new AgentEmitter();
+    const events: AgentEvent[] = [];
+    emitter.on((event) => events.push(event));
+    const runner: ToolRunner = {
+      execute: async () => {
+        controller.abort();
+        return { ok: true, output: "done" };
+      },
+    };
+    const chat = make_chat_queue([
+      result("", [
+        { id: "t1", name: "first", args: {} },
+        { id: "t2", name: "second", args: {} },
+      ]),
+    ]);
+    const deps: LoopDeps = {
+      chat,
+      tools: runner,
+      definitions: () => [],
+      emitter,
+      tool_context: { work_dir: ".", env: {}, signal: controller.signal },
+    };
+
+    await run_conversation(deps, [{ role: "user", content: "go" }], {
+      max_turns: 3,
+      signal: controller.signal,
+    });
+
+    const ends = events.filter((event) => event.type === "tool_call_end");
+    expect(ends).toHaveLength(2);
+    expect(ends[0]).toMatchObject({ call: { id: "t1" }, result: { ok: true } });
+    expect(ends[0] && "cancelled" in ends[0] ? ends[0].cancelled : undefined).toBeUndefined();
+    expect(ends[1]).toMatchObject({ call: { id: "t2" }, cancelled: true, result: { error: "cancelled" } });
   });
 
   it("scenario D: compresses history when the context budget is exceeded", async () => {

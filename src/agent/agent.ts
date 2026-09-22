@@ -14,6 +14,7 @@ import { load_plugins, plugin_errors_summary, type LoadedPlugin } from "../plugi
 import type { HookContext, Plugin } from "../plugins/types.js";
 import type { Message, Usage } from "../providers/types.js";
 import { ProviderRouter } from "../providers/router.js";
+import { create_session_recorder, type SessionRecorder } from "../session/recorder.js";
 import { open_session, type SessionHandle } from "../session/store.js";
 import type { ToolContext } from "../tools/types.js";
 import type { AgentConfig } from "./config.js";
@@ -34,6 +35,8 @@ export interface AgentRunOptions {
   history?: readonly Message[];
   signal?: AbortSignal;
   label?: string;
+  /** Shared transcript handle (TUI: one file per launch). When set, Agent reuses it. */
+  session?: SessionHandle;
 }
 
 export interface AgentRunResult {
@@ -67,22 +70,6 @@ function collect_usage(total: Usage): (event: AgentEvent) => void {
       total.total_tokens += event.result.usage.total_tokens;
     }
   };
-}
-
-function append_meta(handle: SessionHandle, meta: Record<string, unknown>): Promise<void> {
-  return handle.append({ ts: new Date().toISOString(), kind: "meta", meta });
-}
-
-function append_run_end(handle: SessionHandle, stopped_reason: string, usage_total: Usage): Promise<void> {
-  return append_meta(handle, {
-    event: "run_end",
-    stopped_reason,
-    usage: {
-      prompt_tokens: usage_total.prompt_tokens,
-      completion_tokens: usage_total.completion_tokens,
-      total_tokens: usage_total.total_tokens,
-    },
-  });
 }
 
 /** Register plugin tools onto the final registry; duplicates warn and skip. */
@@ -165,9 +152,20 @@ export class Agent {
     const run_events = new AgentEmitter();
     const stop_forwarding = run_events.on((event) => this.events.emit(event));
     const stop_collecting = run_events.on(collect_usage(usage_total));
+    const recorder = await this.open_recorder(options);
+    const stop_recording =
+      recorder === undefined ? undefined : run_events.on((event) => recorder.on_event(event));
     await this.call_plugin_run_start(options.input);
     let outcome: LoopOutcome | undefined;
     try {
+      if (recorder !== undefined) {
+        await recorder.seed({
+          input: options.input,
+          history: options.history ?? [],
+          system_prompt: this.config.system_prompt ?? DEFAULT_AGENT_SYSTEM_PROMPT,
+          owned: options.session === undefined,
+        });
+      }
       const seed_messages: Message[] = [...(options.history ?? [])];
       seed_messages.push({ role: "user", content: options.input });
       const tool_context: ToolContext = {
@@ -185,14 +183,24 @@ export class Agent {
         signal: options.signal,
       });
     } finally {
+      stop_recording?.();
       stop_collecting();
       stop_forwarding();
+      if (recorder !== undefined) {
+        await recorder.flush();
+      }
       if (outcome !== undefined) {
         await this.call_plugin_run_end(outcome);
       }
     }
-    const session_path = await this.persist_session(outcome, options, usage_total);
-    return { outcome, messages: outcome.messages, usage_total, session_path };
+    if (outcome === undefined) {
+      // Provider throw: rethrow path already left try; this is unreachable.
+      throw new Error("agent run ended without outcome");
+    }
+    if (recorder !== undefined) {
+      await recorder.finish(outcome.stopped_reason, usage_total);
+    }
+    return { outcome, messages: outcome.messages, usage_total, session_path: recorder?.path };
   }
 
   /** Close MCP sessions so stdio children do not keep the event loop alive. */
@@ -245,23 +253,12 @@ export class Agent {
     );
   }
 
-  /** Best-effort JSONL transcript: never fails the run, returns undefined path on error. */
-  private async persist_session(
-    outcome: LoopOutcome,
-    options: AgentRunOptions,
-    usage_total: Usage,
-  ): Promise<string | undefined> {
+  /** Best-effort recorder: open failures warn and skip persistence for this run. */
+  private async open_recorder(options: AgentRunOptions): Promise<SessionRecorder | undefined> {
     try {
-      const handle: SessionHandle = await open_session(this.config.session_dir, options.label);
-      await append_meta(handle, { event: "run_start", input_chars: options.input.length, history_size: outcome.messages.length });
-      for (const message of outcome.messages) {
-        await handle.append({ ts: new Date().toISOString(), kind: "message", message });
-      }
-      if (outcome.stopped_reason === "budget") {
-        await append_meta(handle, { event: "budget_exhausted" });
-      }
-      await append_run_end(handle, outcome.stopped_reason, usage_total);
-      return handle.path;
+      const handle =
+        options.session ?? (await open_session(this.config.session_dir, options.label));
+      return create_session_recorder(handle);
     } catch (error) {
       logger.warn("session persistence failed; continuing without transcript", error);
       return undefined;

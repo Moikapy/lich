@@ -14,7 +14,7 @@ export interface AgentEvents {
   llm_start: { turn: number };
   llm_end: { turn: number; result: ChatResult };
   tool_call_start: { turn: number; call: ToolCall };
-  tool_call_end: { turn: number; call: ToolCall; result: ToolResult };
+  tool_call_end: { turn: number; call: ToolCall; result: ToolResult; cancelled?: boolean };
   compress_start: { estimated_tokens: number };
   compress_end: { summary_chars: number };
   turn_end: { turn: number };
