@@ -124,13 +124,14 @@ Walkthrough of a single `Agent.run({ input })` call
    the final assistant message (or the last one seen), the last `ChatResult`
    on a real final, `turns_used`, and a `stopped_reason` of `final`, `budget`,
    or `aborted`.
-8. **Session persist.** `persist_session()` appends one `meta` record
-   (`run_start`), then one `message` record per outcome message, then a
-   `budget_exhausted` meta record if the budget stopped the run, then a
-   `run_end` meta record (`stopped_reason`, `usage`) for every completed
-   run, to a JSONL file under `session_dir` (default
-   `<work_dir>/.lich/sessions`). Persistence is best-effort: failures are
-   logged and the run still succeeds with `session_path: undefined`.
+8. **Session persist.** While the loop runs, a session recorder appends
+   `run_start`, seeded messages, then event-driven records (`llm_end` /
+   `tool_call_end` messages, `budget_exhausted`, `compress_end`), and finally
+   `run_end` (`stopped_reason`, `usage`) to a JSONL file under `session_dir`
+   (default `<work_dir>/.lich/sessions`). The TUI passes one shared
+   `SessionHandle` per launch; other modes open a fresh file per run.
+   Persistence is best-effort: failures are logged and never fail the run;
+   `session_path` is the handle path when recording started.
 9. **Return.** `AgentRunResult` bundles the outcome, the full transcript
    (prior history plus the new exchange), the collected `usage_total`, and the
    session path.

@@ -8,7 +8,7 @@ Tool shapes live in [`examples/game_bridge/README.md`](https://github.com/Moikap
 
 ## Session files as combat logs
 
-Each `Agent.run` appends one `.jsonl` file under `session_dir` (default `<work_dir>/.lich/sessions`). Records are `{ts, kind: "message"|"meta", message?, meta?}`.
+Each `Agent.run` without a shared `session` handle appends one `.jsonl` file under `session_dir` (default `<work_dir>/.lich/sessions`). The TUI passes one handle per launch so N turns share one file. Records are `{ts, kind: "message"|"meta", message?, meta?}`.
 
 | What you want | Where it is |
 | --- | --- |
@@ -75,9 +75,9 @@ Recipe 2 counts assistant tool-call arguments, including orders a hook later vet
 
 ## Do not glob a playthrough blindly
 
-A gateway conversation of N posts writes N files. `Agent.run` seeds from `history`, and `persist_session` appends all of `outcome.messages`, so each file is a superset of the previous exchange. Globbing `*.jsonl` double-counts. Take the newest file per label (names sort by timestamp prefix), or dedupe on `tool_call.id`, which stays stable when the same call is replayed into the next file.
+A gateway conversation of N posts writes N files. `Agent.run` seeds from `history`, and without a shared `session` handle each run opens a new file that includes prior history plus the new exchange, so each file is a superset of the previous. Globbing `*.jsonl` double-counts. Take the newest file per label (names sort by timestamp prefix), or dedupe on `tool_call.id`, which stays stable when the same call is replayed into the next file. TUI launches avoid this by sharing one handle.
 
-Compression can rewrite a long run in place: when estimated tokens cross `compress_threshold` of `context_budget_tokens`, older messages become one summary and the 8 most recent non-system messages stay verbatim. Early rounds may survive only as that summary. The recipes see the file on disk, not the pre-compression transcript.
+Compression can rewrite in-memory history: when estimated tokens cross `compress_threshold` of `context_budget_tokens`, older messages become one summary and the 8 most recent non-system messages stay verbatim. The transcript keeps raw pre-compress messages plus a `compress_end` meta marker; on resume those raw messages replay and compression may run again. Early rounds may survive only as the in-memory summary for the live agent. Offline recipes see the file on disk.
 
 ## Player modeling
 

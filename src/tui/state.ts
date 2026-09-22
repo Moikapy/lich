@@ -67,7 +67,10 @@ export function apply_event(state: UiState, event: AgentEvent): UiState {
         ...state,
         phase: "thinking",
         active_tool: undefined,
-        last_error: event.result.ok === true ? state.last_error : (event.result.error ?? "tool failed"),
+        last_error:
+          event.cancelled === true || event.result.ok === true
+            ? state.last_error
+            : (event.result.error ?? "tool failed"),
       };
     case "turn_end":
       return { ...state, turns_used: event.turn };
