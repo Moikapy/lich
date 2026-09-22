@@ -138,6 +138,9 @@ function freeze_config(config: AgentConfig): AgentConfig {
     Object.freeze(provider);
   }
   Object.freeze(config.plugins);
+  for (const plugin of config.plugins) {
+    Object.freeze(plugin);
+  }
   if (Array.isArray(config.tools_enabled) === true) {
     Object.freeze(config.tools_enabled);
   }

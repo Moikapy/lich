@@ -3,7 +3,7 @@
  * append-only .jsonl file; records carry either a message or arbitrary meta.
  */
 import { randomBytes } from "node:crypto";
-import { appendFile, mkdir, open, readFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Message } from "../providers/types.js";
 import { safe_json_parse, safe_stringify } from "../util/json.js";
@@ -36,10 +36,6 @@ function slugify_label(label: string): string {
   return slug.length > 0 ? `-${slug}` : "";
 }
 
-function is_eexist(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "EEXIST";
-}
-
 function next_session_id(label_part: string): string {
   counter_state.value += 1;
   const rand = randomBytes(3).toString("hex");
@@ -51,14 +47,12 @@ async function create_unique_session_path(dir: string, label_part: string): Prom
     const id = next_session_id(label_part);
     const file_path = path.join(dir, `${id}.jsonl`);
     try {
-      const handle = await open(file_path, "wx");
-      await handle.close();
+      await access(file_path);
+      // Already taken; try another id.
+      continue;
+    } catch {
+      // Path is free — create lazily on first append so empty TUI launches leave no file.
       return { id, path: file_path };
-    } catch (error) {
-      if (is_eexist(error) === true) {
-        continue;
-      }
-      throw error;
     }
   }
   throw new Error(`could not create unique session file in ${dir}`);

@@ -200,7 +200,7 @@ async function compress_if_needed(
   }
   const non_system_count = history.filter((message) => message.role !== "system").length;
   if (non_system_count <= KEEP_RECENT_TURNS) {
-    backoff.skip_until_turn = Number.POSITIVE_INFINITY;
+    schedule_compress_backoff(backoff, turn);
     return;
   }
   emitter?.emit({ type: "compress_start", estimated_tokens: estimate_messages_tokens(history) });
@@ -229,8 +229,8 @@ async function compress_if_needed(
     return;
   }
   if (kept_tail_over_budget(history, budget_tokens, threshold) === true) {
-    // Kept tail alone still overflows; further compress attempts cannot help.
-    backoff.skip_until_turn = Number.POSITIVE_INFINITY;
+    // Kept tail alone still overflows; retry after backoff so huge turns can age out.
+    schedule_compress_backoff(backoff, turn);
     return;
   }
   // Full history (summary + recent) still high; retry after backoff so huge turns can age out.
