@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.9.0
+
+- close agent should-fixes (A-7/A-8/A-10–A-13): a truncated summarizer no longer
+  drops recent older turns, ineffective compress attempts back off for three
+  turns and their usage lands on `compress_end` so transcripts stay clean,
+  `turn_end` usage balances, duplicate provider names are rejected at config
+  load with plugins and `tools_enabled` frozen, session ids use crypto-grade
+  entropy, and `run_conversation`, `open_session`, `read_session_messages` are
+  exported. session files are now created lazily, so an empty TUI launch
+  leaves no file.
+- close provider should-fixes (P-2..P-8): truncated or unparseable tool calls
+  are omitted with a note instead of running half-parsed arguments, the
+  Anthropic `max_tokens` default rises to 16384, failover preserves the root
+  cause and honors server `Retry-After` capped at 30s (longer values fail over
+  instead of sleeping), context-overflow detection matches the real
+  Anthropic/Ollama error text, and temperature is omitted for reasoning models.
+- harden the gateway reconnect path (G-4/G-6/G-8/G-9): Discord and Twitch
+  reconnects sleep on an escalating backoff that resets once a session proves
+  itself, fatal closes (bad auth, missing intents) stop retrying, bus eviction
+  no longer drops live conversation chains, webhook bodies are capped at 1 MB,
+  and Discord heartbeats/intents/`allowed_mentions` and the twitch outbound
+  IRC write path are tightened.
+- close MCP should-fixes (M-2..M-9): stdio RPC ids are mapped so responses
+  cannot cross wires and a dead pipe rejects pending calls fail-closed, MCP
+  attach times out (15s) and honors the run AbortSignal, the refuse list grows
+  eval flags, `bun x` / package dlx, and env-var chains, redot pins by command
+  basename, gatekeeper dirty-tracking is per-run (AsyncLocalStorage) and fails
+  closed, and MCP tool metadata is bounded.
+- close tools should-fixes (S-6..S-9): `terminal` and `run_tests` kill the
+  whole process group on timeout or abort so spawned children do not survive
+  the run, `grep_files` matches long lines ReDoS-safely (literal `includes`
+  for literal patterns, short-prefix probing for complex regexes) without
+  losing hit coverage, and `fetch_url`/`http_request` stream response bodies
+  under a hard byte ceiling instead of buffering an oversized payload.
+- close CLI should-fixes (C-4/C-5/C-6): switching `--provider-kind` without
+  explicit overrides clears stale `base_url`/`api_key_env` while same-kind
+  URLs are kept, chat keeps multi-turn memory, skips blank lines, and reads
+  piped stdin, and `lich update` only runs `npm install -g` for real npm
+  global installs so project-local and bun installs are treated as local.
+- harden the persona_orchestrator example (E-1): the server refuses to start
+  with auth off, requires a loopback Host and JSON content-type, caps the
+  request body, evicts idle chat chains, and trims capped history to a user
+  turn so tool results are not orphaned.
+- sync user docs with the 0.8.0 tree — trust-model table, `LICH_DOCS_DIR`,
+  real model ids (#68) — and close test gaps T-3/T-4 with coverage for
+  abort/chained runs, compression pairing, provider finish reasons, and
+  gateway conversation bounds (#71).
+
 ## 0.8.0
 
 - TUI session resume (Phase 1): `lich --resume <id|latest>` loads an existing
