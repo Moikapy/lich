@@ -8,8 +8,9 @@ Twitch, or an HTTP webhook; serve owns sessions, live `AgentEvent` streaming,
 and abort.
 
 This page documents the shared contract in
-[`src/serve/protocol.ts`](../../src/serve/protocol.ts). Transport, listening,
-and Agent wiring land in follow-up work — this note is types + intent only.
+[`src/serve/protocol.ts`](../../src/serve/protocol.ts) and the loopback
+WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts).
+Session/prompt RPC and the `lich serve` CLI land in follow-up issues.
 
 ## Role in the system
 
@@ -65,11 +66,15 @@ Events are 1:1 with the in-process emitter — `turn_start`, `llm_*`,
 `tool_call_*`, `final`, `error`, and the rest — so a Chat pane can mirror TUI
 semantics without embedding `Agent` in Electron.
 
-## What this issue does not include
+## Transport (loopback)
 
-- No WebSocket listener, port binding, or auth token.
-- No `lich serve` CLI entry.
+- Bind `127.0.0.1` only (or other loopback aliases); port `0` picks an ephemeral port.
+- On listen, emit **one** stdout JSON line: `{"port":…,"token":…}` for Electron to parse.
+- WebSocket upgrade requires the token via `?token=` or `x-lich-token` (mismatch → 401).
+- `health` returns `{ status: "ok", version }` (`LICH_VERSION` / package version).
+
+## Not in this layer yet
+
+- No `lich serve` CLI entry (#84).
+- No `session.*` / `prompt.*` handlers (#82 / #83) — locked names return method-not-found until implemented.
 - No Agent construction or session file I/O.
-
-Those belong to the serve track after protocol types compile and this doc is
-in tree.

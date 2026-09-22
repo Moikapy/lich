@@ -87,3 +87,10 @@ export type {
   SessionListParams,
   SessionListResult,
 } from "./serve/protocol.js";
+export {
+  create_serve_server,
+  DEFAULT_SERVE_HOST,
+  DEFAULT_SERVE_PORT,
+} from "./serve/server.js";
+export type { ServeBootInfo, ServeOptions, ServeServer } from "./serve/server.js";
+export { handle_serve_rpc_message } from "./serve/rpc.js";
