@@ -42,7 +42,7 @@ describe("OpenAICompatProvider finish_reason and tools", () => {
     expect(result.message.tool_calls).toBeUndefined();
   });
 
-  it("keeps tool_calls when finish_reason is length (truncated tools)", async () => {
+  it("omits tool calls when finish_reason is length (truncated tools)", async () => {
     const provider = new OpenAICompatProvider(
       openai_config(
         fixed_fetch({
@@ -69,12 +69,8 @@ describe("OpenAICompatProvider finish_reason and tools", () => {
     );
     const result = await provider.chat([{ role: "user", content: "read" }], []);
     expect(result.finish_reason).toBe("length");
-    expect(result.message.tool_calls).toHaveLength(1);
-    expect(result.message.tool_calls?.[0]).toMatchObject({
-      id: "partial_1",
-      name: "read_file",
-      args: {},
-    });
+    expect(result.message.tool_calls).toBeUndefined();
+    expect(result.message.content).toContain("[truncated tool call omitted]");
   });
 
   it("parses valid tool arguments when finish_reason is tool_calls", async () => {

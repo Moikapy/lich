@@ -74,9 +74,8 @@ describe("run_conversation", () => {
     expect(outcome.messages[0]?.role).toBe("user");
     expect(outcome.messages.at(-1)?.role).toBe("assistant");
 
-    // Event order through final. Mid-tool turns do not emit turn_end today (A-10);
-    // assert the closing turn_end only — do not pin unbalanced mid-turn pairing.
-    expect(event_types(events).slice(0, 8)).toEqual([
+    // Event order through final. Tool turns and the final path both emit turn_end (A-10).
+    expect(event_types(events)).toEqual([
       "turn_start",
       "llm_start",
       "llm_end",
@@ -86,11 +85,11 @@ describe("run_conversation", () => {
       "turn_start",
       "llm_start",
       "llm_end",
+      "final",
+      "turn_end",
     ]);
-    expect(events.some((event) => event.type === "final")).toBe(true);
-    expect(event_types(events).at(-1)).toBe("turn_end");
     expect(event_types(events).filter((type) => type === "turn_start")).toHaveLength(2);
-    expect(event_types(events).filter((type) => type === "turn_end")).toHaveLength(1);
+    expect(event_types(events).filter((type) => type === "turn_end")).toHaveLength(2);
     const final_event = events.find((event) => event.type === "final");
     expect(final_event).toBeDefined();
     if (final_event?.type === "final") {
