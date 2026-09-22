@@ -6,12 +6,25 @@ interface RpcBody {
   result?: unknown;
 }
 
-async function post_rpc(url: string, fetch_fn: typeof fetch, body: Record<string, unknown>): Promise<unknown> {
+function aborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+async function post_rpc(
+  url: string,
+  fetch_fn: typeof fetch,
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  if (aborted(signal) === true) {
+    throw new Error("cancelled");
+  }
   const response = await fetch_fn(url, {
     method: "POST",
     redirect: "error",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   const parsed = (await response.json()) as RpcBody;
   if (parsed.error !== undefined) {
@@ -24,10 +37,10 @@ async function post_rpc(url: string, fetch_fn: typeof fetch, body: Record<string
 export function http_pipe(url: string, fetch_fn: typeof fetch): McpPipe {
   let next_id = 1;
   return {
-    request(method: string, params: unknown): Promise<unknown> {
+    request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
       const id = next_id;
       next_id += 1;
-      return post_rpc(url, fetch_fn, { jsonrpc: "2.0", id, method, params });
+      return post_rpc(url, fetch_fn, { jsonrpc: "2.0", id, method, params }, signal);
     },
     notify(method: string): void {
       void fetch_fn(url, {

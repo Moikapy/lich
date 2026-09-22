@@ -156,6 +156,15 @@ export class Agent {
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
     await this.attach_mcp_once();
+    const body = (): Promise<AgentRunResult> => this.run_body(options);
+    // Per-run ALS scope so concurrent Agent.run calls do not share gatekeeper state (M-6).
+    if (this.hook_runner !== undefined) {
+      return this.hook_runner.run_scope(body);
+    }
+    return body();
+  }
+
+  private async run_body(options: AgentRunOptions): Promise<AgentRunResult> {
     const usage_total: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     const run_events = new AgentEmitter();
     const stop_forwarding = run_events.on((event) => this.events.emit(event));

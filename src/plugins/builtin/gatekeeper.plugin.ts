@@ -206,11 +206,33 @@ function git_commit_tool(): Tool {
   };
 }
 
+/** Tools that cannot mutate the worktree; everything else marks dirty (M-7). */
+const READ_ONLY_TOOLS = new Set([
+  "read_file",
+  "list_dir",
+  "grep_files",
+  "docs_read",
+  "docs_search",
+  "env_get",
+  "fetch_url",
+  "http_request",
+  "web_search",
+  "process_list",
+  "disk_usage",
+]);
+
 /** Fresh per-run defaults into the plugin's state sub-map (run start). */
 function seed_state(ctx: HookContext): void {
   ctx.state?.set("tests_ok", false);
   ctx.state?.set("dirty", true);
   ctx.state?.set("commits", 0);
+}
+
+function mark_dirty_if_writer(tool_name: string, ctx: HookContext): void {
+  if (READ_ONLY_TOOLS.has(tool_name) === true || tool_name === "run_tests" || tool_name === "git_commit") {
+    return;
+  }
+  ctx.state?.set("dirty", true);
 }
 
 /** The hooks: state transitions in after_tool_call, vetoes in before_tool_call. */
@@ -248,19 +270,21 @@ function gatekeeper_hooks(allow_self_commit: boolean): PluginHooks {
       return {};
     },
     after_tool_call: (info: AfterToolCallInfo, ctx) => {
-      if (info.ok !== true) {
-        return;
-      }
-      if (info.tool_name === "write_file" || info.tool_name === "edit_file") {
-        ctx.state?.set("dirty", true);
-      } else if (info.tool_name === "run_tests") {
+      // Fail closed: any non-read-only attempt dirties, including failed/timed-out writes.
+      mark_dirty_if_writer(info.tool_name, ctx);
+      if (info.tool_name === "run_tests") {
+        if (info.ok !== true) {
+          return;
+        }
         const filter = info.args["filter"];
         const filtered = typeof filter === "string" && filter.length > 0;
         if (filtered === false) {
           ctx.state?.set("tests_ok", true);
           ctx.state?.set("dirty", false);
         }
-      } else if (info.tool_name === "git_commit") {
+        return;
+      }
+      if (info.tool_name === "git_commit" && info.ok === true) {
         ctx.state?.set("commits", state_count(ctx, "commits") + 1);
       }
     },
