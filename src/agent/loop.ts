@@ -109,7 +109,9 @@ async function run_tool_calls(
 ): Promise<"continued" | "aborted"> {
   for (const call of calls) {
     if (signal_aborted(signal) === true) {
-      history.push(cancelled_tool_message(call));
+      const cancelled: ToolResult = { ok: false, output: "", error: "cancelled" };
+      history.push(tool_message_from_result(call, cancelled));
+      emitter?.emit({ type: "tool_call_end", turn, call, result: cancelled, cancelled: true });
       continue;
     }
     emitter?.emit({ type: "tool_call_start", turn, call });
@@ -118,16 +120,6 @@ async function run_tool_calls(
     emitter?.emit({ type: "tool_call_end", turn, call, result });
   }
   return signal_aborted(signal) === true ? "aborted" : "continued";
-}
-
-function cancelled_tool_message(call: ToolCall): ToolMessage {
-  return {
-    role: "tool",
-    tool_call_id: call.id,
-    name: call.name,
-    content: format_tool_result_content({ ok: false, output: "", error: "cancelled" }),
-    is_error: true,
-  };
 }
 
 async function call_chat(

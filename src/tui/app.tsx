@@ -51,6 +51,9 @@ type SetBlocks = Dispatch<SetStateAction<readonly HistoryBlock[]>>;
 /** Map one agent event to optional transcript blocks (tool rows, notices). */
 function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBlock[] {
   if (event.type === "tool_call_end") {
+    if (event.cancelled === true) {
+      return [];
+    }
     return [tool_result_block(event.call, event.result.ok === true, event.result.output)];
   }
   if (event.type === "compress_end") {

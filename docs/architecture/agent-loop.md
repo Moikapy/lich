@@ -95,7 +95,7 @@ swallowed; handlers may unsubscribe mid-emit (the emitter iterates a snapshot).
 | `llm_start` | `{ turn }` | Just before the chat call | Exactly one per LLM call |
 | `llm_end` | `{ turn, result }` | Chat call resolved | Pairs with `llm_start`; never fires if the call throws |
 | `tool_call_start` | `{ turn, call }` | Before each tool executes | After `llm_end`, sequential per call |
-| `tool_call_end` | `{ turn, call, result }` | After that tool resolves | Pairs with its `tool_call_start` |
+| `tool_call_end` | `{ turn, call, result, cancelled? }` | After that tool resolves, or when abort skips a pending call | Normally pairs with `tool_call_start`; cancelled skips emit `cancelled: true` with no start |
 | `final` | `{ message, result }` | A turn produced no tool calls | At most once per run; only on a real final |
 | `budget_exhausted` | `{ turns_used }` | Loop exits without a final | Follows the last `tool_call_end` |
 | `turn_end` | `{ turn }` | Last event of a turn | After `final` **or** after `budget_exhausted` |
@@ -185,15 +185,19 @@ coarse - see the trade-off note in [overview](./overview.md#design-trade-offs).
   "message": { "role": "assistant", "content": "done" } }
 ```
 
+`history_size` on `run_start` is the length of `options.history` at seed
+time (pre-run seed count), not the final message count after the run.
+
 What gets persisted while a run is active (`src/session/recorder.ts`): a
 `run_start` meta record at seed time, the seeded system/user (and prior
 history when the handle is owned or first used), then event-driven appends —
 `llm_end` → assistant message, `tool_call_end` → tool message (via exported
-`format_tool_result_content` / `tool_message_from_result`), `budget_exhausted`
-meta, and a `compress_end` meta marker. A `run_end` meta record
-(`stopped_reason`, `usage`) closes every completed run. `usage` is the run's
-`usage_total`. Everything is best-effort: any error logs a warning and never
-fails the run; `session_path` is the handle path when recording started.
+`format_tool_result_content` / `tool_message_from_result`, including
+abort-cancelled tools), `budget_exhausted` meta, and a `compress_end` meta
+marker. A `run_end` meta record (`stopped_reason`, `usage`) closes every
+completed run. `usage` is the run's `usage_total`. Everything is best-effort:
+any error logs a warning and never fails the run; `session_path` is the
+handle path when recording started.
 
 Callers may pass `AgentRunOptions.session` to reuse a `SessionHandle`. The TUI
 opens one handle per launch so N turns share one transcript file (one session
@@ -202,8 +206,10 @@ id). One-shot, chat, and gateway omit the option and keep per-run files.
 `read_session_messages(path)` parses a file back into `Message[]`: per line it
 JSON-parses leniently, accepts only records with a `kind: "message"`-shaped
 `message` whose `role` is one of the four known roles, and silently skips
-everything else. Missing files parse to an empty array. On resume, raw
-pre-compress messages are replayed; compression simply re-runs on a later turn.
+everything else. Missing files parse to an empty array. A trailing user
+message is dropped so a provider throw or abort-before-turn does not leave
+two consecutive user turns on resume. On resume, raw pre-compress messages
+are replayed; compression simply re-runs on a later turn.
 
 **Resume (Phase 1 + 2):** `lich --resume <id|latest>` resolves a path with
 `src/session/resolve.ts` (`latest` = newest `.jsonl` by mtime; otherwise exact

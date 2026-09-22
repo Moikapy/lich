@@ -71,5 +71,11 @@ export async function read_session_messages(file_path: string): Promise<Message[
       messages.push(record.message);
     }
   }
+  // Provider throw / abort-before-turn can leave a dangling user seed with no
+  // assistant reply. Drop it so resume does not start with two consecutive users.
+  const last = messages.at(-1);
+  if (last?.role === "user") {
+    messages.pop();
+  }
   return messages;
 }
