@@ -9,7 +9,7 @@ import {
   ToolTimeoutError,
   with_timeout,
 } from "../guard.js";
-import { kill_process_group } from "../process_group.js";
+import { kill_process_group, track_detached_child } from "../process_group.js";
 import type { Tool, ToolContext, ToolResult } from "../types.js";
 import { scrub_spawn_env } from "./terminal.js";
 
@@ -66,6 +66,7 @@ function default_runner(
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  track_detached_child(child);
   child.stdout?.on("data", (chunk: Buffer) => on_chunk("stdout", chunk));
   child.stderr?.on("data", (chunk: Buffer) => on_chunk("stderr", chunk));
   wire_kill(child, signal);

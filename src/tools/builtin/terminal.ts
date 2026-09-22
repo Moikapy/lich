@@ -10,7 +10,7 @@ import {
   ToolTimeoutError,
   with_timeout,
 } from "../guard.js";
-import { kill_process_group } from "../process_group.js";
+import { kill_process_group, track_detached_child } from "../process_group.js";
 import type { Tool } from "../types.js";
 import { SECRET_PATTERN } from "./env_get.js";
 
@@ -103,6 +103,7 @@ async function run_command(
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  track_detached_child(child);
   child.stdout?.on("data", (chunk: Buffer) => stream_chunk(stdout, chunk));
   child.stderr?.on("data", (chunk: Buffer) => stream_chunk(stderr, chunk));
   const exit_promise = wait_exit(child);

@@ -23,7 +23,6 @@ export function reject_oversized_content_length(response: Response, max_bytes: n
 
 /** Read up to `max_bytes` from the response, decoding as utf8; cancel early. */
 export async function read_clamped_text(response: Response, max_bytes: number): Promise<ClampedBody> {
-  reject_oversized_content_length(response, max_bytes);
   if (response.body === null) {
     const text = await response.text();
     const bytes = Buffer.byteLength(text, "utf8");

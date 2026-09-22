@@ -96,7 +96,7 @@ describe("S-7 run_tests timeout clears mutex", () => {
 });
 
 describe("S-8 grep_files ReDoS caps", () => {
-  it("caps line length so a pathological regex returns quickly", async () => {
+  it("rejects nested-quantifier patterns quickly", async () => {
     const work = await make_temp_dir();
     const long_line = `${"a".repeat(80)}b`;
     await writeFile(path.join(work, "evil.txt"), `${long_line}\n`, "utf8");
@@ -107,7 +107,8 @@ describe("S-8 grep_files ReDoS caps", () => {
       path: "evil.txt",
     });
     const elapsed = Date.now() - started;
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.error ?? "").toMatch(/unsafe_regex/);
     expect(elapsed).toBeLessThan(300);
   });
 
@@ -124,6 +125,22 @@ describe("S-8 grep_files ReDoS caps", () => {
     expect(result.ok).toBe(true);
     const match_lines = result.output.split("\n").filter((line) => line.includes("hit_"));
     expect(match_lines.length).toBeLessThanOrEqual(2000);
+  });
+
+  it("matches past column 22 for literal, space, and metachar patterns", async () => {
+    const work = await make_temp_dir();
+    const line = `${"x".repeat(5)}lit ${"y".repeat(20)}has space ${"z".repeat(40)}fn(`;
+    await writeFile(path.join(work, "cols.txt"), `${line}\n`, "utf8");
+    const executor = make_executor(work);
+    const literal = await executor.execute("grep_files", { pattern: "lit", path: "cols.txt" });
+    const spaced = await executor.execute("grep_files", { pattern: "has space", path: "cols.txt" });
+    const meta = await executor.execute("grep_files", { pattern: "fn\\(", path: "cols.txt" });
+    expect(literal.ok).toBe(true);
+    expect(literal.output).toContain("cols.txt:1:");
+    expect(spaced.ok).toBe(true);
+    expect(spaced.output).toContain("cols.txt:1:");
+    expect(meta.ok).toBe(true);
+    expect(meta.output).toContain("cols.txt:1:");
   });
 });
 
@@ -157,18 +174,20 @@ describe("S-9 HTTP stream clamp", () => {
     expect(reads).toBeLessThan(10);
   });
 
-  it("fetch_url fails closed on oversized content-length via mock", async () => {
+  it("fetch_url clamps when content-length exceeds the byte budget", async () => {
     const work = await make_temp_dir();
     const executor = make_executor(work);
+    const payload = "H".repeat(5000);
     set_url_guard_fetch(async () =>
-      new Response("x", {
+      new Response(payload, {
         status: 200,
-        headers: { "content-type": "text/plain", "content-length": "90000000" },
+        headers: { "content-type": "text/plain", "content-length": String(payload.length) },
       }),
     );
-    const result = await executor.execute("fetch_url", { url: "https://example.com/huge", max_chars: 10 });
-    expect(result.ok).toBe(false);
-    expect(result.error ?? "").toMatch(/body_too_large/);
+    const result = await executor.execute("fetch_url", { url: "https://example.com/huge", max_chars: 40 });
+    expect(result.ok).toBe(true);
+    expect(result.output.length).toBeLessThan(payload.length);
+    expect(result.output.includes("H")).toBe(true);
   });
 
   it("http_request streams a capped body via mock", async () => {

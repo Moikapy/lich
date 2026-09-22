@@ -19,7 +19,6 @@ const SNIFF_BYTES = 1000;
 const DEFAULT_MAX_RESULTS = 200;
 const MAX_MAX_RESULTS = 2000;
 const MAX_LINE_CHARS = 4000;
-const SAFE_REGEX_CHARS = 22;
 const REGEX_TIMEOUT_MS = 50;
 
 const parameters: JsonSchemaObject = {
@@ -70,13 +69,29 @@ async function read_if_text(file_path: string, size: number): Promise<string[] |
   }
 }
 
+const regex_sandbox: { re: RegExp; line: string; matched: boolean } = {
+  re: /$^/,
+  line: "",
+  matched: false,
+};
+vm.createContext(regex_sandbox);
+const regex_script = new vm.Script("matched = re.test(line)");
+
 /** Time-bound regex.test so nested quantifiers cannot freeze the event loop. */
 function safe_regex_test(regex: RegExp, line: string): boolean {
+  regex_sandbox.re = regex;
+  regex_sandbox.line = line;
   try {
-    return vm.runInNewContext("re.test(line)", { re: regex, line }, { timeout: REGEX_TIMEOUT_MS }) === true;
+    regex_script.runInContext(regex_sandbox, { timeout: REGEX_TIMEOUT_MS });
   } catch {
     return false;
   }
+  return Boolean(regex_sandbox.matched);
+}
+
+/** Classic nested-quantifier shapes that invite catastrophic backtracking. */
+function has_nested_quantifiers(pattern: string): boolean {
+  return /(\([^)]*[+*][^)]*\)[+*])/.test(pattern) === true;
 }
 
 /** True when the pattern has no regex metacharacters (safe for includes). */
@@ -86,14 +101,10 @@ function is_literal_pattern(pattern: string): boolean {
 
 function line_matches(regex: RegExp, pattern: string, line: string): boolean {
   const capped = line.length > MAX_LINE_CHARS ? line.slice(0, MAX_LINE_CHARS) : line;
-  if (capped.length <= SAFE_REGEX_CHARS) {
-    return safe_regex_test(regex, capped);
-  }
   if (is_literal_pattern(pattern) === true) {
     return capped.includes(pattern);
   }
-  // Complex regex on a long line: only probe a short prefix (ReDoS bound).
-  return safe_regex_test(regex, capped.slice(0, SAFE_REGEX_CHARS));
+  return safe_regex_test(regex, capped);
 }
 
 function match_lines(
@@ -298,6 +309,9 @@ async function run_grep(args: Record<string, unknown>, work_dir: string, signal?
     regex = new RegExp(pattern);
   } catch {
     throw new Error(`invalid_regex: ${pattern}`);
+  }
+  if (has_nested_quantifiers(pattern) === true) {
+    throw new Error(`unsafe_regex: nested quantifiers are not supported (${pattern})`);
   }
   const matcher = glob.length > 0 ? glob_matcher(glob) : () => true;
   const root = resolve_safe_path(work_dir, target);
