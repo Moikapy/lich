@@ -1,0 +1,33 @@
+---
+title: Ossuary (desktop app)
+created: 2026-09-23
+updated: 2026-09-23
+type: entity
+tags: [ossuary, surface, serve]
+sources: [raw/issues/issue-79.md, raw/audits/2026-09-23-game-surface-audit.md]
+confidence: medium
+---
+
+# Ossuary
+
+Ossuary is a Hermes-shaped desktop app built with Electron, React and Dockview (epic #79). Its code lives in `apps/ossuary`. The scaffold (#85) is merged on origin (`bad1243`). It is a client of [[lich-serve]], and the rule in #79 is: "Do not build panels on webhook `POST /message`."
+
+## Tracks (issues #86–#94, all with open PRs)
+
+- spawn `lich serve` and connect a WebSocket client (#86)
+- a Chat pane (#87)
+- a contribution registry for panes (#88)
+- a Dockview shell (#89)
+- tool_log and status panes (#90)
+- a sessions pane (#91)
+- persisted layout (#92)
+- popout windows (#93)
+- the `lich ossuary` CLI command and docs (#94)
+
+## Coupling risk
+
+Every pane renders from serve `event` notifications, and those carry raw `AgentEvent` values with no run or session id. If the event shape changes after the panes exist, every pane has to change. That is why [[0002-serve-pr-merge-path]] adds the [[event-envelope]] before #102 merges.
+
+The Ossuary client depends only on the method names from #80, which are stable, so the gateway-hub plan does not block it ([[0001-gateway-as-hub]]).
+
+Related: [[hermes-agent]] (Hermes' own `apps/desktop/` and `ui-tui` ↔ `tui_gateway` split).
