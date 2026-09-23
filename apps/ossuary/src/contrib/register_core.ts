@@ -1,5 +1,6 @@
 import { ChatPane } from "../panes/chat";
-import { PlaceholderPane } from "../panes/placeholder";
+import { StatusPane } from "../panes/status";
+import { ToolLogPane } from "../panes/tool_log";
 import { contrib_registry, register_pane } from "./registry";
 
 /**
@@ -18,9 +19,15 @@ export function register_core_contributions(): void {
     render: ChatPane,
   });
   register_pane({
-    id: "lich.scratch",
-    title: "Scratch",
+    id: "lich.status",
+    title: "Status",
     data: { placement: "right" },
-    render: PlaceholderPane,
+    render: StatusPane,
+  });
+  register_pane({
+    id: "lich.tool_log",
+    title: "Tool log",
+    data: { placement: "bottom" },
+    render: ToolLogPane,
   });
 }

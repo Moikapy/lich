@@ -136,14 +136,79 @@ body,
   background: #222;
 }
 
-.pane-placeholder {
+.pane-tool-log,
+.pane-status {
   height: 100%;
-  padding: 1.25rem;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 1.25rem;
 }
 
-.pane-body {
-  margin: 0.75rem 0 0;
-  opacity: 0.7;
-  line-height: 1.45;
-  max-width: 28rem;
+.pane-empty {
+  margin: 0;
+  opacity: 0.55;
+}
+
+.tool-log-list {
+  overflow: auto;
+  border: 1px solid #2a2a2a;
+  border-radius: 0.35rem;
+  padding: 0.75rem 0.9rem;
+  background: #161616;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.tool-log-row {
+  margin: 0 0 0.65rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #9a9;
+}
+
+.tool-log-row:last-child {
+  margin-bottom: 0;
+}
+
+.tool-log-running {
+  color: #cb8;
+}
+
+.tool-log-ok {
+  color: #9a9;
+}
+
+.tool-log-error,
+.tool-log-cancelled {
+  color: #f88;
+}
+
+.status-fields {
+  margin: 0;
+  display: grid;
+  gap: 0.55rem;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.85rem;
+}
+
+.status-fields > div {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: 0.5rem;
+}
+
+.status-fields dt {
+  margin: 0;
+  opacity: 0.55;
+}
+
+.status-fields dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.status-path {
+  opacity: 0.85;
 }

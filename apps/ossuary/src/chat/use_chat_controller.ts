@@ -1,11 +1,10 @@
-/** Compose Chat pane hooks: connection, session, events, submit/abort. */
+/** Compose Chat pane hooks: shared serve runtime + local transcript / composer. */
 import { useState } from "react";
-import { use_gateway_connection } from "./use_gateway_connection";
+import { use_serve_runtime } from "../session/serve_runtime";
 import { use_prompt_actions } from "./use_prompt_actions";
 import { use_serve_events } from "./use_serve_events";
-import { use_serve_session } from "./use_serve_session";
-import { INITIAL_UI_STATE, type HistoryBlock, type UiState } from "./types";
 import type { ConnectionInfo } from "../gateway-client";
+import type { HistoryBlock, UiState } from "./types";
 
 export interface ChatController {
   connection: ConnectionInfo;
@@ -21,29 +20,27 @@ export interface ChatController {
 }
 
 export function use_chat_controller(): ChatController {
-  const connection = use_gateway_connection();
-  const { session_id, session_error, session_ref } = use_serve_session(connection);
-  const [ui, set_ui] = useState<UiState>(INITIAL_UI_STATE);
+  const runtime = use_serve_runtime();
   const [blocks, set_blocks] = useState<readonly HistoryBlock[]>([]);
   const [draft, set_draft] = useState("");
   const [busy, set_busy] = useState(false);
 
-  use_serve_events(session_ref, set_ui, set_blocks);
+  use_serve_events(runtime.session_ref, set_blocks);
   const { send, abort } = use_prompt_actions(
-    session_ref,
+    runtime.session_ref,
     draft,
     busy,
     set_draft,
     set_busy,
-    set_ui,
+    runtime.set_ui,
     set_blocks,
   );
 
   return {
-    connection,
-    session_id,
-    session_error,
-    ui,
+    connection: runtime.connection,
+    session_id: runtime.session_id,
+    session_error: runtime.session_error,
+    ui: runtime.ui,
     blocks,
     draft,
     busy,
