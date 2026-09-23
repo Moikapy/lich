@@ -206,3 +206,87 @@ body,
 .status-path {
   opacity: 0.85;
 }
+
+.pane-sessions {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 0.65rem;
+  padding: 1rem 1rem 1.25rem;
+}
+
+.sessions-status {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.sessions-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.sessions-actions button,
+.sessions-item {
+  font: inherit;
+  border-radius: 0.3rem;
+  border: 1px solid #333;
+  background: #1b1b1b;
+  color: inherit;
+  padding: 0.4rem 0.65rem;
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+.sessions-actions button:disabled,
+.sessions-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sessions-actions button:not(:disabled):hover,
+.sessions-item:not(:disabled):hover {
+  border-color: #555;
+  background: #222;
+}
+
+.sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sessions-empty {
+  opacity: 0.55;
+  font-size: 0.85rem;
+}
+
+.sessions-item {
+  width: 100%;
+  display: grid;
+  gap: 0.15rem;
+  text-align: left;
+  text-transform: none;
+}
+
+.sessions-item-active {
+  border-color: #5a7;
+  background: #1a221a;
+}
+
+.sessions-item-id {
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.sessions-item-mtime {
+  font-size: 0.75rem;
+  opacity: 0.65;
+}

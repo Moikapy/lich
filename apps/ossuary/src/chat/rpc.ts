@@ -1,21 +1,10 @@
-/** Typed serve session / prompt RPC helpers for the Chat pane. */
+/** Prompt submit / abort RPCs (session helpers live in session/session_rpc). */
 import { request_gateway } from "../gateway-client";
 import { parse_submit_result } from "./parse_submit_result";
 import type { PromptSubmitResult } from "./types";
 import { as_record } from "./wire_guards";
 
-export async function session_create(source: string, label?: string): Promise<string> {
-  const params: Record<string, unknown> = { source };
-  if (label !== undefined) {
-    params.label = label;
-  }
-  const result = await request_gateway("session.create", params);
-  const record = as_record(result);
-  if (record === undefined || typeof record.session_id !== "string") {
-    throw new Error("unexpected session.create result");
-  }
-  return record.session_id;
-}
+export { session_create } from "../session/session_rpc";
 
 export async function prompt_submit(session_id: string, text: string): Promise<PromptSubmitResult> {
   const result = await request_gateway("prompt.submit", { session_id, text });
