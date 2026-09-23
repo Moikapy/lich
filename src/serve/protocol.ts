@@ -3,6 +3,7 @@
  * Types only — no listening server here.
  */
 import type { AgentEvent } from "../agent/events.js";
+import type { LoopOutcome } from "../agent/loop.js";
 import type { Usage } from "../providers/types.js";
 
 /** Locked method names for the serve surface. */
@@ -107,7 +108,7 @@ export interface PromptSubmitResult {
   usage: Usage;
   session_path: string | undefined;
   turns_used: number;
-  stopped_reason: "final" | "budget" | "aborted";
+  stopped_reason: LoopOutcome["stopped_reason"];
 }
 
 export interface PromptAbortParams {
