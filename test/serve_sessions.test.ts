@@ -353,6 +353,35 @@ describe("serve session rpc", () => {
     expect(latest.message_count).toBe(2);
   });
 
+  it("keeps message_count stable across repeated fork resumes (several trailing users)", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-fork-stable"), "sessions");
+    await write_transcript(session_dir, "stacked-1", [
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+      { role: "user", content: "dangling-1" },
+      { role: "user", content: "dangling-2" },
+    ]);
+    const context = rpc_context(session_dir);
+    const first = (await rpc(context, "session.resume", { id: "stacked-1" })).result as {
+      session_id: string;
+      message_count: number;
+    };
+    expect(first.message_count).toBe(2);
+    const second = (await rpc(context, "session.resume", { id: first.session_id }, 2)).result as {
+      session_id: string;
+      message_count: number;
+    };
+    expect(second.message_count).toBe(2);
+    const third = (await rpc(context, "session.resume", { id: second.session_id }, 3)).result as {
+      message_count: number;
+    };
+    expect(third.message_count).toBe(2);
+    expect(context.sessions.get(second.session_id)?.history).toEqual([
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]);
+  });
+
   it("marks the resume fork handle seeded so recorder.seed does not re-append history", async () => {
     const session_dir = path.join(await make_temp_dir("serve-fork-seeded"), "sessions");
     await write_transcript(session_dir, "seeded-1", [

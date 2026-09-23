@@ -67,7 +67,7 @@ async function touch_transcript(file_path: string): Promise<void> {
 
 /**
  * Write the filtered resume history into a new fork transcript. Uses the same
- * messages the bag stores (trailing user already dropped by
+ * messages the bag stores (trailing users already dropped by
  * `read_session_messages`) so the on-disk fork matches in-memory history —
  * a raw byte copy would reintroduce the dropped user and leave meta lines
  * that `recorder.seed` would then duplicate on top. `ax` fails on collision
