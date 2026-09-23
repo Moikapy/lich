@@ -118,4 +118,26 @@ describe("serve protocol types", () => {
     };
     expect(with_params.params.session_id).toBe("s1");
   });
+
+  it("ties method to params on the bare ServeRequest union", () => {
+    // @ts-expect-error prompt.submit params require session_id and text
+    const mismatched: ServeRequest = {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "prompt.submit",
+      params: {},
+    };
+    void mismatched;
+
+    const text_of = (r: ServeRequest): string | undefined =>
+      r.method === "prompt.submit" ? r.params.text : undefined;
+    expect(
+      text_of({
+        jsonrpc: "2.0",
+        id: 6,
+        method: "prompt.submit",
+        params: { session_id: "s1", text: "hi" },
+      }),
+    ).toBe("hi");
+  });
 });

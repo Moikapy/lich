@@ -150,12 +150,16 @@ export interface ServeMethodMap {
   "prompt.abort": { params: PromptAbortParams; result: PromptAbortResult };
 }
 
-/** Serve requests require params (unlike bare JSON-RPC, which may omit them). */
-export type ServeRequest<M extends ServeMethod = ServeMethod> = JsonRpcRequest<
-  M,
-  ServeMethodMap[M]["params"]
-> & { params: ServeMethodMap[M]["params"] };
+/**
+ * Serve requests require params (unlike bare JSON-RPC, which may omit them).
+ * Distributes over M so the bare `ServeRequest` is a discriminated union:
+ * `method` pins `params`, and switching on `method` narrows `params`.
+ */
+export type ServeRequest<M extends ServeMethod = ServeMethod> = M extends ServeMethod
+  ? JsonRpcRequest<M, ServeMethodMap[M]["params"]> & { params: ServeMethodMap[M]["params"] }
+  : never;
 
-export type ServeSuccess<M extends ServeMethod = ServeMethod> = JsonRpcSuccess<
-  ServeMethodMap[M]["result"]
->;
+/** Distributes over M so the bare `ServeSuccess` is a union of per-method results. */
+export type ServeSuccess<M extends ServeMethod = ServeMethod> = M extends ServeMethod
+  ? JsonRpcSuccess<ServeMethodMap[M]["result"]>
+  : never;
