@@ -16,28 +16,109 @@ body,
   height: 100%;
 }
 
-.hello {
+.shell {
+  height: 100%;
   min-height: 100%;
-  display: grid;
-  place-items: center;
 }
 
-.hello h1 {
+.pane-chat {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.chat-header h1 {
   margin: 0;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: lowercase;
+  font-size: 1.1rem;
 }
 
-.hello .status,
-.hello .health,
-.hello .error {
-  margin: 0.75rem 0 0;
-  font-size: 0.95rem;
-  opacity: 0.85;
+.chat-status {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
 }
 
-.hello .error {
+.chat-transcript {
+  overflow: auto;
+  border: 1px solid #2a2a2a;
+  border-radius: 0.35rem;
+  padding: 0.85rem 1rem;
+  background: #161616;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.chat-empty {
+  margin: 0;
+  opacity: 0.55;
+}
+
+.chat-block {
+  margin: 0 0 0.65rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-block:last-child {
+  margin-bottom: 0;
+}
+
+.chat-block-user {
+  color: #cde;
+}
+
+.chat-block-lich {
+  color: #ded;
+}
+
+.chat-block-tool {
+  color: #9a9;
+  opacity: 0.9;
+}
+
+.chat-block-meta {
+  color: #888;
+}
+
+.chat-block-error {
   color: #f88;
-  opacity: 1;
+}
+
+.chat-composer {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+}
+
+.chat-input,
+.chat-composer button {
+  font: inherit;
+  border-radius: 0.3rem;
+  border: 1px solid #333;
+  background: #1b1b1b;
+  color: inherit;
+  padding: 0.55rem 0.75rem;
+}
+
+.chat-composer button {
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-composer button:disabled,
+.chat-input:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chat-composer button:not(:disabled):hover {
+  border-color: #555;
+  background: #222;
 }
