@@ -7,6 +7,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { LICH_VERSION } from "../version.js";
+import { logger } from "../util/log.js";
 import { handle_serve_rpc_message } from "./rpc.js";
 import { create_serve_session_store, type ServeSessionStore } from "./sessions.js";
 
@@ -32,6 +33,8 @@ export interface ServeOptions {
   version?: string;
   /** Transcript directory for session.list / resume / create. */
   session_dir?: string;
+  /** LRU cap for in-memory session bags; `0` disables. Default 32. */
+  max_session_bags?: number;
   /** Boot JSON line sink. Default `process.stdout`; `null` skips emission. */
   boot_stdout?: NodeJS.WritableStream | null;
   on_listening?: (info: ServeBootInfo) => void;
@@ -49,8 +52,11 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   const want_port = options.port ?? DEFAULT_SERVE_PORT;
   const token = options.token ?? randomBytes(TOKEN_BYTES).toString("hex");
   const version = options.version ?? LICH_VERSION;
+  // TODO(#84): derive from the loaded agent config (`config.session_dir`)
+  // rather than cwd — until the CLI passes it explicitly, `lich serve`
+  // launched from a different work_dir would read a different transcript dir.
   const session_dir = options.session_dir ?? path.join(process.cwd(), ".lich", "sessions");
-  const sessions = create_serve_session_store(session_dir);
+  const sessions = create_serve_session_store(session_dir, options.max_session_bags);
   assert_loopback_host(host);
 
   let http_server: Server | undefined;
@@ -122,13 +128,21 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       await close_http(http_server);
       http_server = undefined;
       boot = undefined;
+      sessions.dispose();
     },
   };
 }
 
 function attach_client(client: WebSocket, version: string, sessions: ServeSessionStore): void {
+  // Serialize frames per connection: pipelined requests get in-order replies,
+  // and the tail catch keeps any rejection from becoming an unhandled one.
+  let tail: Promise<void> = Promise.resolve();
   client.on("message", (data) => {
-    void handle_client_message(client, data, version, sessions);
+    tail = tail
+      .then(() => handle_client_message(client, data, version, sessions))
+      .catch((error: unknown) => {
+        logger.warn("serve client message handling failed", error);
+      });
   });
 }
 

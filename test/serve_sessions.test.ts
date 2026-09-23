@@ -24,8 +24,8 @@ afterEach(async () => {
   }
 });
 
-function rpc_context(session_dir: string): ServeRpcContext {
-  return { version: "9.9.9", sessions: create_serve_session_store(session_dir) };
+function rpc_context(session_dir: string, max_bags?: number): ServeRpcContext {
+  return { version: "9.9.9", sessions: create_serve_session_store(session_dir, max_bags) };
 }
 
 async function rpc(
@@ -120,13 +120,24 @@ describe("serve session rpc", () => {
 
     const context = rpc_context(session_dir);
     const response = await rpc(context, "session.resume", { id: "m1abc" });
-    const result = response.result as { session_id: string; message_count: number };
+    const result = response.result as { session_id: string; resumed_id: string; message_count: number };
     expect(result.message_count).toBe(3);
+    expect(result.resumed_id).toBe("m1abc-1-tui");
     expect(context.sessions.get(result.session_id)?.history).toEqual([
       { role: "system", content: "sys" },
       { role: "user", content: "hello" },
       { role: "assistant", content: "hi" },
     ]);
+  });
+
+  it("resumes with a custom source tag and reports resumed_id", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-resume-source"), "sessions");
+    await write_transcript(session_dir, "src-1", [{ role: "user", content: "x" }]);
+    const context = rpc_context(session_dir);
+    const response = await rpc(context, "session.resume", { id: "src-1", source: "ossuary" });
+    const result = response.result as { session_id: string; resumed_id: string; message_count: number };
+    expect(result.resumed_id).toBe("src-1");
+    expect(context.sessions.get(result.session_id)?.source).toBe("ossuary");
   });
 
   it("keeps prompt.submit unimplemented (-32601)", async () => {
@@ -143,6 +154,88 @@ describe("serve session rpc", () => {
     expect(bad_create.error).toMatchObject({ code: -32602 });
     const bad_clear = await rpc(context, "session.clear", { session_id: "missing" });
     expect(bad_clear.error).toMatchObject({ code: -32000, message: /session not found/ });
+  });
+
+  it("rejects empty-string labels on create (empty source also invalid)", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-label"), "sessions");
+    const context = rpc_context(session_dir);
+    const bad = await rpc(context, "session.create", { source: "x", label: "" });
+    expect(bad.error).toMatchObject({ code: -32602 });
+    const ok = await rpc(context, "session.create", { source: "x" });
+    expect(ok.result).toHaveProperty("session_id");
+  });
+
+  it("evicts the least recently used bag beyond the cap", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-lru"), "sessions");
+    const context = rpc_context(session_dir, 2);
+    const first = (await rpc(context, "session.create", { source: "a" })).result as {
+      session_id: string;
+    };
+    const second = (await rpc(context, "session.create", { source: "b" })).result as {
+      session_id: string;
+    };
+    // Touch `first` so `second` becomes the LRU entry.
+    context.sessions.get(first.session_id);
+    const third = (await rpc(context, "session.create", { source: "c" })).result as {
+      session_id: string;
+    };
+    expect(context.sessions.get(first.session_id)).toBeDefined();
+    expect(context.sessions.get(second.session_id)).toBeUndefined();
+    expect(context.sessions.get(third.session_id)).toBeDefined();
+  });
+
+  it("dispose drops every bag", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-dispose"), "sessions");
+    const context = rpc_context(session_dir);
+    const first = (await rpc(context, "session.create", { source: "a" })).result as {
+      session_id: string;
+    };
+    context.sessions.dispose();
+    expect(context.sessions.get(first.session_id)).toBeUndefined();
+  });
+
+  it("rejects resume of a missing id with a clean -32000", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-resume-missing"), "sessions");
+    const context = rpc_context(session_dir);
+    const response = await rpc(context, "session.resume", { id: "no-such-id" });
+    expect(response.error).toMatchObject({ code: -32000, message: "session not found" });
+  });
+
+  it("rejects ambiguous prefix resume with a clean -32000", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-resume-amb"), "sessions");
+    await write_transcript(session_dir, "dup-1", [{ role: "user", content: "x" }]);
+    await write_transcript(session_dir, "dup-2", [{ role: "user", content: "y" }]);
+    const context = rpc_context(session_dir);
+    const response = await rpc(context, "session.resume", { id: "dup" });
+    expect(response.error).toMatchObject({ code: -32000, message: "ambiguous session id" });
+  });
+
+  it("keeps traversal-shaped ids inside session_dir (path-safety pin)", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-traversal"), "sessions");
+    const outside = path.dirname(session_dir);
+    const secret = path.join(outside, "secret.jsonl");
+    await mkdir(outside, { recursive: true });
+    await writeFile(secret, "stolen", "utf8");
+    const context = rpc_context(session_dir);
+    const response = await rpc(context, "session.resume", { id: "../secret" });
+    expect(response.error).toMatchObject({ code: -32000, message: "session not found" });
+  });
+
+  it("resumes meta/malformed records with only valid messages", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-resume-filter"), "sessions");
+    await mkdir(session_dir, { recursive: true });
+    const lines = [
+      JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", kind: "meta", meta: { note: "skip me" } }),
+      JSON.stringify({ ts: "2026-01-01T00:00:01.000Z", kind: "message", message: { role: "user", content: "hi" } }),
+      "not json at all",
+      JSON.stringify({ ts: "2026-01-01T00:00:02.000Z", kind: "message", message: { role: "assistant", content: "yo" } }),
+    ];
+    await writeFile(path.join(session_dir, "mixed-1.jsonl"), `${lines.join("\n")}\n`, "utf8");
+    const context = rpc_context(session_dir);
+    const response = await rpc(context, "session.resume", { id: "mixed-1" });
+    const result = response.result as { resumed_id: string; message_count: number };
+    expect(result.message_count).toBe(2);
+    expect(result.resumed_id).toBe("mixed-1");
   });
 });
 

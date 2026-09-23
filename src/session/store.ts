@@ -7,6 +7,7 @@ import { access, appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Message } from "../providers/types.js";
 import { safe_json_parse, safe_stringify } from "../util/json.js";
+import { is_enoent } from "../util/fs.js";
 
 export interface SessionRecord {
   ts: string;
@@ -83,8 +84,11 @@ export async function read_session_messages(file_path: string): Promise<Message[
   let raw: string;
   try {
     raw = await readFile(file_path, "utf8");
-  } catch {
-    return [];
+  } catch (error) {
+    if (is_enoent(error) === true) {
+      return [];
+    }
+    throw error;
   }
   const messages: Message[] = [];
   for (const line of raw.split("\n")) {

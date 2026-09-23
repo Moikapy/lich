@@ -45,7 +45,7 @@ method `event` (no `id`).
 | `session.create` | `{ label?, source }` | `{ session_id }` |
 | `session.list` | `{}` | `{ sessions: [{ id, mtime_ms }, ...] }` |
 | `session.clear` | `{ session_id }` | `{ session_id }` |
-| `session.resume` | `{ id }` | `{ session_id, message_count }` |
+| `session.resume` | `{ id, source? }` | `{ session_id, resumed_id, message_count }` |
 | `prompt.submit` | `{ session_id, text }` | reply, usage, `session_path`, `stopped_reason`, … |
 | `prompt.abort` | `{ session_id }` | `{ session_id, aborted }` |
 
@@ -53,15 +53,22 @@ method `event` (no `id`).
 `params: {}`, because `ServeRequest` requires `params`. JSON-RPC 2.0 also
 allows omitting `params`; serve handlers accept that omission the same as `{}`.
 
-`session.resume` and other session RPCs may extend this map in later issues;
-clients must not invent method names outside the locked set above until those
-land.
+`prompt.*` may extend this map in later issues (#83); clients must not invent
+method names outside the locked set above until those land.
 
 `session.create` opens one `SessionHandle` and an empty in-memory history bag.
-`session.clear` resets that bag (handle stays). `session.list` / `session.resume`
-reuse [`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
-semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds history
-from disk and opens a fresh `SessionHandle` for later `prompt.submit` (#83).
+`session.clear` resets that bag's in-memory history (handle stays; the on-disk
+transcript is untouched). `session.list` / `session.resume` reuse
+[`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
+semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds
+history from disk and opens a fresh `SessionHandle` for later `prompt.submit`
+(#83) — like CLI `--resume`, each resume forks a new transcript; it does not
+re-bind the original. `SessionResumeResult.resumed_id` reports which
+transcript was resolved, even for `latest` / prefix resumes.
+
+In-memory bags are capped (LRU, default 32 via `max_session_bags`): the
+oldest is evicted first, and `ServeServer.stop()` drops all of them. Evicted
+transcripts stay on disk and can be resumed again.
 
 ## Notifications
 
@@ -86,9 +93,16 @@ semantics without embedding `Agent` in Electron.
   do not assume `file://` / `app://` behavior here.
 - Frame size capped at ~1 MiB (`maxPayload`).
 - `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
+- Frames are handled per-connection in arrival order: pipelined requests get
+  in-order replies even when earlier requests hit slower filesystem awaits.
+- `session_dir` defaults to `<cwd>/.lich/sessions` until the #84 CLI passes the
+  agent config's `session_dir` (derived from `work_dir`) explicitly.
 
 ## Not in this layer yet
 
-- No `lich serve` CLI entry (#84).
+- No `lich serve` CLI entry (#84). The CLI must pass `config.session_dir`
+  explicitly — the library default is `process.cwd()/.lich/sessions`, which
+  diverges from `AgentConfig`'s `${work_dir}/.lich/sessions` when launched
+  from another directory.
 - No `prompt.*` handlers (#83) — locked names return method-not-found until implemented.
 - No Agent construction yet (also #83).

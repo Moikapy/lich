@@ -2,7 +2,7 @@
  * Serve transport tests: loopback WS JSON-RPC, health, and token rejection.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as net_connect } from "node:net";
 import path from "node:path";
@@ -233,6 +233,79 @@ describe("serve websocket transport", () => {
       await expect(server.stop()).resolves.toBeUndefined();
     } finally {
       process.off("uncaughtException", on_uncaught);
+    }
+  });
+
+  it("round-trips session.create and session.resume over WS", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-ws-sessions"), "sessions");
+    await mkdir(session_dir, { recursive: true });
+    await writeFile(
+      path.join(session_dir, "ws-demo-1.jsonl"),
+      [
+        JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", kind: "message", message: { role: "user", content: "hi" } }),
+        JSON.stringify({ ts: "2026-01-01T00:00:01.000Z", kind: "message", message: { role: "assistant", content: "hello" } }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir });
+    servers.push(server);
+    const boot = await server.start();
+
+    const created = await rpc_over_ws(boot.port, boot.token, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "session.create",
+      params: { source: "ossuary", label: "ws-demo" },
+    });
+    const session_id = (created as { result: { session_id: string } }).result.session_id;
+    expect(session_id.length).toBeGreaterThan(0);
+
+    const resumed = await rpc_over_ws(boot.port, boot.token, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "session.resume",
+      params: { id: "ws-demo-1" },
+    });
+    expect(resumed).toMatchObject({
+      id: 2,
+      result: { session_id: expect.any(String), resumed_id: "ws-demo-1", message_count: 2 },
+    });
+    // The server's store carries the resumed history for prompt.submit (#83).
+    const bag = server.sessions.get(
+      (resumed as { result: { session_id: string } }).result.session_id,
+    );
+    expect(bag?.history).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ]);
+  });
+
+  it("replies to pipelined frames in order, per connection", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-ws-order"), "sessions");
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir });
+    servers.push(server);
+    const boot = await server.start();
+
+    const url = `ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`;
+    const ws = await open_ws(url);
+    try {
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.list", params: {} }));
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "health", params: {} }));
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "session.list", params: {} }));
+      const ids: number[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("pipeline timeout")), 5000);
+        ws.on("message", (data) => {
+          ids.push((JSON.parse(String(data)) as { id: number }).id);
+          if (ids.length === 3) {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+      expect(ids).toEqual([1, 2, 3]);
+    } finally {
+      ws.close();
     }
   });
 });
