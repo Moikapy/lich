@@ -74,3 +74,13 @@ Captured 2026-09-23. CI green at head.
 | --- | --- |
 | Warning `sessions.ts:170` — resume fork writes an empty transcript; the fork becomes the newest file, so a later `latest` resume (or restart-resume of the fork id) loads `message_count: 0` and hides the source conversation | Fixed — `fork_transcript` copies the source conversation into the fork (`readFile` → `writeFile` flag `ax`, collision-safe) on `session.resume`; the fork is self-contained and resumable (test: fork transcript contains the source messages on disk; a `latest` resume after the fork reloads `message_count: 2`) |
 | Suggestion `agent-loop.md:210` — CLI `--resume` and TUI `/resume` surfaced raw ENOENT (absolute path in the message); only serve rewrote it | Fixed — `read_transcript_or_not_found` helper in `tui/load_resume.ts` (exported, unit-tested) and the same mapping inline in `cli.ts` `run_tui_entry` map read-path ENOENT to stable `session not found (transcript deleted)`; docs updated to describe all three callers mapping ENOENT to stable text (tests: CLI rejects with mapped text and no path/ENOENT in the message via read-spy; helper unit test pins the mapping) |
+
+---
+
+# Round 4 — bot re-review at 21:10Z / 21:22Z on `f025acc` / `33288ea` (1 Warning)
+
+Captured 2026-09-23. CI green at head.
+
+| Finding | Disposition |
+| --- | --- |
+| Warning `sessions.ts:74` — raw byte-copy fork diverges from bag history (`read_session_messages` drops trailing user); stacked `prompt.submit` (#83) passes `history: bag.history` + `session: bag.handle` into `recorder.seed`, which re-appends history because the handle is not in `seeded_handles` → conversation doubles and the dropped user returns on next resume | Fixed — `write_fork_transcript` writes the filtered bag messages (JSONL records + trailing newline; empty → empty file) with `ax`; `mark_session_seeded(handle)` (exported from `session/recorder.ts`) is called before return so a later `recorder.seed({owned: false})` appends only the new turn (tests: fork drops trailing user and matches bag; seeded-handle seed leaves history once + new turn only) |

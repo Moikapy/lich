@@ -321,31 +321,65 @@ describe("serve session rpc", () => {
     expect(result.resumed_id).toBe("mixed-1");
   });
 
-  it("copies the source conversation into the resume fork (latest still sees it)", async () => {
-    const session_dir = path.join(await make_temp_dir("serve-fork-copy"), "sessions");
+  it("writes filtered bag history into the resume fork (drops trailing user, matches bag)", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-fork-filtered"), "sessions");
     await write_transcript(session_dir, "src-conv-1", [
       { role: "user", content: "question" },
       { role: "assistant", content: "answer" },
+      { role: "user", content: "dangling" },
     ]);
     const context = rpc_context(session_dir);
     const fork = (await rpc(context, "session.resume", { id: "src-conv-1" })).result as {
       session_id: string;
-      resumed_id: string;
       message_count: number;
     };
-
-    // The fork transcript carries the source conversation on disk…
+    // read_session_messages drops the trailing user; bag and fork must agree.
+    expect(fork.message_count).toBe(2);
+    expect(context.sessions.get(fork.session_id)?.history).toEqual([
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]);
     const fork_raw = await readFile(path.join(session_dir, `${fork.session_id}.jsonl`), "utf8");
     expect(fork_raw).toContain("question");
     expect(fork_raw).toContain("answer");
+    expect(fork_raw).not.toContain("dangling");
 
-    // …so a `latest` resume (or a restart) reloads the history, not an empty file.
+    // A later `latest` resume reloads the filtered history, not an empty file.
     const latest = (await rpc(context, "session.resume", { id: "latest" }, 2)).result as {
       message_count: number;
       resumed_id: string;
     };
     expect(latest.resumed_id).toBe(fork.session_id);
     expect(latest.message_count).toBe(2);
+  });
+
+  it("marks the resume fork handle seeded so recorder.seed does not re-append history", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-fork-seeded"), "sessions");
+    await write_transcript(session_dir, "seeded-1", [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ]);
+    const context = rpc_context(session_dir);
+    const fork = (await rpc(context, "session.resume", { id: "seeded-1" })).result as {
+      session_id: string;
+    };
+    const bag = context.sessions.get(fork.session_id);
+    expect(bag).toBeDefined();
+    const { create_session_recorder } = await import("../src/session/recorder.js");
+    const recorder = create_session_recorder(bag!.handle);
+    await recorder.seed({
+      input: "next turn",
+      history: bag!.history,
+      system_prompt: undefined,
+      owned: false,
+    });
+    await recorder.flush();
+    const raw = await readFile(bag!.handle.path, "utf8");
+    // History appears once (from the fork write); only the new user turn is
+    // appended. A double-seed would leave two "hello" / "hi" pairs.
+    expect(raw.match(/"content":"hello"/g)).toHaveLength(1);
+    expect(raw.match(/"content":"hi"/g)).toHaveLength(1);
+    expect(raw).toContain("next turn");
   });
 });
 

@@ -4,10 +4,12 @@
  * transcripts stay on disk and can be resumed again.
  */
 import path from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import type { Message } from "../providers/types.js";
 import { logger } from "../util/log.js";
 import { is_enoent } from "../util/fs.js";
+import { safe_stringify } from "../util/json.js";
+import { mark_session_seeded } from "../session/recorder.js";
 import { list_session_files, resolve_session_path, SessionResolveError } from "../session/resolve.js";
 import { open_session, read_session_messages, type SessionHandle } from "../session/store.js";
 import type {
@@ -64,14 +66,23 @@ async function touch_transcript(file_path: string): Promise<void> {
 }
 
 /**
- * Fork a transcript for `session.resume`: copy the source conversation so the
- * fork is self-contained (a later `latest` resume, or a restart, reloads the
- * history instead of an empty file). `ax` fails on collision instead of
- * truncating an existing transcript.
+ * Write the filtered resume history into a new fork transcript. Uses the same
+ * messages the bag stores (trailing user already dropped by
+ * `read_session_messages`) so the on-disk fork matches in-memory history —
+ * a raw byte copy would reintroduce the dropped user and leave meta lines
+ * that `recorder.seed` would then duplicate on top. `ax` fails on collision
+ * instead of truncating an existing transcript.
  */
-async function fork_transcript(source_path: string, target_path: string): Promise<void> {
-  const raw = await readFile(source_path, "utf8");
-  await writeFile(target_path, raw, { flag: "ax" });
+async function write_fork_transcript(
+  target_path: string,
+  messages: readonly Message[],
+): Promise<void> {
+  const ts = new Date().toISOString();
+  const lines = messages.map((message) =>
+    safe_stringify({ ts, kind: "message", message }),
+  );
+  const body = lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+  await writeFile(target_path, body, { flag: "ax" });
 }
 
 export interface ServeSessionBag {
@@ -174,7 +185,11 @@ export function create_serve_session_store(
       let handle: SessionHandle;
       try {
         handle = await open_session(session_dir, "resume");
-        await fork_transcript(transcript, handle.path);
+        // Write the filtered bag history (not a raw copy) so the fork matches
+        // in-memory state; mark seeded so #83 prompt.submit's recorder.seed
+        // appends only the new turn.
+        await write_fork_transcript(handle.path, messages);
+        mark_session_seeded(handle);
       } catch (error) {
         throw client_error(error);
       }
