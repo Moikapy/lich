@@ -28,3 +28,22 @@ jobs:
           CLAUDECODE: ""
           CLAUDE_CODE: ""
         run: env -u CLAUDECODE -u CLAUDE_CODE node node_modules/vitest/vitest.mjs run
+
+  ossuary:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/ossuary
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # --ignore-scripts skips the postinstall Electron binary download; the build doesn't need it.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Build
+        run: bun run build
