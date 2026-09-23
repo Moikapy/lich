@@ -1,4 +1,5 @@
 import { ChatPane } from "../panes/chat";
+import { PlaceholderPane } from "../panes/placeholder";
 import { contrib_registry, register_pane } from "./registry";
 
 /**
@@ -13,7 +14,13 @@ export function register_core_contributions(): void {
   register_pane({
     id: "lich.chat",
     title: "Chat",
-    data: { placement: "main" },
+    data: { placement: "main", closable: false },
     render: ChatPane,
+  });
+  register_pane({
+    id: "lich.scratch",
+    title: "Scratch",
+    data: { placement: "right" },
+    render: PlaceholderPane,
   });
 }

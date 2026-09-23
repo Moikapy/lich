@@ -100,21 +100,23 @@ describe("core contributions", () => {
   it("registers lich.chat as the main pane", () => {
     register_core_contributions();
     const panes = list_panes();
-    expect(panes.map((item) => item.id)).toEqual(["lich.chat"]);
-    expect(panes[0]?.data.placement).toBe("main");
+    const chat = panes.find((item) => item.id === "lich.chat");
+    expect(chat?.data.placement).toBe("main");
   });
 
   it("is idempotent under HMR-style re-registration", () => {
     register_core_contributions();
+    const count = list_panes().length;
     expect(() => register_core_contributions()).not.toThrow();
-    expect(list_panes()).toHaveLength(1);
+    expect(list_panes()).toHaveLength(count);
   });
 
   it("re-registers after clear()", () => {
     register_core_contributions();
+    const count = list_panes().length;
     contrib_registry.clear();
     expect(list_panes()).toEqual([]);
     register_core_contributions();
-    expect(list_panes()).toHaveLength(1);
+    expect(list_panes()).toHaveLength(count);
   });
 });

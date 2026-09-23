@@ -1,17 +1,13 @@
 import { register_core_contributions } from "./contrib/register_core";
-import { list_panes, type PaneContribution } from "./contrib/registry";
+import { list_panes } from "./contrib/registry";
+import { DockShell } from "./shell/dock_shell";
 
 register_core_contributions();
 
-function pick_main_pane(panes: PaneContribution[]): PaneContribution | undefined {
-  return panes.find((pane) => pane.data.placement === "main") ?? panes[0];
-}
-
-/** Naive shell: mount the main registered pane until Dockview (#89). */
+/** Dockview shell over contribution-registered panes (`lich.chat` is main). */
 export function App() {
   const panes = list_panes();
-  const main = pick_main_pane(panes);
-  if (!main) {
+  if (panes.length === 0) {
     return (
       <main className="hello">
         <h1>ossuary</h1>
@@ -20,10 +16,9 @@ export function App() {
     );
   }
 
-  const Pane = main.render;
   return (
-    <main className="shell" data-pane-id={main.id}>
-      <Pane />
+    <main className="shell" data-testid="dock-shell">
+      <DockShell panes={panes} />
     </main>
   );
 }
