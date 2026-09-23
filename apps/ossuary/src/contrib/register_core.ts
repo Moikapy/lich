@@ -1,17 +1,17 @@
 import { ChatPane } from "../panes/chat";
-import { register } from "./registry";
+import { contrib_registry, register_pane } from "./registry";
 
-let core_registered = false;
-
-/** Register first-party panes the same way future plugins will. */
+/**
+ * Register first-party panes the same way future plugins will. Idempotent:
+ * repeat calls and HMR module re-eval hit the registry guard instead of
+ * throwing duplicate_contribution.
+ */
 export function register_core_contributions(): void {
-  if (core_registered) {
+  if (contrib_registry.get("lich.chat")) {
     return;
   }
-  core_registered = true;
-  register({
+  register_pane({
     id: "lich.chat",
-    area: "panes",
     title: "Chat",
     data: { placement: "main" },
     render: ChatPane,
