@@ -35,7 +35,12 @@ await new Promise<void>((resolve, reject) => {
 });
 
 const vite = run("bun", ["x", "vite"]);
-await wait_for_url(dev_url);
+try {
+  await wait_for_url(dev_url);
+} catch (err) {
+  vite.kill("SIGTERM");
+  throw err;
+}
 
 const electron = run("bun", ["x", "electron", "."], {
   ...process.env,
