@@ -47,6 +47,10 @@ method `event` (no `id`).
 | `prompt.submit` | `{ session_id, text }` | reply, usage, `session_path`, `stopped_reason`, … |
 | `prompt.abort` | `{ session_id }` | `{ session_id, aborted }` |
 
+`health` and `session.list` have no param fields. Typed clients still send
+`params: {}`, because `ServeRequest` requires `params`. JSON-RPC 2.0 also
+allows omitting `params`; serve handlers accept that omission the same as `{}`.
+
 `session.resume` and other session RPCs may extend this map in later issues;
 clients must not invent method names outside the locked set above until those
 land.
