@@ -140,10 +140,11 @@ export interface ServeMethodMap {
   "prompt.abort": { params: PromptAbortParams; result: PromptAbortResult };
 }
 
+/** Serve requests require params (unlike bare JSON-RPC, which may omit them). */
 export type ServeRequest<M extends ServeMethod = ServeMethod> = JsonRpcRequest<
   M,
   ServeMethodMap[M]["params"]
->;
+> & { params: ServeMethodMap[M]["params"] };
 
 export type ServeSuccess<M extends ServeMethod = ServeMethod> = JsonRpcSuccess<
   ServeMethodMap[M]["result"]
