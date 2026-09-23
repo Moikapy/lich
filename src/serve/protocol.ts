@@ -65,6 +65,7 @@ export const SERVE_ERROR_CODES = {
   METHOD_NOT_FOUND: -32601,
   INVALID_PARAMS: -32602,
   APPLICATION_ERROR: -32000,
+  INTERNAL_ERROR: -32603,
 } as const;
 
 /** Params / results per locked method. */
@@ -155,9 +156,9 @@ export interface ServeMethodMap {
  * Distributes over M so the bare `ServeRequest` is a discriminated union:
  * `method` pins `params`, and switching on `method` narrows `params`.
  */
-export type ServeRequest<M extends ServeMethod = ServeMethod> = M extends ServeMethod
+export type ServeRequest<M extends ServeMethod = ServeMethod> = (M extends ServeMethod
   ? JsonRpcRequest<M, ServeMethodMap[M]["params"]> & { params: ServeMethodMap[M]["params"] }
-  : never;
+  : never) & { method: M };
 
 /** Distributes over M so the bare `ServeSuccess` is a union of per-method results. */
 export type ServeSuccess<M extends ServeMethod = ServeMethod> = M extends ServeMethod

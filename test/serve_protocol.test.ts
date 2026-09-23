@@ -30,6 +30,7 @@ describe("serve protocol types", () => {
       METHOD_NOT_FOUND: -32601,
       INVALID_PARAMS: -32602,
       APPLICATION_ERROR: -32000,
+      INTERNAL_ERROR: -32603,
     });
   });
 
@@ -139,5 +140,10 @@ describe("serve protocol types", () => {
         params: { session_id: "s1", text: "hi" },
       }),
     ).toBe("hi");
+
+    const method_of = <M extends ServeMethod>(r: ServeRequest<M>): M => r.method;
+    expect(
+      method_of({ jsonrpc: "2.0", id: 7, method: "health", params: {} }),
+    ).toBe("health");
   });
 });
