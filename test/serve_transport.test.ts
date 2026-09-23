@@ -176,11 +176,11 @@ describe("serve websocket transport", () => {
     expect(boot.port).toBe(leaked_port);
   });
 
-  it("survives TCP reset of a partial upgrade request", async () => {
+  it("survives TCP reset during pre-upgrade 401 response", async () => {
     const server = create_serve_server({
       port: 0,
       boot_stdout: null,
-      token: "partial-upgrade-token",
+      token: "pre-upgrade-token",
     });
     servers.push(server);
     const boot = await server.start();
@@ -191,8 +191,8 @@ describe("serve websocket transport", () => {
     };
     process.on("uncaughtException", on_uncaught);
     try {
-      for (let i = 0; i < 3; i++) {
-        await reset_partial_upgrade(boot.port, boot.token);
+      for (let i = 0; i < 5; i++) {
+        await reset_during_pre_upgrade_401(boot.port);
       }
       // Give any deferred socket error a chance to surface as uncaught.
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -268,14 +268,20 @@ function open_ws(url: string, headers?: Record<string, string>): Promise<WebSock
   });
 }
 
-/** Raw TCP probe: upgrade request then RST before handshake completes. */
-function reset_partial_upgrade(port: number, token: string): Promise<void> {
+/**
+ * Raw TCP: complete upgrade with a wrong token so the server writes 401 and
+ * never calls wss.handleUpgrade. Immediate RST races the 401 write so the
+ * error lands on the serve handler's on_socket_error — not ws's listener.
+ *
+ * Valid-token RST is insufficient coverage: handleUpgrade runs synchronously
+ * and ws attaches its own socket error listener, so deleting on_socket_error
+ * still passes that path.
+ */
+function reset_during_pre_upgrade_401(port: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = net_connect({ host: "127.0.0.1", port }, () => {
-      // Full HTTP upgrade headers so the serve upgrade handler runs and attaches
-      // its socket error listener; RST before the WS handshake finishes.
       socket.write(
-        `GET /?token=${encodeURIComponent(token)} HTTP/1.1\r\n` +
+        "GET /?token=wrong-token HTTP/1.1\r\n" +
           `Host: 127.0.0.1:${port}\r\n` +
           "Upgrade: websocket\r\n" +
           "Connection: Upgrade\r\n" +
@@ -283,11 +289,13 @@ function reset_partial_upgrade(port: number, token: string): Promise<void> {
           "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
           "\r\n",
       );
+      // RST before the server's 401 write when possible — that is the path
+      // on_socket_error protects (write ECONNRESET without a listener).
       socket.resetAndDestroy();
     });
     const timer = setTimeout(() => {
       socket.destroy();
-      reject(new Error("partial upgrade reset timeout"));
+      reject(new Error("pre-upgrade 401 reset timeout"));
     }, 5000);
     socket.on("close", () => {
       clearTimeout(timer);
