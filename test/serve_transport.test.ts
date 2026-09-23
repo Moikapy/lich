@@ -176,6 +176,10 @@ describe("serve websocket transport", () => {
     expect(boot.port).toBe(leaked_port);
   });
 
+  // Smoke test: RST on the pre-upgrade 401 path must not crash the server and
+  // must not break later RPC. It does not assert which error listener handles
+  // the write error — the sync write+destroy in the 401 branch usually masks
+  // it, so on_socket_error in src/serve/server.ts stays defense-in-depth.
   it("survives TCP reset during pre-upgrade 401 response", async () => {
     const server = create_serve_server({
       port: 0,
@@ -269,13 +273,15 @@ function open_ws(url: string, headers?: Record<string, string>): Promise<WebSock
 }
 
 /**
- * Raw TCP: complete upgrade with a wrong token so the server writes 401 and
- * never calls wss.handleUpgrade. Immediate RST races the 401 write so the
- * error lands on the serve handler's on_socket_error — not ws's listener.
+ * Raw TCP: complete the upgrade with a wrong token so the server writes 401
+ * and never calls wss.handleUpgrade, then RST to race the 401 write. The
+ * wrong token keeps the socket on the server's pre-upgrade path — a valid
+ * token hands it to ws, which attaches its own socket error listener.
  *
- * Valid-token RST is insufficient coverage: handleUpgrade runs synchronously
- * and ws attaches its own socket error listener, so deleting on_socket_error
- * still passes that path.
+ * Smoke-test scenario: the 401 branch's sync write+destroy usually masks
+ * the write error, so this does not assert which error listener handles
+ * it; on_socket_error in src/serve/server.ts is defense-in-depth and is
+ * not directly exercised.
  */
 function reset_during_pre_upgrade_401(port: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -289,8 +295,9 @@ function reset_during_pre_upgrade_401(port: number): Promise<void> {
           "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
           "\r\n",
       );
-      // RST before the server's 401 write when possible — that is the path
-      // on_socket_error protects (write ECONNRESET without a listener).
+      // RST to race the server's 401 write. on_socket_error in server.ts is
+      // defense-in-depth for async write errors here; the sync write+destroy
+      // usually masks the error, so no listener is asserted.
       socket.resetAndDestroy();
     });
     const timer = setTimeout(() => {

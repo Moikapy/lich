@@ -64,6 +64,9 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       });
       wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
       http_server.on("upgrade", (request, socket, head) => {
+        // Defense-in-depth for pre-upgrade reject writes (403/401): the sync
+        // write+destroy below usually masks the write error, so this listener
+        // is not directly exercised by tests.
         const on_socket_error = () => {
           socket.destroy();
         };
