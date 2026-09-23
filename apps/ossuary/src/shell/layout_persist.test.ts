@@ -31,6 +31,21 @@ describe("can_restore_layout", () => {
     expect(can_restore_layout(sample, registered)).toBe(true);
   });
 
+  it("accepts layouts that include Dockview popoutGroups (#93)", () => {
+    const with_popout = {
+      ...sample,
+      popoutGroups: [
+        {
+          data: { id: "g1", views: ["lich.scratch"], activeView: "lich.scratch" },
+          position: { left: 10, top: 10, width: 400, height: 300 },
+          url: "/popout.html",
+        },
+      ],
+    };
+    const registered = new Set(["lich.chat", "lich.scratch"]);
+    expect(can_restore_layout(with_popout, registered)).toBe(true);
+  });
+
   it("rejects unknown panel ids so #90/#91 panes stay opt-in", () => {
     const registered = new Set(["lich.chat"]);
     expect(can_restore_layout(sample, registered)).toBe(false);

@@ -13,6 +13,8 @@ import { build_dock_components, plan_pane_layout } from "./pane_layout";
 
 const UNCLOSEABLE_TAB = "uncloseable";
 const SAVE_DEBOUNCE_MS = 250;
+/** Same-origin blank page for Dockview OS-window popouts (#93). */
+const POPOUT_URL = "/popout.html";
 
 function UncloseableTab(props: IDockviewPanelHeaderProps) {
   return <DockviewDefaultTab {...props} hideClose />;
@@ -60,15 +62,16 @@ function add_missing_panels(
   }
 }
 
-function restore_or_default(
+async function restore_or_default(
   event: DockviewReadyEvent,
   panes: PaneContribution[],
   saved: unknown,
-): void {
+): Promise<void> {
   const registered = new Set(panes.map((pane) => pane.id));
   if (can_restore_layout(saved, registered)) {
     try {
       event.api.fromJSON(saved as Parameters<typeof event.api.fromJSON>[0]);
+      await event.api.popoutRestorationPromise;
       const missing = missing_registered_ids(saved, registered) ?? [];
       add_missing_panels(event, panes, missing);
       return;
@@ -107,7 +110,10 @@ export function DockShell({ panes }: DockShellProps) {
         if (generation !== generation_ref.current) {
           return;
         }
-        restore_or_default(event, panes_ref.current, saved);
+        await restore_or_default(event, panes_ref.current, saved);
+        if (generation !== generation_ref.current) {
+          return;
+        }
 
         let timer: ReturnType<typeof setTimeout> | undefined;
         const flush = (): void => {
@@ -154,6 +160,8 @@ export function DockShell({ panes }: DockShellProps) {
       className="dockview-theme-abyss ossuary-dock"
       components={components}
       tabComponents={TAB_COMPONENTS}
+      popoutUrl={POPOUT_URL}
+      getTabContextMenuItems={() => ["popout", "float", "separator", "maximize"]}
       onReady={on_ready}
     />
   );
