@@ -56,6 +56,7 @@ export type {
 export {
   SERVE_METHODS,
   SERVE_NOTIFICATION_EVENT,
+  SERVE_ERROR_CODES,
 } from "./serve/protocol.js";
 export type {
   HealthParams,

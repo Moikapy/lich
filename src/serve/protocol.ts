@@ -58,6 +58,15 @@ export interface JsonRpcNotification<M extends string = string, P = unknown> {
 
 export type JsonRpcResponse<R = unknown> = JsonRpcSuccess<R> | JsonRpcError;
 
+/** Locked JSON-RPC 2.0 error codes for the serve surface. */
+export const SERVE_ERROR_CODES = {
+  PARSE_ERROR: -32700,
+  INVALID_REQUEST: -32600,
+  METHOD_NOT_FOUND: -32601,
+  INVALID_PARAMS: -32602,
+  APPLICATION_ERROR: -32000,
+} as const;
+
 /** Params / results per locked method. */
 
 export type HealthParams = Record<string, never>;

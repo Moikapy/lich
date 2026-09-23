@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { AgentEvent } from "../src/agent/events.js";
 import {
   SERVE_METHODS,
+  SERVE_ERROR_CODES,
   SERVE_NOTIFICATION_EVENT,
   type JsonRpcRequest,
   type ServeEventNotification,
@@ -20,6 +21,16 @@ describe("serve protocol types", () => {
       "prompt.submit",
       "prompt.abort",
     ]);
+  });
+
+  it("locks the serve error codes to JSON-RPC 2.0 values", () => {
+    expect(SERVE_ERROR_CODES).toEqual({
+      PARSE_ERROR: -32700,
+      INVALID_REQUEST: -32600,
+      METHOD_NOT_FOUND: -32601,
+      INVALID_PARAMS: -32602,
+      APPLICATION_ERROR: -32000,
+    });
   });
 
   it("types a health request and event notification", () => {
