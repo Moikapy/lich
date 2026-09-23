@@ -4,6 +4,17 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+/** Default UI surface: packaged/dev file load is always this exact page. */
+const RENDERER_INDEX_PATH = path.resolve(__dirname, "../renderer/index.html");
+
+/** Future plugin/extension pages may register here; empty until needed. */
+function plugin_allowed_file_paths(): readonly string[] {
+  return [];
+}
+
+function allowed_file_paths(): Set<string> {
+  return new Set([RENDERER_INDEX_PATH, ...plugin_allowed_file_paths()]);
+}
 
 function allowed_origins(): Set<string> {
   const origins = new Set<string>();
@@ -20,10 +31,21 @@ function allowed_origins(): Set<string> {
   return origins;
 }
 
+function is_allowed_file_navigation(url: string): boolean {
+  try {
+    const file_path = path.resolve(fileURLToPath(url));
+    return allowed_file_paths().has(file_path);
+  } catch {
+    return false;
+  }
+}
+
 function is_allowed_navigation(url: string): boolean {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol === "file:") return true;
+    if (parsed.protocol === "file:") {
+      return is_allowed_file_navigation(url);
+    }
     return allowed_origins().has(parsed.origin);
   } catch {
     return false;
@@ -54,7 +76,7 @@ function create_window(): void {
   if (dev_url && !app.isPackaged) {
     void win.loadURL(dev_url);
   } else {
-    void win.loadFile(path.join(__dirname, "../renderer/index.html"));
+    void win.loadFile(RENDERER_INDEX_PATH);
   }
 }
 
