@@ -63,3 +63,14 @@ Captured 2026-09-23. CI green at head; fixed items above must not regress.
 | `sessions.ts:147` — dead ENOENT branch (deleted transcript resumed as empty success) | Fixed — root cause was `read_session_messages` swallowing ENOENT into `[]`; the reader now rethrows ENOENT, making the serve read-path branch live → `not_found` (tests: delete-after-create then resume → `-32000 session not found`; store-level rethrow-ENOENT + empty-file→`[]` pins) |
 | `server.ts:131` — `stop()`/`dispose()` race (mid-I/O create/resume can `put()` after `dispose()`, leaking a bag across restarts) | Fixed — server-wide in-flight set tracks per-connection handler chains; `stop()` rejects new upgrades, closes clients, drains in-flight before `dispose()` (test: create held mid-I/O while `stop()` runs; `create_done` strictly before `dispose`) |
 | `sessions.ts:96` — LRU eviction is log-only; should the client learn a bag was evicted? | Kept log-only (decision): bags are an in-memory cache; the documented client-visible behavior is the next `session.clear` / `prompt.submit` (#83) on an evicted id failing `not_found`, and the transcript stays resumable. serve.md now states this explicitly; no notification mechanism invented (matches instructions: no `event` fan-out until needed) |
+
+---
+
+# Round 3 — bot re-review at 19:11Z on `433f295` (2 findings)
+
+Captured 2026-09-23. CI green at head.
+
+| Finding | Disposition |
+| --- | --- |
+| Warning `sessions.ts:170` — resume fork writes an empty transcript; the fork becomes the newest file, so a later `latest` resume (or restart-resume of the fork id) loads `message_count: 0` and hides the source conversation | Fixed — `fork_transcript` copies the source conversation into the fork (`readFile` → `writeFile` flag `ax`, collision-safe) on `session.resume`; the fork is self-contained and resumable (test: fork transcript contains the source messages on disk; a `latest` resume after the fork reloads `message_count: 2`) |
+| Suggestion `agent-loop.md:210` — CLI `--resume` and TUI `/resume` surfaced raw ENOENT (absolute path in the message); only serve rewrote it | Fixed — `read_transcript_or_not_found` helper in `tui/load_resume.ts` (exported, unit-tested) and the same mapping inline in `cli.ts` `run_tui_entry` map read-path ENOENT to stable `session not found (transcript deleted)`; docs updated to describe all three callers mapping ENOENT to stable text (tests: CLI rejects with mapped text and no path/ENOENT in the message via read-spy; helper unit test pins the mapping) |

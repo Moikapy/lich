@@ -4,7 +4,7 @@
  * transcripts stay on disk and can be resumed again.
  */
 import path from "node:path";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import type { Message } from "../providers/types.js";
 import { logger } from "../util/log.js";
 import { is_enoent } from "../util/fs.js";
@@ -61,6 +61,17 @@ function client_error(error: unknown): ServeSessionError {
  */
 async function touch_transcript(file_path: string): Promise<void> {
   await writeFile(file_path, "", { flag: "ax" });
+}
+
+/**
+ * Fork a transcript for `session.resume`: copy the source conversation so the
+ * fork is self-contained (a later `latest` resume, or a restart, reloads the
+ * history instead of an empty file). `ax` fails on collision instead of
+ * truncating an existing transcript.
+ */
+async function fork_transcript(source_path: string, target_path: string): Promise<void> {
+  const raw = await readFile(source_path, "utf8");
+  await writeFile(target_path, raw, { flag: "ax" });
 }
 
 export interface ServeSessionBag {
@@ -163,7 +174,7 @@ export function create_serve_session_store(
       let handle: SessionHandle;
       try {
         handle = await open_session(session_dir, "resume");
-        await touch_transcript(handle.path);
+        await fork_transcript(transcript, handle.path);
       } catch (error) {
         throw client_error(error);
       }

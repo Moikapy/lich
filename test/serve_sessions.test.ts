@@ -1,7 +1,7 @@
 /**
  * Serve session RPC: create / clear / list / resume with isolated history bags.
  */
-import { mkdir, mkdtemp, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, unlink, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolve_session_path } from "../src/session/resolve.js";
@@ -319,6 +319,33 @@ describe("serve session rpc", () => {
     const result = response.result as { resumed_id: string; message_count: number };
     expect(result.message_count).toBe(2);
     expect(result.resumed_id).toBe("mixed-1");
+  });
+
+  it("copies the source conversation into the resume fork (latest still sees it)", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-fork-copy"), "sessions");
+    await write_transcript(session_dir, "src-conv-1", [
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]);
+    const context = rpc_context(session_dir);
+    const fork = (await rpc(context, "session.resume", { id: "src-conv-1" })).result as {
+      session_id: string;
+      resumed_id: string;
+      message_count: number;
+    };
+
+    // The fork transcript carries the source conversation on disk…
+    const fork_raw = await readFile(path.join(session_dir, `${fork.session_id}.jsonl`), "utf8");
+    expect(fork_raw).toContain("question");
+    expect(fork_raw).toContain("answer");
+
+    // …so a `latest` resume (or a restart) reloads the history, not an empty file.
+    const latest = (await rpc(context, "session.resume", { id: "latest" }, 2)).result as {
+      message_count: number;
+      resumed_id: string;
+    };
+    expect(latest.resumed_id).toBe(fork.session_id);
+    expect(latest.message_count).toBe(2);
   });
 });
 

@@ -64,9 +64,11 @@ transcript is untouched). `session.list` / `session.resume` reuse
 [`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
 semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds
 history from disk and opens a fresh `SessionHandle` for later `prompt.submit`
-(#83) — like CLI `--resume`, each resume forks a new transcript (also created
-eagerly); it does not re-bind the original. A transcript that is deleted
-between resolve and read resumes as `not_found`, never as an empty history.
+(#83) — like CLI `--resume`, each resume forks a new transcript: the fork
+copies the source conversation, so it stays resumable (later `latest` resume,
+or a restart, reloads the history rather than an empty file); it does not
+re-bind the original. A transcript that is deleted between resolve and read
+resumes as `not_found`, never as an empty history.
 `SessionResumeResult.resumed_id` reports which
 transcript was resolved, even for `latest` / prefix resumes.
 
