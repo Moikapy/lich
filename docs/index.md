@@ -41,7 +41,7 @@ One package, four ways to drive the same agent: a one-shot CLI, an interactive c
 
 ## How it works
 
-For the internals — the agent loop, provider failover, tool guardrails, and how to extend each layer — read the architecture track: [overview](architecture/overview.md), [agent loop](architecture/agent-loop.md), [providers](architecture/providers.md), [tools](architecture/tools.md), [plugins](architecture/plugins.md), and [extending](architecture/extending.md).
+For the internals — the agent loop, provider failover, tool guardrails, and how to extend each layer — read the architecture track: [overview](architecture/overview.md), [agent loop](architecture/agent-loop.md), [providers](architecture/providers.md), [tools](architecture/tools.md), [plugins](architecture/plugins.md), [serve](architecture/serve.md), and [extending](architecture/extending.md).
 
 ## 60-second quickstart
 
