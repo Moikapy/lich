@@ -3,6 +3,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
+import { connect as net_connect } from "node:net";
 import { Writable } from "node:stream";
 import WebSocket from "ws";
 import { LICH_VERSION } from "../src/index.js";
@@ -174,6 +175,45 @@ describe("serve websocket transport", () => {
     const boot = await second.start();
     expect(boot.port).toBe(leaked_port);
   });
+
+  it("survives TCP reset of a partial upgrade request", async () => {
+    const server = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      token: "partial-upgrade-token",
+    });
+    servers.push(server);
+    const boot = await server.start();
+
+    const uncaught: Error[] = [];
+    const on_uncaught = (error: Error) => {
+      uncaught.push(error);
+    };
+    process.on("uncaughtException", on_uncaught);
+    try {
+      for (let i = 0; i < 3; i++) {
+        await reset_partial_upgrade(boot.port, boot.token);
+      }
+      // Give any deferred socket error a chance to surface as uncaught.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(uncaught).toEqual([]);
+
+      const result = await rpc_over_ws(boot.port, boot.token, {
+        jsonrpc: "2.0",
+        id: 9,
+        method: "health",
+        params: {},
+      });
+      expect(result).toMatchObject({
+        id: 9,
+        result: { status: "ok", version: expect.any(String) },
+      });
+
+      await expect(server.stop()).resolves.toBeUndefined();
+    } finally {
+      process.off("uncaughtException", on_uncaught);
+    }
+  });
 });
 
 async function rpc_over_ws(
@@ -224,6 +264,37 @@ function open_ws(url: string, headers?: Record<string, string>): Promise<WebSock
     ws.once("error", () => {
       clearTimeout(timer);
       reject(new Error("websocket open failed"));
+    });
+  });
+}
+
+/** Raw TCP probe: upgrade request then RST before handshake completes. */
+function reset_partial_upgrade(port: number, token: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = net_connect({ host: "127.0.0.1", port }, () => {
+      // Full HTTP upgrade headers so the serve upgrade handler runs and attaches
+      // its socket error listener; RST before the WS handshake finishes.
+      socket.write(
+        `GET /?token=${encodeURIComponent(token)} HTTP/1.1\r\n` +
+          `Host: 127.0.0.1:${port}\r\n` +
+          "Upgrade: websocket\r\n" +
+          "Connection: Upgrade\r\n" +
+          "Sec-WebSocket-Version: 13\r\n" +
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+          "\r\n",
+      );
+      socket.resetAndDestroy();
+    });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("partial upgrade reset timeout"));
+    }, 5000);
+    socket.on("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    socket.on("error", () => {
+      // Expected after resetAndDestroy (ECONNRESET on the client side).
     });
   });
 }
