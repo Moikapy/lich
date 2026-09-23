@@ -66,7 +66,7 @@ semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds
 history from disk and opens a fresh `SessionHandle` for later `prompt.submit`
 (#83) — like CLI `--resume`, each resume forks a new transcript; it does not
 re-bind the original. The fork is written from the filtered bag history
-(trailing user already dropped by `read_session_messages`), not a raw byte
+(every trailing user already dropped by `read_session_messages`), not a raw byte
 copy, and the handle is marked seeded so a later `prompt.submit` (#83)
 `recorder.seed` appends only the new turn. A later `latest` resume (or the
 fork id after a restart) reloads that filtered history. A transcript that is

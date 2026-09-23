@@ -209,9 +209,10 @@ JSON-parses leniently, accepts only records with a `kind: "message"`-shaped
 everything else. Missing files rethrow `ENOENT` — callers that resolve the
 path first (CLI `--resume`, TUI `/resume`, serve `session.resume`) map that to
 a stable `session not found` notice instead of Node's raw message (which
-contains the absolute path). A trailing user
-message is dropped so a provider throw or abort-before-turn does not leave
-two consecutive user turns on resume. On resume, raw pre-compress messages
+contains the absolute path). Every trailing user
+message is dropped (repeated failures can stack several) so a provider throw
+or abort-before-turn does not leave consecutive user turns on resume, and a
+re-read of the filtered list is unchanged. On resume, raw pre-compress messages
 are replayed; compression simply re-runs on a later turn.
 
 **Resume (Phase 1 + 2):** `lich --resume <id|latest>` resolves a path with
