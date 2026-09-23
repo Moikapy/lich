@@ -64,6 +64,10 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       });
       wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
       http_server.on("upgrade", (request, socket, head) => {
+        const on_socket_error = () => {
+          socket.destroy();
+        };
+        socket.on("error", on_socket_error);
         // Reject non-loopback Host before the token (DNS-rebinding defense).
         // TODO: Origin allowlist needs an Electron product decision (file:// /
         // app:// / custom protocol) — do not invent a browser Origin policy here.
@@ -78,6 +82,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
           return;
         }
         wss?.handleUpgrade(request, socket, head, (client) => {
+          socket.off("error", on_socket_error);
           attach_client(client, version);
         });
       });
@@ -88,6 +93,8 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
         emit_boot_line(options.boot_stdout, boot);
         return boot;
       } catch (error) {
+        await close_wss(wss);
+        await close_http(http_server);
         http_server = undefined;
         wss = undefined;
         boot = undefined;
@@ -142,7 +149,8 @@ function request_host_loopback(request: IncomingMessage): boolean {
 }
 
 function is_loopback_hostname(hostname: string): boolean {
-  const normalized = hostname.trim().toLowerCase();
+  // WHATWG URL.hostname keeps brackets for IPv6 (`"[::1]"`); strip before compare.
+  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
 }
 

@@ -2,6 +2,7 @@
  * Serve transport tests: loopback WS JSON-RPC, health, and token rejection.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { createServer } from "node:http";
 import { Writable } from "node:stream";
 import WebSocket from "ws";
 import { LICH_VERSION } from "../src/index.js";
@@ -74,6 +75,23 @@ describe("serve websocket transport", () => {
     });
   });
 
+  it("accepts ::1 clients when bound to IPv6 loopback", async () => {
+    const server = create_serve_server({ host: "::1", port: 0, boot_stdout: null });
+    servers.push(server);
+    const boot = await server.start();
+    const result = await rpc_over_ws(
+      boot.port,
+      boot.token,
+      { jsonrpc: "2.0", id: 3, method: "health", params: {} },
+      undefined,
+      "::1",
+    );
+    expect(result).toMatchObject({
+      id: 3,
+      result: { status: "ok", version: expect.any(String) },
+    });
+  });
+
   it("rejects connections without a token", async () => {
     const server = create_serve_server({ port: 0, boot_stdout: null, token: "secret-token-value" });
     servers.push(server);
@@ -118,6 +136,44 @@ describe("serve websocket transport", () => {
       }),
     ).rejects.toThrow(/HTTP 403/);
   });
+
+  it("retries start with EADDRINUSE after a listen failure, not already started", async () => {
+    const holder = createServer();
+    await new Promise<void>((resolve, reject) => {
+      holder.once("error", reject);
+      holder.listen(0, "127.0.0.1", () => resolve());
+    });
+    const occupied = (holder.address() as { port: number }).port;
+    try {
+      const server = create_serve_server({ port: occupied, boot_stdout: null });
+      servers.push(server);
+      await expect(server.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
+      await expect(server.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
+    } finally {
+      await new Promise<void>((resolve) => holder.close(() => resolve()));
+    }
+  });
+
+  it("releases the port when on_listening throws during start", async () => {
+    let leaked_port = 0;
+    const first = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      on_listening: (info) => {
+        leaked_port = info.port;
+        throw new Error("on_listening boom");
+      },
+    });
+    servers.push(first);
+    await expect(first.start()).rejects.toThrow(/on_listening boom/);
+    expect(leaked_port).toBeGreaterThan(0);
+    await first.stop();
+
+    const second = create_serve_server({ port: leaked_port, boot_stdout: null });
+    servers.push(second);
+    const boot = await second.start();
+    expect(boot.port).toBe(leaked_port);
+  });
 });
 
 async function rpc_over_ws(
@@ -125,9 +181,11 @@ async function rpc_over_ws(
   token: string | null,
   request: Record<string, unknown>,
   headers?: Record<string, string>,
+  host: string = "127.0.0.1",
 ): Promise<unknown> {
+  const authority = host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
   const url =
-    token === null ? `ws://127.0.0.1:${port}/` : `ws://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`;
+    token === null ? `ws://${authority}/` : `ws://${authority}/?token=${encodeURIComponent(token)}`;
   const ws = await open_ws(url, headers);
   try {
     return await new Promise((resolve, reject) => {
