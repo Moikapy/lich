@@ -5,6 +5,8 @@ import { resolve_repo_root_from_electron_dir } from "./backend-command.js";
 import { GatewaySession, type GatewayConnectionInfo } from "./gateway-session.js";
 import { assert_gateway_method, is_allowed_sender_url } from "./ipc-policy.js";
 import { read_layout_file, write_layout_file } from "./layout_store.js";
+import { is_allowed_popout_url } from "./popout_allow.js";
+import { start_renderer_server, type RendererServer } from "./renderer_server.js";
 import { spawn_lich_serve, type RunningServe } from "./serve-process.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -51,7 +53,7 @@ function is_allowed_navigation(url: string): boolean {
     if (parsed.protocol === "file:") {
       return is_allowed_file_navigation(url);
     }
-    return allowed_origins().has(parsed.origin);
+    return allowed_origins().has(parsed.origin) || parsed.origin === renderer_origin;
   } catch {
     return false;
   }
@@ -67,6 +69,8 @@ let gateway: GatewaySession | undefined;
 let last_connection_info: GatewayConnectionInfo = { status: "connecting" };
 let on_serve_exit: (() => void) | undefined;
 let work_dir = "";
+let renderer_origin = "";
+let renderer_server: RendererServer | undefined;
 
 function publish_connection(info: GatewayConnectionInfo): void {
   last_connection_info = info;
@@ -75,32 +79,47 @@ function publish_connection(info: GatewayConnectionInfo): void {
   }
 }
 
+function preload_path(): string {
+  return path.join(__dirname, "preload.cjs");
+}
+
+function window_web_prefs() {
+  return {
+    preload: preload_path(),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  };
+}
+
+function attach_popout_handler(win: BrowserWindow): void {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (is_allowed_popout_url(url, renderer_origin) === false) {
+      return { action: "deny" };
+    }
+    return {
+      action: "allow",
+      overrideBrowserWindowOptions: {
+        webPreferences: window_web_prefs(),
+      },
+    };
+  });
+}
+
 function create_window(): BrowserWindow {
   const win = new BrowserWindow({
     width: 960,
     height: 640,
     title: "ossuary",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: window_web_prefs(),
   });
-
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  attach_popout_handler(win);
   win.webContents.on("will-navigate", (event, url) => {
     if (!is_allowed_navigation(url)) {
       event.preventDefault();
     }
   });
-
-  const dev_url = process.env.VITE_DEV_SERVER_URL;
-  if (dev_url && !app.isPackaged) {
-    void win.loadURL(dev_url);
-  } else {
-    void win.loadFile(RENDERER_INDEX_PATH);
-  }
+  void win.loadURL(renderer_origin);
   return win;
 }
 
@@ -208,8 +227,18 @@ function stop_backend(): void {
   running_serve = undefined;
 }
 
+async function resolve_renderer_origin(): Promise<string> {
+  const dev_url = process.env.VITE_DEV_SERVER_URL;
+  if (dev_url) {
+    return dev_url.replace(/\/$/, "");
+  }
+  renderer_server = await start_renderer_server(path.join(__dirname, "../renderer"));
+  return renderer_server.origin;
+}
+
 app.whenReady().then(async () => {
   register_ipc();
+  renderer_origin = await resolve_renderer_origin();
   main_window = create_window();
   try {
     await start_backend();
@@ -231,6 +260,8 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   stop_backend();
+  void renderer_server?.close();
+  renderer_server = undefined;
 });
 
 app.on("window-all-closed", () => {
