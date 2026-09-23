@@ -27,6 +27,7 @@ export default defineConfig({
           { text: 'Getting started', link: '/getting-started' },
           { text: 'CLI reference', link: '/user-guide/cli' },
           { text: 'TUI guide', link: '/user-guide/tui' },
+          { text: 'Ossuary guide', link: '/user-guide/ossuary' },
           { text: 'Gateway guide', link: '/user-guide/gateway' },
           { text: 'Library guide', link: '/user-guide/library' },
           { text: 'Plugins guide', link: '/user-guide/plugins' },
