@@ -107,6 +107,17 @@ describe("serve websocket transport", () => {
   it("refuses non-loopback hosts", () => {
     expect(() => create_serve_server({ host: "0.0.0.0", boot_stdout: null })).toThrow(/loopback/);
   });
+
+  it("rejects upgrades with a non-loopback Host header", async () => {
+    const server = create_serve_server({ port: 0, boot_stdout: null, token: "host-check-token" });
+    servers.push(server);
+    const boot = await server.start();
+    await expect(
+      open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`, {
+        Host: "evil.example",
+      }),
+    ).rejects.toThrow(/HTTP 403/);
+  });
 });
 
 async function rpc_over_ws(

@@ -2,16 +2,17 @@
  * Loopback WebSocket JSON-RPC transport for `lich serve`.
  * Token-gated upgrade; emits one machine-readable boot JSON line.
  */
-import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
+import { LICH_VERSION } from "../version.js";
 import { handle_serve_rpc_message } from "./rpc.js";
 
 export const DEFAULT_SERVE_HOST = "127.0.0.1";
 export const DEFAULT_SERVE_PORT = 0;
 const TOKEN_BYTES = 24;
+const MAX_PAYLOAD_BYTES = 1 << 20;
+const CLOSE_GRACE_MS = 1000;
 
 export interface ServeBootInfo {
   port: number;
@@ -25,7 +26,7 @@ export interface ServeOptions {
   port?: number;
   /** Shared secret; generated when omitted. */
   token?: string;
-  /** Reported by `health`; defaults to package.json version. */
+  /** Reported by `health`; defaults to `LICH_VERSION`. */
   version?: string;
   /** Boot JSON line sink. Default `process.stdout`; `null` skips emission. */
   boot_stdout?: NodeJS.WritableStream | null;
@@ -42,7 +43,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   const host = options.host ?? DEFAULT_SERVE_HOST;
   const want_port = options.port ?? DEFAULT_SERVE_PORT;
   const token = options.token ?? randomBytes(TOKEN_BYTES).toString("hex");
-  const version = options.version ?? read_package_version();
+  const version = options.version ?? LICH_VERSION;
   assert_loopback_host(host);
 
   let http_server: Server | undefined;
@@ -61,8 +62,16 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
         res.statusCode = 404;
         res.end();
       });
-      wss = new WebSocketServer({ noServer: true });
+      wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
       http_server.on("upgrade", (request, socket, head) => {
+        // Reject non-loopback Host before the token (DNS-rebinding defense).
+        // TODO: Origin allowlist needs an Electron product decision (file:// /
+        // app:// / custom protocol) — do not invent a browser Origin policy here.
+        if (request_host_loopback(request) !== true) {
+          socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
         if (request_token_ok(request, token) !== true) {
           socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
           socket.destroy();
@@ -72,17 +81,22 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
           attach_client(client, version);
         });
       });
-      const port = await listen_http(http_server, host, want_port);
-      boot = { port, token };
-      options.on_listening?.(boot);
-      emit_boot_line(options.boot_stdout, boot);
-      return boot;
+      try {
+        const port = await listen_http(http_server, host, want_port);
+        boot = { port, token };
+        options.on_listening?.(boot);
+        emit_boot_line(options.boot_stdout, boot);
+        return boot;
+      } catch (error) {
+        http_server = undefined;
+        wss = undefined;
+        boot = undefined;
+        throw error;
+      }
     },
     stop: async () => {
       const sockets = wss === undefined ? [] : [...wss.clients];
-      for (const client of sockets) {
-        client.close();
-      }
+      await Promise.all(sockets.map((client) => close_client_with_grace(client)));
       await close_wss(wss);
       wss = undefined;
       await close_http(http_server);
@@ -114,13 +128,22 @@ function raw_data_to_string(data: RawData): string {
   return Buffer.from(data).toString("utf8");
 }
 
-function read_package_version(): string {
-  const pkg_path = fileURLToPath(new URL("../../package.json", import.meta.url));
-  const pkg = JSON.parse(readFileSync(pkg_path, "utf8")) as { version?: unknown };
-  if (typeof pkg.version !== "string" || pkg.version.length === 0) {
-    throw new Error("package.json is missing version");
+function request_host_loopback(request: IncomingMessage): boolean {
+  const raw = request.headers.host;
+  if (typeof raw !== "string" || raw.length === 0) {
+    return false;
   }
-  return pkg.version;
+  try {
+    const { hostname } = new URL(`http://${raw}`);
+    return is_loopback_hostname(hostname);
+  } catch {
+    return false;
+  }
+}
+
+function is_loopback_hostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
 }
 
 function request_token_ok(request: IncomingMessage, expected: string): boolean {
@@ -158,8 +181,7 @@ function tokens_equal(a: string, b: string): boolean {
 }
 
 function assert_loopback_host(host: string): void {
-  const normalized = host.trim().toLowerCase();
-  if (normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost") {
+  if (is_loopback_hostname(host)) {
     return;
   }
   throw new Error(`lich serve binds loopback only (got ${host})`);
@@ -178,8 +200,12 @@ function emit_boot_line(
 
 function listen_http(server: Server, host: string, port: number): Promise<number> {
   return new Promise((resolve, reject) => {
-    server.once("error", reject);
+    const on_error = (error: Error) => {
+      reject(error);
+    };
+    server.once("error", on_error);
     server.listen(port, host, () => {
+      server.off("error", on_error);
       const bound = (server.address() as { port?: number } | null)?.port;
       if (bound === undefined) {
         reject(new Error("lich serve failed to resolve bound port"));
@@ -187,6 +213,24 @@ function listen_http(server: Server, host: string, port: number): Promise<number
       }
       resolve(bound);
     });
+  });
+}
+
+function close_client_with_grace(client: WebSocket): Promise<void> {
+  return new Promise((resolve) => {
+    if (client.readyState === client.CLOSED) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      client.terminate();
+      resolve();
+    }, CLOSE_GRACE_MS);
+    client.once("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    client.close();
   });
 }
 

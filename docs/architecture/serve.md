@@ -70,8 +70,15 @@ semantics without embedding `Agent` in Electron.
 
 - Bind `127.0.0.1` only (or other loopback aliases); port `0` picks an ephemeral port.
 - On listen, emit **one** stdout JSON line: `{"port":…,"token":…}` for Electron to parse.
-- WebSocket upgrade requires the token via `?token=` or `x-lich-token` (mismatch → 401).
-- `health` returns `{ status: "ok", version }` (`LICH_VERSION` / package version).
+- Upgrade checks, in order:
+  1. **`Host`** must be a loopback name (`127.0.0.1`, `localhost`, `::1`, with optional
+     port) — otherwise **403** (DNS-rebinding defense).
+  2. **Token** via query `?token=` or header **`x-lich-token`** (preferred for clients
+     that should not put secrets in URLs / logs) — mismatch or missing → **401**.
+- Origin allowlisting is deferred until Electron’s page origin policy is decided;
+  do not assume `file://` / `app://` behavior here.
+- Frame size capped at ~1 MiB (`maxPayload`).
+- `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
 
 ## Not in this layer yet
 
