@@ -56,19 +56,27 @@ allows omitting `params`; serve handlers accept that omission the same as `{}`.
 `prompt.*` may extend this map in later issues (#83); clients must not invent
 method names outside the locked set above until those land.
 
-`session.create` opens one `SessionHandle` and an empty in-memory history bag.
+`session.create` opens one `SessionHandle` and an empty in-memory history bag,
+and eagerly creates the (empty) `.jsonl` transcript so `session.list` sees the
+new id immediately — before any prompt appends to it.
 `session.clear` resets that bag's in-memory history (handle stays; the on-disk
 transcript is untouched). `session.list` / `session.resume` reuse
 [`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
 semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds
 history from disk and opens a fresh `SessionHandle` for later `prompt.submit`
-(#83) — like CLI `--resume`, each resume forks a new transcript; it does not
-re-bind the original. `SessionResumeResult.resumed_id` reports which
+(#83) — like CLI `--resume`, each resume forks a new transcript (also created
+eagerly); it does not re-bind the original. A transcript that is deleted
+between resolve and read resumes as `not_found`, never as an empty history.
+`SessionResumeResult.resumed_id` reports which
 transcript was resolved, even for `latest` / prefix resumes.
 
 In-memory bags are capped (LRU, default 32 via `max_session_bags`): the
-oldest is evicted first, and `ServeServer.stop()` drops all of them. Evicted
-transcripts stay on disk and can be resumed again.
+oldest is evicted first, and `ServeServer.stop()` drops all of them — after
+draining in-flight RPC handlers, so a mid-I/O `session.create` /
+`session.resume` cannot resurrect a bag after shutdown. Eviction is log-only
+— there is no client notification; a client operating on an evicted id learns
+about it from the next `session.clear` (or #83 `prompt.submit`) failing with
+`not_found`. Evicted transcripts stay on disk and can be resumed again.
 
 ## Notifications
 

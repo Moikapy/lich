@@ -1,7 +1,7 @@
 /**
  * Serve transport tests: loopback WS JSON-RPC, health, and token rejection.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as net_connect } from "node:net";
@@ -14,6 +14,61 @@ import { create_serve_server, type ServeServer } from "../src/serve/server.js";
 import { create_serve_session_store } from "../src/serve/sessions.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
+/**
+ * File-wide spy on the session store: records create/dispose ordering and can
+ * gate `create` so a test can hold an RPC handler mid-I/O while stop() runs.
+ */
+const serve_store_spy = vi.hoisted(() => {
+  type ReleaseFn = () => void;
+  const state = {
+    events: [] as string[],
+    gate: null as Promise<void> | null,
+    release_gate: null as ReleaseFn | null,
+    reset(): void {
+      state.events.length = 0;
+      state.gate = null;
+      state.release_gate = null;
+    },
+    /** Clear recorded events and hold the next create until released. */
+    arm(): void {
+      state.reset();
+      state.hold();
+    },
+    /** Hold the next (and later) creates until `release_gate` is called. */
+    hold(): void {
+      state.gate = new Promise<void>((resolve) => {
+        state.release_gate = resolve;
+      });
+    },
+  };
+  return state;
+});
+
+vi.mock("../src/serve/sessions.js", async (import_original) => {
+  const actual = await import_original<typeof import("../src/serve/sessions.js")>();
+  const wrap_store = (store: ReturnType<typeof actual.create_serve_session_store>) => ({
+    ...store,
+    create: async (params: Parameters<typeof store.create>[0]) => {
+      serve_store_spy.events.push("create_start");
+      if (serve_store_spy.gate !== null) {
+        await serve_store_spy.gate;
+      }
+      const result = await store.create(params);
+      serve_store_spy.events.push("create_done");
+      return result;
+    },
+    dispose: () => {
+      serve_store_spy.events.push("dispose");
+      store.dispose();
+    },
+  });
+  return {
+    ...actual,
+    create_serve_session_store: (dir: string, max_bags?: number) =>
+      wrap_store(actual.create_serve_session_store(dir, max_bags)),
+  };
+});
+
 const servers: ServeServer[] = [];
 const created: string[] = [];
 
@@ -25,6 +80,7 @@ async function make_temp_dir(prefix: string): Promise<string> {
 }
 
 afterEach(async () => {
+  serve_store_spy.reset();
   while (servers.length > 0) {
     const server = servers.pop();
     await server?.stop();
@@ -278,6 +334,35 @@ describe("serve websocket transport", () => {
       { role: "user", content: "hi" },
       { role: "assistant", content: "hello" },
     ]);
+  });
+
+  it("drains a create held mid-I/O before stop() disposes the store", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-ws-drain"), "sessions");
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir });
+    servers.push(server);
+    const boot = await server.start();
+
+    serve_store_spy.arm();
+    const url = `ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`;
+    const ws = await open_ws(url);
+    try {
+      ws.send(
+        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: { source: "ossuary" } }),
+      );
+      // Wait until the handler is parked inside create() before stopping.
+      await vi.waitFor(() => {
+        expect(serve_store_spy.events).toContain("create_start");
+      });
+
+      const stopped = server.stop();
+      serve_store_spy.release_gate?.();
+      await stopped;
+      // The bag was put strictly before dispose dropped the store; the reply
+      // itself may be lost to the concurrent close handshake (not asserted).
+      expect(serve_store_spy.events).toEqual(["create_start", "create_done", "dispose"]);
+    } finally {
+      ws.close();
+    }
   });
 
   it("replies to pipelined frames in order, per connection", async () => {

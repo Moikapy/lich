@@ -50,3 +50,16 @@ Captured 2026-09-23. Head at capture: `3953e58` (fix commit on `410fb20`).
 - On-disk `clear` contract (#83) — finding 5
 - `config.session_dir` wiring (#84) — finding 7 / bot session_dir
 - Large-transcript streaming (#83, if needed)
+
+---
+
+# Round 2 — bot re-review at 18:03Z on `d2ea008` (4 threads)
+
+Captured 2026-09-23. CI green at head; fixed items above must not regress.
+
+| Thread | Disposition |
+| --- | --- |
+| `sessions.ts:110` — create/list visibility gap (`.jsonl` only exists after first append; list can't see fresh create/resume-fork ids) | Fixed — serve eagerly touches the transcript (`writeFile` flag `ax`, collision-safe) on `create` and on `resume`'s fork handle; `read_session_messages` parses an empty file to `[]`, so empty transcripts list and resume cleanly (tests: eager-create visible in `session.list`; resume of a just-created empty transcript forks + lists with `message_count` 0) |
+| `sessions.ts:147` — dead ENOENT branch (deleted transcript resumed as empty success) | Fixed — root cause was `read_session_messages` swallowing ENOENT into `[]`; the reader now rethrows ENOENT, making the serve read-path branch live → `not_found` (tests: delete-after-create then resume → `-32000 session not found`; store-level rethrow-ENOENT + empty-file→`[]` pins) |
+| `server.ts:131` — `stop()`/`dispose()` race (mid-I/O create/resume can `put()` after `dispose()`, leaking a bag across restarts) | Fixed — server-wide in-flight set tracks per-connection handler chains; `stop()` rejects new upgrades, closes clients, drains in-flight before `dispose()` (test: create held mid-I/O while `stop()` runs; `create_done` strictly before `dispose`) |
+| `sessions.ts:96` — LRU eviction is log-only; should the client learn a bag was evicted? | Kept log-only (decision): bags are an in-memory cache; the documented client-visible behavior is the next `session.clear` / `prompt.submit` (#83) on an evicted id failing `not_found`, and the transcript stays resumable. serve.md now states this explicitly; no notification mechanism invented (matches instructions: no `event` fan-out until needed) |

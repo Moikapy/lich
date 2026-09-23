@@ -1,13 +1,35 @@
 /**
  * Serve session RPC: create / clear / list / resume with isolated history bags.
  */
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolve_session_path } from "../src/session/resolve.js";
 import { handle_serve_rpc_message, type ServeRpcContext } from "../src/serve/rpc.js";
 import { create_serve_session_store } from "../src/serve/sessions.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
+
+/**
+ * When armed, `read_session_messages` throws ENOENT so a test can pin the
+ * serve read-path branch (transcript vanishing between resolve and read)
+ * without racing real filesystem interleaving. Off → real reader.
+ */
+const read_spy = vi.hoisted(() => ({ fail_read_enoent: false }));
+
+vi.mock("../src/session/store.js", async (import_original) => {
+  const actual = await import_original<typeof import("../src/session/store.js")>();
+  return {
+    ...actual,
+    read_session_messages: (file_path: string) => {
+      if (read_spy.fail_read_enoent === true) {
+        return Promise.reject(
+          Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+        );
+      }
+      return actual.read_session_messages(file_path);
+    },
+  };
+});
 
 const created: string[] = [];
 
@@ -63,6 +85,20 @@ describe("serve session rpc", () => {
     expect(bag?.history).toEqual([]);
     expect(bag?.source).toBe("ossuary");
     expect(bag?.handle.id).toBe(result.session_id);
+  });
+
+  it("creates the transcript eagerly so session.list sees it before any append", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-create-visible"), "sessions");
+    const context = rpc_context(session_dir);
+    const response = await rpc(context, "session.create", { source: "ossuary" });
+    const session_id = (response.result as { session_id: string }).session_id;
+
+    const info = await stat(path.join(session_dir, `${session_id}.jsonl`));
+    expect(info.isFile()).toBe(true);
+
+    const listed = await rpc(context, "session.list", {});
+    const ids = (listed.result as { sessions: Array<{ id: string }> }).sessions.map((s) => s.id);
+    expect(ids).toContain(session_id);
   });
 
   it("isolates history per session_id and clear resets only that bag", async () => {
@@ -138,6 +174,53 @@ describe("serve session rpc", () => {
     const result = response.result as { session_id: string; resumed_id: string; message_count: number };
     expect(result.resumed_id).toBe("src-1");
     expect(context.sessions.get(result.session_id)?.source).toBe("ossuary");
+  });
+
+  it("resumes a just-created empty transcript (fork id lists immediately, message_count 0)", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-resume-empty"), "sessions");
+    const context = rpc_context(session_dir);
+    const created = await rpc(context, "session.create", { source: "ossuary" });
+    const original_id = (created.result as { session_id: string }).session_id;
+
+    const response = await rpc(context, "session.resume", { id: original_id });
+    const result = response.result as { session_id: string; resumed_id: string; message_count: number };
+    expect(response.error).toBeUndefined();
+    expect(result.message_count).toBe(0);
+    expect(result.resumed_id).toBe(original_id);
+    expect(result.session_id).not.toBe(original_id);
+
+    const info = await stat(path.join(session_dir, `${result.session_id}.jsonl`));
+    expect(info.isFile()).toBe(true);
+    const listed = await rpc(context, "session.list", {});
+    const ids = (listed.result as { sessions: Array<{ id: string }> }).sessions.map((s) => s.id);
+    expect(ids).toContain(result.session_id);
+  });
+
+  it("rejects resume of a transcript deleted after create with not_found, not an empty success", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-resume-deleted"), "sessions");
+    const context = rpc_context(session_dir);
+    const created = await rpc(context, "session.create", { source: "ossuary" });
+    const session_id = (created.result as { session_id: string }).session_id;
+    await unlink(path.join(session_dir, `${session_id}.jsonl`));
+
+    const response = await rpc(context, "session.resume", { id: session_id });
+    expect(response.error).toMatchObject({ code: -32000, message: "session not found" });
+  });
+
+  it("maps a transcript vanishing between resolve and read to not_found (read-path ENOENT)", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-resume-raced"), "sessions");
+    await write_transcript(session_dir, "raced-1", [
+      { role: "user", content: "x" },
+      { role: "assistant", content: "y" },
+    ]);
+    const context = rpc_context(session_dir);
+    read_spy.fail_read_enoent = true;
+    try {
+      const response = await rpc(context, "session.resume", { id: "raced-1" });
+      expect(response.error).toMatchObject({ code: -32000, message: "session not found" });
+    } finally {
+      read_spy.fail_read_enoent = false;
+    }
   });
 
   it("keeps prompt.submit unimplemented (-32601)", async () => {

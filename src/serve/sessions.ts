@@ -4,6 +4,7 @@
  * transcripts stay on disk and can be resumed again.
  */
 import path from "node:path";
+import { writeFile } from "node:fs/promises";
 import type { Message } from "../providers/types.js";
 import { logger } from "../util/log.js";
 import { is_enoent } from "../util/fs.js";
@@ -52,6 +53,14 @@ function client_error(error: unknown): ServeSessionError {
       : "internal";
   logger.warn("serve session operation failed", error);
   return new ServeSessionError(kind, CLIENT_MESSAGES[kind]);
+}
+
+/**
+ * Eagerly create the transcript file so `session.list` sees a fresh id before
+ * its first append. `ax` fails on collision instead of truncating a transcript.
+ */
+async function touch_transcript(file_path: string): Promise<void> {
+  await writeFile(file_path, "", { flag: "ax" });
 }
 
 export interface ServeSessionBag {
@@ -104,6 +113,7 @@ export function create_serve_session_store(
       let handle: SessionHandle;
       try {
         handle = await open_session(session_dir, params.label);
+        await touch_transcript(handle.path);
       } catch (error) {
         throw client_error(error);
       }
@@ -153,6 +163,7 @@ export function create_serve_session_store(
       let handle: SessionHandle;
       try {
         handle = await open_session(session_dir, "resume");
+        await touch_transcript(handle.path);
       } catch (error) {
         throw client_error(error);
       }

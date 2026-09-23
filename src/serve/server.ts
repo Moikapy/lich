@@ -62,6 +62,9 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   let http_server: Server | undefined;
   let wss: WebSocketServer | undefined;
   let boot: ServeBootInfo | undefined;
+  let stopping = false;
+  /** Enqueued handler chains; stop() drains this before sessions.dispose(). */
+  const inflight = new Set<Promise<void>>();
 
   return {
     get boot() {
@@ -74,6 +77,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       if (http_server !== undefined) {
         throw new Error("lich serve already started");
       }
+      stopping = false;
       http_server = createServer((_req, res) => {
         res.statusCode = 404;
         res.end();
@@ -100,9 +104,16 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
           socket.destroy();
           return;
         }
+        if (stopping === true) {
+          // Graceful-shutdown race: stop() drains in-flight RPC; do not accept
+          // a new client whose handlers could put() after dispose().
+          socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
         wss?.handleUpgrade(request, socket, head, (client) => {
           socket.off("error", on_socket_error);
-          attach_client(client, version, sessions);
+          attach_client(client, version, sessions, inflight);
         });
       });
       try {
@@ -121,28 +132,51 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       }
     },
     stop: async () => {
+      // Reject new upgrades while stopping; then close clients so no new
+      // frames are enqueued, and drain in-flight handlers before dispose() —
+      // a mid-I/O create/resume must not put() a bag after the store is
+      // dropped (leak across restarts).
+      stopping = true;
       const sockets = wss === undefined ? [] : [...wss.clients];
       await Promise.all(sockets.map((client) => close_client_with_grace(client)));
       await close_wss(wss);
       wss = undefined;
       await close_http(http_server);
       http_server = undefined;
+      while (inflight.size > 0) {
+        await Promise.allSettled(inflight);
+      }
       boot = undefined;
       sessions.dispose();
     },
   };
 }
 
-function attach_client(client: WebSocket, version: string, sessions: ServeSessionStore): void {
+/**
+ * Per-connection handler chain plus a server-wide in-flight set: stop() closes
+ * clients first, then drains this set so no handler runs after dispose().
+ */
+function attach_client(
+  client: WebSocket,
+  version: string,
+  sessions: ServeSessionStore,
+  inflight: Set<Promise<void>>,
+): void {
   // Serialize frames per connection: pipelined requests get in-order replies,
   // and the tail catch keeps any rejection from becoming an unhandled one.
   let tail: Promise<void> = Promise.resolve();
   client.on("message", (data) => {
-    tail = tail
+    const chain = tail
       .then(() => handle_client_message(client, data, version, sessions))
       .catch((error: unknown) => {
         logger.warn("serve client message handling failed", error);
       });
+    tail = chain;
+    // Track the exact chain (not the mutable tail) so stop() drains this one.
+    inflight.add(chain);
+    void chain.then(() => {
+      inflight.delete(chain);
+    });
   });
 }
 
