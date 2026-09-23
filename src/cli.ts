@@ -22,6 +22,7 @@ import {
 } from "./cli_config.js";
 import { run_mcp } from "./cli_mcp.js";
 import { empty_mcp_flags, take_mcp_flag, type McpCliFlags } from "./cli_mcp_flags.js";
+import { package_root_from_module_url, run_ossuary } from "./cli_ossuary.js";
 import { run_update } from "./cli_update.js";
 import type { Message } from "./providers/types.js";
 import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
@@ -67,6 +68,7 @@ function usage_text(): string {
     "  lich chat              interactive chat (commands: /exit, /quit)",
     "  lich tui               interactive terminal UI (ink)",
     "  lich serve             headless WebSocket JSON-RPC agent (loopback)",
+    "  lich ossuary           Electron desktop shell (requires apps/ossuary)",
     "  lich gateway <plat..>  messaging gateway (webhook|telegram|discord|twitch)",
     "  lich config            print a starter config template (save as .lich/config.json)",
     "  lich update            install a newer @moikapy/lich from npm, if one exists",
@@ -122,7 +124,8 @@ function non_tui_resume_mode(first: string | undefined): string | undefined {
     first === "update" ||
     first === "chat" ||
     first === "gateway" ||
-    first === "serve"
+    first === "serve" ||
+    first === "ossuary"
   ) {
     return first;
   }
@@ -680,6 +683,12 @@ export async function run_cli(argv: string[]): Promise<number> {
       throw new Error("serve takes no arguments");
     }
     return run_serve_entry(build_config_for(options, first), options.serve_flags);
+  }
+  if (first === "ossuary") {
+    if (options.positionals.length > 1) {
+      throw new Error("ossuary takes no arguments");
+    }
+    return run_ossuary(package_root_from_module_url(import.meta.url), work_dir_of(options));
   }
   return run_one_shot(build_config_for(options, "one-shot"), options.positionals.join(" "));
 }
