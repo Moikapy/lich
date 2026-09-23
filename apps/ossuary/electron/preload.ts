@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld("ossuary", {
     ipcRenderer.invoke("ossuary:get-connection") as Promise<OssuaryConnectionInfo>,
   requestGateway: (method: string, params?: Record<string, unknown>): Promise<unknown> =>
     ipcRenderer.invoke("ossuary:request-gateway", method, params ?? {}) as Promise<unknown>,
+  loadLayout: (): Promise<unknown | null> =>
+    ipcRenderer.invoke("ossuary:load-layout") as Promise<unknown | null>,
+  saveLayout: (layout: unknown): Promise<void> =>
+    ipcRenderer.invoke("ossuary:save-layout", layout) as Promise<void>,
   onConnection: (handler: ConnectionHandler): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, info: OssuaryConnectionInfo): void => {
       handler(info);
