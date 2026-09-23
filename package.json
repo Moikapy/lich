@@ -39,7 +39,9 @@
     "release:package": "bun scripts/release.ts",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "ossuary": "bun run --cwd apps/ossuary start",
+    "ossuary:dev": "bun run --cwd apps/ossuary dev"
   },
   "dependencies": {
     "ink": "^6.0.0",

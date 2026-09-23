@@ -1,0 +1,30 @@
+:root {
+  color-scheme: light dark;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: #111;
+  color: #eee;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+.hello {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.hello h1 {
+  margin: 0;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+}
