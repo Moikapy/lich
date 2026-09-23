@@ -255,4 +255,76 @@ describe("read_session_messages resume hygiene", () => {
     const messages = await read_session_messages(handle.path);
     expect(messages.map((message) => message.role)).toEqual(["system"]);
   });
+
+  it("fills tool results missing after a crash mid tool call", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "tools");
+    await handle.append({
+      ts: "2026-01-01T00:00:00.000Z",
+      kind: "message",
+      message: { role: "user", content: "run both" },
+    });
+    await handle.append({
+      ts: "2026-01-01T00:00:01.000Z",
+      kind: "message",
+      message: {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { id: "c1", name: "terminal", args: { command: "echo a" } },
+          { id: "c2", name: "terminal", args: { command: "echo b" } },
+        ],
+      },
+    });
+    await handle.append({
+      ts: "2026-01-01T00:00:02.000Z",
+      kind: "message",
+      message: { role: "tool", tool_call_id: "c1", name: "terminal", content: "a" },
+    });
+    const messages = await read_session_messages(handle.path);
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool"]);
+    const repaired = messages[3];
+    expect(repaired).toMatchObject({
+      role: "tool",
+      tool_call_id: "c2",
+      name: "terminal",
+      is_error: true,
+      content: JSON.stringify({ ok: false, output: "", error: "cancelled" }),
+    });
+    expect(messages[2]).toMatchObject({ role: "tool", tool_call_id: "c1", content: "a" });
+  });
+
+  it("leaves a complete tool exchange unchanged", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "complete");
+    await handle.append({
+      ts: "2026-01-01T00:00:00.000Z",
+      kind: "message",
+      message: {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: "c1", name: "read_file", args: { path: "a.txt" } }],
+      },
+    });
+    await handle.append({
+      ts: "2026-01-01T00:00:01.000Z",
+      kind: "message",
+      message: { role: "tool", tool_call_id: "c1", name: "read_file", content: "body" },
+    });
+    await handle.append({
+      ts: "2026-01-01T00:00:02.000Z",
+      kind: "message",
+      message: { role: "assistant", content: "done" },
+    });
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: "c1", name: "read_file", args: { path: "a.txt" } }],
+      },
+      { role: "tool", tool_call_id: "c1", name: "read_file", content: "body" },
+      { role: "assistant", content: "done" },
+    ]);
+  });
 });

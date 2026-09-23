@@ -5,7 +5,8 @@
 import { randomBytes } from "node:crypto";
 import { access, appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { Message } from "../providers/types.js";
+import { tool_message_from_result } from "../agent/loop.js";
+import type { Message, ToolCall } from "../providers/types.js";
 import { safe_json_parse, safe_stringify } from "../util/json.js";
 
 export interface SessionRecord {
@@ -79,6 +80,55 @@ function is_message(value: unknown): value is Message {
   return typeof role === "string" && MESSAGE_ROLES.has(role);
 }
 
+/** Crash between llm_end and tool_call_end: tool_use with no result breaks the next provider call. */
+function close_dangling_tool_calls(messages: readonly Message[]): Message[] {
+  const closed: Message[] = [];
+  let index = 0;
+  while (index < messages.length) {
+    const message = messages[index];
+    if (message === undefined) {
+      break;
+    }
+    closed.push(message);
+    index += 1;
+    const calls = message.role === "assistant" ? message.tool_calls : undefined;
+    if (calls === undefined || calls.length === 0) {
+      continue;
+    }
+    const seen = collect_following_tool_ids(messages, index, closed);
+    index += seen.consumed;
+    append_missing_tool_results(calls, seen.ids, closed);
+  }
+  return closed;
+}
+
+function collect_following_tool_ids(
+  messages: readonly Message[],
+  start: number,
+  closed: Message[],
+): { ids: Set<string>; consumed: number } {
+  const ids = new Set<string>();
+  let consumed = 0;
+  while (start + consumed < messages.length && messages[start + consumed]?.role === "tool") {
+    const tool_message = messages[start + consumed];
+    if (tool_message?.role === "tool") {
+      ids.add(tool_message.tool_call_id);
+      closed.push(tool_message);
+    }
+    consumed += 1;
+  }
+  return { ids, consumed };
+}
+
+function append_missing_tool_results(calls: readonly ToolCall[], seen: Set<string>, closed: Message[]): void {
+  for (const call of calls) {
+    if (seen.has(call.id) === true) {
+      continue;
+    }
+    closed.push(tool_message_from_result(call, { ok: false, output: "", error: "cancelled" }));
+  }
+}
+
 export async function read_session_messages(file_path: string): Promise<Message[]> {
   let raw: string;
   try {
@@ -93,11 +143,12 @@ export async function read_session_messages(file_path: string): Promise<Message[
       messages.push(record.message);
     }
   }
+  const closed = close_dangling_tool_calls(messages);
   // Provider throw / abort-before-turn can leave a dangling user seed with no
   // assistant reply. Drop it so resume does not start with two consecutive users.
-  const last = messages.at(-1);
+  const last = closed.at(-1);
   if (last?.role === "user") {
-    messages.pop();
+    closed.pop();
   }
-  return messages;
+  return closed;
 }
