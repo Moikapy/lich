@@ -158,8 +158,14 @@ async function dispatch_session_resume(
   if (resume_id === undefined) {
     return error_response(id, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params");
   }
+  const source = read_optional_string(params, "source");
+  if (source === null) {
+    return error_response(id, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params");
+  }
   try {
-    const result = await sessions.resume({ id: resume_id });
+    const result = await sessions.resume(
+      source === undefined ? { id: resume_id } : { id: resume_id, source },
+    );
     return { jsonrpc: "2.0", id: id as JsonRpcId, result };
   } catch (error) {
     return error_response(id, SERVE_ERROR_CODES.APPLICATION_ERROR, error_message(error));
@@ -220,7 +226,7 @@ function parse_session_create(
   if (body.label === undefined) {
     return { source: body.source };
   }
-  if (typeof body.label !== "string") {
+  if (typeof body.label !== "string" || body.label.length === 0) {
     return undefined;
   }
   return { source: body.source, label: body.label };
@@ -248,6 +254,21 @@ function read_string_field(params: unknown, key: string): string | undefined {
   }
   const value = (params as Record<string, unknown>)[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Optional string field: `undefined` when absent, error when present but empty/non-string. */
+function read_optional_string(params: unknown, key: string): string | undefined | null {
+  if (typeof params !== "object" || params === null || Array.isArray(params)) {
+    return null;
+  }
+  const value = (params as Record<string, unknown>)[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  return value;
 }
 
 function is_empty_params(params: unknown): boolean {

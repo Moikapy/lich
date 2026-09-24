@@ -255,4 +255,24 @@ describe("read_session_messages resume hygiene", () => {
     const messages = await read_session_messages(handle.path);
     expect(messages.map((message) => message.role)).toEqual(["system"]);
   });
+
+  it("drops every trailing user message left by repeated failures", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "dangling-many");
+    const roles_and_content: Array<["user" | "assistant", string]> = [
+      ["user", "question"],
+      ["assistant", "answer"],
+      ["user", "unanswered-1"],
+      ["user", "unanswered-2"],
+    ];
+    for (const [index, [role, content]] of roles_and_content.entries()) {
+      await handle.append({
+        ts: `2026-01-01T00:00:0${index}.000Z`,
+        kind: "message",
+        message: { role, content },
+      });
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+  });
 });

@@ -46,7 +46,7 @@ method `event` (no `id`).
 | `session.create` | `{ label?, source }` | `{ session_id }` |
 | `session.list` | `{}` | `{ sessions: [{ id, mtime_ms }, ...] }` |
 | `session.clear` | `{ session_id }` | `{ session_id }` |
-| `session.resume` | `{ id }` | `{ session_id, message_count }` |
+| `session.resume` | `{ id, source? }` | `{ session_id, resumed_id, message_count }` |
 | `prompt.submit` | `{ session_id, text }` | reply, usage, `session_path`, `stopped_reason`, … |
 | `prompt.abort` | `{ session_id }` | `{ session_id, aborted }` |
 
@@ -54,15 +54,34 @@ method `event` (no `id`).
 `params: {}`, because `ServeRequest` requires `params`. JSON-RPC 2.0 also
 allows omitting `params`; serve handlers accept that omission the same as `{}`.
 
-`session.resume` and other session RPCs may extend this map in later issues;
-clients must not invent method names outside the locked set above until those
-land.
+Clients must not invent method names outside the locked set above.
 
-`session.create` opens one `SessionHandle` and an empty in-memory history bag.
-`session.clear` resets that bag (handle stays). `session.list` / `session.resume`
-reuse [`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
-semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds history
-from disk and opens a fresh `SessionHandle` for later `prompt.submit`.
+`session.create` opens one `SessionHandle` and an empty in-memory history bag,
+and eagerly creates the (empty) `.jsonl` transcript so `session.list` sees the
+new id immediately — before any prompt appends to it.
+`session.clear` resets that bag's in-memory history (handle stays; the on-disk
+transcript is untouched). `session.list` / `session.resume` reuse
+[`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
+semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds
+history from disk and opens a fresh `SessionHandle` for later `prompt.submit`
+— like CLI `--resume`, each resume forks a new transcript; it does not
+re-bind the original. The fork is written from the filtered bag history
+(every trailing user already dropped by `read_session_messages`), not a raw byte
+copy, and the handle is marked seeded so a later `prompt.submit`
+`recorder.seed` appends only the new turn. A later `latest` resume (or the
+fork id after a restart) reloads that filtered history. A transcript that is
+deleted between resolve and read resumes as `not_found`, never as an empty
+history.
+`SessionResumeResult.resumed_id` reports which
+transcript was resolved, even for `latest` / prefix resumes.
+
+In-memory bags are capped (LRU, default 32 via `max_session_bags`): the
+oldest is evicted first, and `ServeServer.stop()` drops all of them — after
+draining in-flight RPC handlers, so a mid-I/O `session.create` /
+`session.resume` cannot resurrect a bag after shutdown. Eviction is log-only
+— there is no client notification; a client operating on an evicted id learns
+about it from the next `session.clear` or `prompt.submit` failing with
+`not_found`. Evicted transcripts stay on disk and can be resumed again.
 
 `prompt.submit` runs the server Agent with that bag's history and
 `AgentRunOptions.session` (one JSONL file per serve session). Runs are serialized
@@ -94,7 +113,11 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
   do not assume `file://` / `app://` behavior here.
 - Frame size capped at ~1 MiB (`maxPayload`).
 - `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
+- Frames are handled per-connection in arrival order: pipelined requests get
+  in-order replies even when earlier requests hit slower filesystem awaits.
 - Pass `agent` or `agent_config` (same shape as CLI / `create_agent_with_plugins`) so
   `prompt.*` is available; without an agent, those methods return an application error.
 - **CLI:** `lich serve [--host 127.0.0.1] [--port 0]` builds the Agent from the same
-  config resolution as TUI/chat and passes it as `agent_config`.
+  config resolution as TUI/chat and passes it as `agent_config` with
+  `session_dir` from the agent config (`${work_dir}/.lich/sessions`). The library
+  default when `session_dir` is omitted remains `<cwd>/.lich/sessions`.

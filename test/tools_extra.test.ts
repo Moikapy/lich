@@ -1,7 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import dns from "node:dns/promises";
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
@@ -31,23 +29,6 @@ function stub_fetch(mock_fn: typeof fetch): void {
 function restore_fetch(): void {
   reset_url_guard_fetch();
   globalThis.fetch = real_fetch;
-}
-
-const MARKER_NAME = "lich_pl_test_marker_7f3d";
-
-interface MarkerProcess {
-  name: string;
-  child: ChildProcess;
-}
-
-/** Spawn a uniquely-named sleeper so process_list filtering is deterministic. */
-async function spawn_marker_process(): Promise<MarkerProcess> {
-  const child = spawn("bash", ["-c", `exec -a ${MARKER_NAME} sleep 60`], { stdio: "ignore" });
-  await new Promise<void>((resolve) => {
-    child.on("spawn", () => resolve());
-    child.on("error", () => resolve());
-  });
-  return { name: MARKER_NAME, child };
 }
 
 async function write_temp(relative: string, content: string | Buffer): Promise<void> {
@@ -315,17 +296,19 @@ describe("process_list", () => {
     const lines = listing.output.split("\n");
     expect(lines.length > 1).toBe(true);
     expect(lines[0]?.includes("\t")).toBe(true);
+    // Anchor the filter assertion to the runner executable itself: guaranteed
+    // present on any CI runner, unlike a spawned marker whose /proc cmdline is
+    // transiently empty mid-exec, which raced on ubuntu runners (#118).
+    const runner = path.basename(process.execPath);
+    const self_filter = await executor.execute("process_list", { filter: runner, max_results: 500 });
+    expect(self_filter.ok).toBe(true);
+    expect(self_filter.output.includes(runner)).toBe(true);
+    // Require our own row via its pid prefix: the bare substring match above
+    // would also pass on any foreign cmdline mentioning the runner token (#119).
+    expect(self_filter.output.split("\n").some((line) => line.startsWith(`${process.pid}\t`))).toBe(true);
     const filtered = await executor.execute("process_list", { filter: "no_such_filter_xyz" });
     expect(filtered.ok).toBe(true);
     expect(filtered.output).toBe("no matching processes");
-    const marker = await spawn_marker_process();
-    try {
-      const marker_filter = await executor.execute("process_list", { filter: marker.name });
-      expect(marker_filter.ok).toBe(true);
-      expect(marker_filter.output.includes(marker.name)).toBe(true);
-    } finally {
-      marker.child.kill("SIGKILL");
-    }
   });
 });
 
