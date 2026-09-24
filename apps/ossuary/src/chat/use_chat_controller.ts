@@ -1,6 +1,7 @@
 /** Compose Chat pane hooks: shared serve runtime + local transcript / composer. */
 import { useEffect, useState } from "react";
 import { use_serve_runtime } from "../session/serve_runtime";
+import { cleared_chat_local_state } from "./chat_local_state";
 import { use_prompt_actions } from "./use_prompt_actions";
 import { use_serve_events } from "./use_serve_events";
 import type { ConnectionInfo } from "../gateway-client";
@@ -32,8 +33,9 @@ export function use_chat_controller(): ChatController {
   }, [runtime.connection.status]);
 
   useEffect(() => {
-    set_blocks([]);
-    set_busy(false);
+    const cleared = cleared_chat_local_state();
+    set_blocks(cleared.blocks);
+    set_busy(cleared.busy);
   }, [runtime.session_id]);
 
   use_serve_events(runtime.session_ref, set_blocks);
