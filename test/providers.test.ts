@@ -380,6 +380,60 @@ describe("anthropic provider", () => {
     ]);
   });
 
+  it("folds consecutive user messages into one turn", async () => {
+    const { fetch_fn, requests } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        model: "claude-test",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    const summary = "[context summary of earlier turns]\nsummary\n[end summary]";
+    await provider.chat(
+      [
+        { role: "user", content: summary },
+        { role: "user", content: "latest question" },
+        { role: "assistant", content: "", tool_calls: [{ id: "call_9", name: "list_dir", args: { path: "." } }] },
+        { role: "tool", tool_call_id: "call_9", name: "list_dir", content: "notes.txt" },
+        { role: "user", content: "follow up" },
+      ],
+      [],
+    );
+    const [first_request] = requests;
+    expect(first_request).toBeDefined();
+    if (first_request === undefined) {
+      return;
+    }
+    const body = request_json(first_request);
+    expect(as_array(body["messages"])).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: summary },
+          { type: "text", text: "latest question" },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "call_9", name: "list_dir", input: { path: "." } }],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "call_9",
+            content: [{ type: "text", text: "notes.txt" }],
+          },
+          { type: "text", text: "follow up" },
+        ],
+      },
+    ]);
+  });
+
   it("parses text plus tool_use blocks and maps usage and stop reasons", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,
