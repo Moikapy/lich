@@ -1,6 +1,10 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolve_repo_root_from_electron_dir } from "./backend-command.js";
+import { GatewaySession, type GatewayConnectionInfo } from "./gateway-session.js";
+import { assert_gateway_method, is_allowed_sender_url } from "./ipc-policy.js";
+import { spawn_lich_serve, type RunningServe } from "./serve-process.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,7 +56,24 @@ function is_allowed_navigation(url: string): boolean {
   }
 }
 
-function create_window(): void {
+function is_allowed_ipc_sender(url: string | undefined): boolean {
+  return is_allowed_sender_url(url, is_allowed_navigation);
+}
+
+let main_window: BrowserWindow | undefined;
+let running_serve: RunningServe | undefined;
+let gateway: GatewaySession | undefined;
+let last_connection_info: GatewayConnectionInfo = { status: "connecting" };
+let on_serve_exit: (() => void) | undefined;
+
+function publish_connection(info: GatewayConnectionInfo): void {
+  last_connection_info = info;
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send("ossuary:connection", info);
+  }
+}
+
+function create_window(): BrowserWindow {
   const win = new BrowserWindow({
     width: 960,
     height: 640,
@@ -78,16 +99,115 @@ function create_window(): void {
   } else {
     void win.loadFile(RENDERER_INDEX_PATH);
   }
+  return win;
 }
 
-app.whenReady().then(() => {
-  create_window();
+function register_ipc(): void {
+  ipcMain.handle("ossuary:get-connection", (event: IpcMainInvokeEvent) => {
+    if (is_allowed_ipc_sender(event.senderFrame?.url) === false) {
+      throw new Error("connection read from disallowed frame");
+    }
+    return gateway?.get_info() ?? last_connection_info;
+  });
+  ipcMain.handle(
+    "ossuary:request-gateway",
+    async (event: IpcMainInvokeEvent, method: unknown, params: unknown) => {
+      if (is_allowed_ipc_sender(event.senderFrame?.url) === false) {
+        throw new Error("gateway request from disallowed frame");
+      }
+      if (typeof method !== "string" || method.length === 0) {
+        throw new Error("method must be a non-empty string");
+      }
+      assert_gateway_method(method);
+      if (gateway === undefined) {
+        throw new Error("gateway not ready");
+      }
+      const body =
+        params !== undefined &&
+        typeof params === "object" &&
+        params !== null &&
+        Array.isArray(params) === false
+          ? (params as Record<string, unknown>)
+          : {};
+      return gateway.request(method, body);
+    },
+  );
+}
+
+function wire_gateway_notifications(session: GatewaySession): void {
+  session.subscribe((method, params) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("ossuary:notification", { method, params });
+    }
+  });
+}
+
+function wire_serve_exit(child: RunningServe["child"]): void {
+  on_serve_exit = () => {
+    on_serve_exit = undefined;
+    gateway?.close();
+    gateway = undefined;
+    running_serve = undefined;
+    publish_connection({ status: "stopped" });
+  };
+  child.once("exit", on_serve_exit);
+}
+
+function default_work_dir(repo_root: string): string {
+  if (process.env.LICH_WORK_DIR) {
+    return process.env.LICH_WORK_DIR;
+  }
+  if (app.isPackaged) {
+    return app.getPath("userData");
+  }
+  return repo_root;
+}
+
+async function start_backend(): Promise<void> {
+  const repo_root = resolve_repo_root_from_electron_dir(__dirname);
+  const work_dir = default_work_dir(repo_root);
+  running_serve = await spawn_lich_serve({ repo_root, work_dir });
+  wire_serve_exit(running_serve.child);
+  gateway = new GatewaySession();
+  wire_gateway_notifications(gateway);
+  await gateway.connect(running_serve.ws_url, running_serve.boot.port);
+  publish_connection(gateway.get_info());
+}
+
+function stop_backend(): void {
+  if (running_serve !== undefined && on_serve_exit !== undefined) {
+    running_serve.child.off("exit", on_serve_exit);
+    on_serve_exit = undefined;
+  }
+  gateway?.close();
+  gateway = undefined;
+  running_serve?.stop();
+  running_serve = undefined;
+}
+
+app.whenReady().then(async () => {
+  register_ipc();
+  main_window = create_window();
+  try {
+    await start_backend();
+  } catch (error) {
+    stop_backend();
+    const message = error instanceof Error ? error.message : String(error);
+    publish_connection({
+      status: "error",
+      error: message,
+    });
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      create_window();
+      main_window = create_window();
     }
   });
+});
+
+app.on("before-quit", () => {
+  stop_backend();
 });
 
 app.on("window-all-closed", () => {
