@@ -77,7 +77,15 @@ export async function run_serve(
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
-  await server.start();
+  try {
+    await server.start();
+  } catch (error) {
+    process.off("SIGINT", shutdown);
+    process.off("SIGTERM", shutdown);
+    // stop() closes owned_agent even when listen never succeeded.
+    await server.stop();
+    throw error;
+  }
   return await new Promise<number>(() => undefined);
 }
 

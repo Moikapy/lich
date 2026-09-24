@@ -165,12 +165,48 @@ function take_serve_flag(argv: readonly string[], index: number, flags: ServeCli
     flags.host = value;
     return index + 1;
   }
+  // Reject blanks / non-digits before Number(): Number("") and Number(" ") are 0.
+  if (/^\d+$/.test(value) !== true) {
+    throw new Error("--port must be an integer between 0 and 65535");
+  }
   const port = Number(value);
   if (Number.isInteger(port) === false || port < 0 || port > 65535) {
     throw new Error("--port must be an integer between 0 and 65535");
   }
   flags.port = port;
   return index + 1;
+}
+
+/** First non-flag argv token, skipping known flags that take a value. */
+function argv_first_positional(argv: readonly string[]): string | undefined {
+  const value_flags = new Set([
+    "--config",
+    "--resume",
+    "--host",
+    "--port",
+    "--command",
+    "--url",
+    "--project-path",
+    "--arg",
+    ...Object.keys(FLAG_KEYS),
+  ]);
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "--version") {
+      continue;
+    }
+    if (arg.startsWith("--") === true) {
+      if (value_flags.has(arg) === true) {
+        index += 1;
+      }
+      continue;
+    }
+    return arg;
+  }
+  return undefined;
 }
 
 export function parse_args(argv: string[]): CliOptions {
@@ -181,7 +217,9 @@ export function parse_args(argv: string[]): CliOptions {
     serve_flags: empty_serve_flags(),
   };
   const mcp = argv.includes("mcp");
-  const serve = argv.includes("serve");
+  // Gate serve-only flags on the first positional, not argv.includes("serve"),
+  // so flag values / task words named "serve" do not enable --host/--port.
+  const serve = argv_first_positional(argv) === "serve";
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) {

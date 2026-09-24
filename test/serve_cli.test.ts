@@ -76,6 +76,22 @@ describe("parse_args serve flags", () => {
       "--port must be an integer between 0 and 65535",
     );
   });
+
+  it("rejects blank --port values that Number() would coerce to 0", () => {
+    expect(() => parse_args(["serve", "--port", ""])).toThrow(
+      "--port must be an integer between 0 and 65535",
+    );
+    expect(() => parse_args(["serve", "--port", " "])).toThrow(
+      "--port must be an integer between 0 and 65535",
+    );
+  });
+
+  it("does not treat serve as a flag value as the serve subcommand", () => {
+    expect(() => parse_args(["--model", "serve", "chat", "--port", "1"])).toThrow(
+      "unknown flag: --port",
+    );
+    expect(() => parse_args(["fix", "serve", "--port", "3"])).toThrow("unknown flag: --port");
+  });
 });
 
 describe("run_cli serve wiring", () => {
