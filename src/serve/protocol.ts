@@ -111,10 +111,15 @@ export interface SessionClearResult {
 export interface SessionResumeParams {
   /** Transcript id, unique prefix, or `latest` (same as CLI `--resume`). */
   id: string;
+  /** Origin tag for the new bag; defaults to `resume`. */
+  source?: string;
 }
 
 export interface SessionResumeResult {
+  /** Fresh handle id; use this for `prompt.submit` once #83 lands. */
   session_id: string;
+  /** Which transcript was resolved (exact id, even when resuming `latest`/prefix). */
+  resumed_id: string;
   message_count: number;
 }
 

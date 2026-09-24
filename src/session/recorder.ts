@@ -11,6 +11,15 @@ import type { SessionHandle, SessionRecord } from "./store.js";
 /** Handles that already received history seed for a shared TUI transcript. */
 const seeded_handles = new WeakSet<SessionHandle>();
 
+/**
+ * Mark a handle as already seeded so a later `recorder.seed` (with `owned:
+ * false`) appends only the new user turn. Serve uses this after writing a
+ * filtered resume fork; the TUI marks via the first seed call itself.
+ */
+export function mark_session_seeded(handle: SessionHandle): void {
+  seeded_handles.add(handle);
+}
+
 export interface RecorderSeed {
   input: string;
   history: readonly Message[];

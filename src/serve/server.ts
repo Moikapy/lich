@@ -9,6 +9,7 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { LICH_VERSION } from "../version.js";
 import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
+import { logger } from "../util/log.js";
 import { create_serve_prompt_service, type ServePromptService } from "./prompts.js";
 import { handle_serve_rpc_message } from "./rpc.js";
 import { create_serve_session_store, type ServeSessionStore } from "./sessions.js";
@@ -40,6 +41,8 @@ export interface ServeOptions {
   agent?: Agent;
   /** Parsed like CLI config; used when `agent` is omitted. Creates via create_agent_with_plugins. */
   agent_config?: unknown;
+  /** LRU cap for in-memory session bags; `0` disables. Default 32. */
+  max_session_bags?: number;
   /** Boot JSON line sink. Default `process.stdout`; `null` skips emission. */
   boot_stdout?: NodeJS.WritableStream | null;
   on_listening?: (info: ServeBootInfo) => void;
@@ -83,8 +86,10 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   const want_port = options.port ?? DEFAULT_SERVE_PORT;
   const token = options.token ?? randomBytes(TOKEN_BYTES).toString("hex");
   const version = options.version ?? LICH_VERSION;
+  // Library default is cwd-based; `run_serve` / callers should pass
+  // `config.session_dir` (`${work_dir}/.lich/sessions`) explicitly.
   const session_dir = options.session_dir ?? path.join(process.cwd(), ".lich", "sessions");
-  const sessions = create_serve_session_store(session_dir);
+  const sessions = create_serve_session_store(session_dir, options.max_session_bags);
   assert_loopback_host(host);
 
   let http_server: Server | undefined;
@@ -92,6 +97,9 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   let boot: ServeBootInfo | undefined;
   let prompts: ServePromptService | undefined;
   let owned_agent: Agent | undefined;
+  let stopping = false;
+  /** Enqueued handler chains; stop() drains this before sessions.dispose(). */
+  const inflight = new Set<Promise<void>>();
 
   return {
     get boot() {
@@ -107,6 +115,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       if (http_server !== undefined) {
         throw new Error("lich serve already started");
       }
+      stopping = false;
       const agent = await resolve_agent(options);
       if (agent !== undefined && options.agent === undefined) {
         owned_agent = agent;
@@ -138,9 +147,16 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
           socket.destroy();
           return;
         }
+        if (stopping === true) {
+          // Graceful-shutdown race: stop() drains in-flight RPC; do not accept
+          // a new client whose handlers could put() after dispose().
+          socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return;
+        }
         wss?.handleUpgrade(request, socket, head, (client) => {
           socket.off("error", on_socket_error);
-          attach_client(client, version, sessions, prompts);
+          attach_client(client, version, sessions, prompts, inflight);
         });
       });
       try {
@@ -155,20 +171,35 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
         http_server = undefined;
         wss = undefined;
         boot = undefined;
+        // Bind failed after resolve_agent: drop prompts and close an owned
+        // agent so a retry of start() does not leak MCP children.
+        prompts = undefined;
+        owned_agent?.close();
+        owned_agent = undefined;
         throw error;
       }
     },
     stop: async () => {
+      // Reject new upgrades while stopping; then close clients so no new
+      // frames are enqueued, and drain in-flight handlers before dispose() —
+      // a mid-I/O create/resume must not put() a bag after the store is
+      // dropped (leak across restarts).
+      stopping = true;
+      prompts?.abort_all();
       const sockets = wss === undefined ? [] : [...wss.clients];
       await Promise.all(sockets.map((client) => close_client_with_grace(client)));
       await close_wss(wss);
       wss = undefined;
       await close_http(http_server);
       http_server = undefined;
+      while (inflight.size > 0) {
+        await Promise.allSettled(inflight);
+      }
       boot = undefined;
       prompts = undefined;
       owned_agent?.close();
       owned_agent = undefined;
+      sessions.dispose();
     },
   };
 }
@@ -183,20 +214,55 @@ async function resolve_agent(options: ServeOptions): Promise<Agent | undefined> 
   return undefined;
 }
 
+/**
+ * Per-connection handler chain plus a server-wide in-flight set: stop() closes
+ * clients first, then drains this set so no handler runs after dispose().
+ *
+ * `prompt.abort` bypasses the serial queue so it can cancel an in-flight
+ * `prompt.submit` on the same connection (otherwise abort would wait forever).
+ */
 function attach_client(
   client: WebSocket,
   version: string,
   sessions: ServeSessionStore,
   prompts: ServePromptService | undefined,
+  inflight: Set<Promise<void>>,
 ): void {
+  // Serialize frames per connection: pipelined requests get in-order replies,
+  // and the tail catch keeps any rejection from becoming an unhandled one.
+  let tail: Promise<void> = Promise.resolve();
   client.on("message", (data) => {
-    void handle_client_message(client, data, version, sessions, prompts);
+    const raw = raw_data_to_string(data);
+    const run = (): Promise<void> =>
+      handle_client_message(client, raw, version, sessions, prompts);
+    const is_abort = frame_is_prompt_abort(raw);
+    const chain = (is_abort === true ? run() : tail.then(run)).catch((error: unknown) => {
+      logger.warn("serve client message handling failed", error);
+    });
+    if (is_abort !== true) {
+      tail = chain;
+    }
+    // Track the exact chain (not the mutable tail) so stop() drains this one.
+    inflight.add(chain);
+    void chain.then(() => {
+      inflight.delete(chain);
+    });
   });
+}
+
+/** Peek JSON-RPC method without full validation — abort must not wait on submit. */
+function frame_is_prompt_abort(raw: string): boolean {
+  try {
+    const body = JSON.parse(raw) as { method?: unknown };
+    return body.method === "prompt.abort";
+  } catch {
+    return false;
+  }
 }
 
 async function handle_client_message(
   client: WebSocket,
-  data: RawData,
+  raw: string,
   version: string,
   sessions: ServeSessionStore,
   prompts: ServePromptService | undefined,
@@ -206,7 +272,7 @@ async function handle_client_message(
       client.send(JSON.stringify(notification));
     }
   };
-  const reply = await handle_serve_rpc_message(raw_data_to_string(data), {
+  const reply = await handle_serve_rpc_message(raw, {
     version,
     sessions,
     prompts,
