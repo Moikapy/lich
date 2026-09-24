@@ -1,9 +1,19 @@
 /** Create a serve session once the gateway reports connected. */
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import type { ConnectionInfo } from "../gateway-client";
 import { session_create } from "./rpc";
 
-export function use_serve_session(connection: ConnectionInfo): {
+export function use_serve_session(
+  connection: ConnectionInfo,
+  set_busy: Dispatch<SetStateAction<boolean>>,
+): {
   session_id: string | undefined;
   session_error: string | undefined;
   session_ref: MutableRefObject<string | undefined>;
@@ -14,6 +24,9 @@ export function use_serve_session(connection: ConnectionInfo): {
 
   useEffect(() => {
     if (connection.status !== "connected") {
+      session_ref.current = undefined;
+      set_session_id(undefined);
+      set_busy(false);
       return;
     }
     let cancelled = false;
@@ -33,7 +46,7 @@ export function use_serve_session(connection: ConnectionInfo): {
     return () => {
       cancelled = true;
     };
-  }, [connection.status]);
+  }, [connection.status, set_busy]);
 
   return { session_id, session_error, session_ref };
 }

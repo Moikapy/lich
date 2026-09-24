@@ -65,12 +65,17 @@ export function build_serve_command(options: BackendCommandOptions): BackendComm
 
 export function parse_serve_boot_line(line: string): ServeBootInfo {
   const trimmed = line.trim();
-  const parsed = JSON.parse(trimmed) as { port?: unknown; token?: unknown };
+  let parsed: { port?: unknown; token?: unknown };
+  try {
+    parsed = JSON.parse(trimmed) as { port?: unknown; token?: unknown };
+  } catch {
+    throw new Error("invalid serve boot JSON");
+  }
   if (typeof parsed.port !== "number" || Number.isInteger(parsed.port) === false || parsed.port <= 0) {
-    throw new Error(`invalid serve boot port: ${trimmed}`);
+    throw new Error("invalid serve boot port");
   }
   if (typeof parsed.token !== "string" || parsed.token.length === 0) {
-    throw new Error(`invalid serve boot token: ${trimmed}`);
+    throw new Error("invalid serve boot token");
   }
   return { port: parsed.port, token: parsed.token };
 }
@@ -92,5 +97,5 @@ export function extract_boot_from_stdout(
     }
     return { buffer: incomplete, boot: parse_serve_boot_line(line) };
   }
-  return { buffer: next };
+  return { buffer: incomplete };
 }
