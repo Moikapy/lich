@@ -67,4 +67,4 @@ Details: [CLI reference — Serve](cli.md) and [serve architecture](../architect
 
 - Prefer `--work-dir` (or `cd` into the project) so sessions and layout stay with that project's `.lich/`.
 - If Chat shows a serve error, check that `.lich/config.json` (or env) resolves a model the same way `lich serve` would.
-- Use the Sessions pane to resume a prior transcript; Chat resets its on-screen history with a resume notice, matching `/resume` in the TUI.
+- Use the Sessions pane to resume a prior transcript; Chat shows a count-only resume notice (not the full TUI transcript replay), because `session.resume` returns `message_count` rather than message bodies.
