@@ -2,6 +2,8 @@
 
 ## 0.9.0
 
+- serve `error` notifications serialize `Error` as `{ name, message }` so JSON
+  clients no longer receive `{}` from `JSON.stringify`.
 - close agent should-fixes (A-7/A-8/A-10–A-13): a truncated summarizer no longer
   drops recent older turns, ineffective compress attempts back off for three
   turns and their usage lands on `compress_end` so transcripts stay clean,
