@@ -33,17 +33,25 @@ export function use_prompt_actions(
     }));
     void prompt_submit(id, text)
       .then((result) => {
+        if (session_ref.current !== id) {
+          return;
+        }
         set_ui((current) => apply_submit_result(current, result));
         set_blocks((current) => [...current, ...submit_notice_blocks(result)].slice(-HISTORY_CAP));
       })
       .catch((error: unknown) => {
+        if (session_ref.current !== id) {
+          return;
+        }
         set_blocks((current) =>
           [...current, error_notice_block(error_text(error))].slice(-HISTORY_CAP),
         );
         set_ui((current) => ({ ...current, phase: "idle" }));
       })
       .finally(() => {
-        set_busy(false);
+        if (session_ref.current === id) {
+          set_busy(false);
+        }
       });
   }, [busy, draft, session_ref, set_blocks, set_busy, set_draft, set_ui]);
 
