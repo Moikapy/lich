@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { can_restore_layout, layout_component_ids } from "./layout_persist";
+import {
+  can_restore_layout,
+  layout_component_ids,
+  missing_registered_ids,
+} from "./layout_persist";
 
 const sample = {
   grid: { root: {}, height: 100, width: 200, orientation: "HORIZONTAL" },
@@ -36,5 +40,16 @@ describe("can_restore_layout", () => {
     const registered = new Set(["lich.chat"]);
     expect(can_restore_layout({ grid: {}, panels: {} }, registered)).toBe(false);
     expect(can_restore_layout("{broken", registered)).toBe(false);
+  });
+});
+
+describe("missing_registered_ids", () => {
+  it("lists registered panes absent from a saved layout", () => {
+    const registered = new Set(["lich.chat", "lich.scratch", "lich.tool_log"]);
+    expect(missing_registered_ids(sample, registered)).toEqual(["lich.tool_log"]);
+  });
+
+  it("returns null for corrupt payloads", () => {
+    expect(missing_registered_ids(null, new Set(["lich.chat"]))).toBeNull();
   });
 });

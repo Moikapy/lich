@@ -44,3 +44,16 @@ export function can_restore_layout(
   }
   return ids.every((id) => registered_ids.has(id));
 }
+
+/** Registered contribution ids absent from a saved layout (null if corrupt). */
+export function missing_registered_ids(
+  data: unknown,
+  registered_ids: ReadonlySet<string>,
+): string[] | null {
+  const ids = layout_component_ids(data);
+  if (ids === null) {
+    return null;
+  }
+  const saved = new Set(ids);
+  return [...registered_ids].filter((id) => saved.has(id) === false);
+}
