@@ -4,6 +4,7 @@
  */
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { is_enoent } from "../util/fs.js";
 
 export interface SessionFileInfo {
   readonly name: string;
@@ -13,8 +14,18 @@ export interface SessionFileInfo {
 
 const CANDIDATE_CAP = 5;
 
-function is_enoent(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT";
+/** Failure mode of a session resolve: no match, or a non-unique prefix. */
+export type SessionResolveErrorKind = "missing" | "ambiguous";
+
+/** Thrown by `resolve_session_path`; `kind` lets callers map without parsing. */
+export class SessionResolveError extends Error {
+  readonly kind: SessionResolveErrorKind;
+
+  constructor(kind: SessionResolveErrorKind, message: string) {
+    super(message);
+    this.name = "SessionResolveError";
+    this.kind = kind;
+  }
 }
 
 /** List `.jsonl` transcripts under `dir`, newest mtime first. Missing dir → []. */
@@ -57,12 +68,18 @@ function candidate_ids(entries: readonly SessionFileInfo[]): string {
 }
 
 function missing_error(dir: string, value: string, entries: readonly SessionFileInfo[]): Error {
-  return new Error(`session not found: "${value}" in ${dir} (candidates: ${candidate_ids(entries)})`);
+  return new SessionResolveError(
+    "missing",
+    `session not found: "${value}" in ${dir} (candidates: ${candidate_ids(entries)})`,
+  );
 }
 
 function ambiguous_error(dir: string, value: string, matches: readonly SessionFileInfo[]): Error {
   const sorted = [...matches].sort((a, b) => b.mtime_ms - a.mtime_ms);
-  return new Error(`ambiguous session prefix: "${value}" in ${dir} matches: ${candidate_ids(sorted)}`);
+  return new SessionResolveError(
+    "ambiguous",
+    `ambiguous session prefix: "${value}" in ${dir} matches: ${candidate_ids(sorted)}`,
+  );
 }
 
 /** Map `(dir, value)` to an absolute transcript path, or throw with candidates. */

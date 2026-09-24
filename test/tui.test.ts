@@ -27,7 +27,7 @@ import {
   type HistoryBlock,
   type UiState,
 } from "../src/tui/state.js";
-import { load_resume_view } from "../src/tui/load_resume.js";
+import { load_resume_view, read_transcript_or_not_found } from "../src/tui/load_resume.js";
 import type { AgentRunResult } from "../src/agent/agent.js";
 import { LICH_THEME } from "../src/util/lore.js";
 import type { LoopOutcome } from "../src/agent/loop.js";
@@ -384,6 +384,16 @@ describe("load_resume_view", () => {
     expect(result.block.role).toBe("error");
     expect(result.block.lines[0]).toContain("session not found");
     expect(result.block.lines[0]).toContain("keep-1");
+  });
+
+  it("maps a vanished transcript (read-path ENOENT) to session not found, not a raw path", async () => {
+    const dir = await make_session_dir();
+    await expect(read_transcript_or_not_found(path.join(dir, "missing.jsonl"))).rejects.toThrow(
+      "session not found (transcript deleted)",
+    );
+    await expect(read_transcript_or_not_found(path.join(dir, "missing.jsonl"))).rejects.not.toThrow(
+      /ENOENT/,
+    );
   });
 });
 
