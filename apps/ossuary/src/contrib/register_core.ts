@@ -1,4 +1,5 @@
 import { ChatPane } from "../panes/chat";
+import { SessionsPane } from "../panes/sessions";
 import { StatusPane } from "../panes/status";
 import { ToolLogPane } from "../panes/tool_log";
 import {
@@ -13,6 +14,12 @@ const CORE_PANES: PaneContributionInput[] = [
     title: "Chat",
     data: { placement: "main", closable: false },
     render: ChatPane,
+  },
+  {
+    id: "lich.sessions",
+    title: "Sessions",
+    data: { placement: "left" },
+    render: SessionsPane,
   },
   {
     id: "lich.status",

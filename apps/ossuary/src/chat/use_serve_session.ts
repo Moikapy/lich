@@ -1,4 +1,4 @@
-/** Create a serve session once the gateway reports connected. */
+/** Create a serve session on connect; follow Sessions pane bind switches. */
 import {
   useEffect,
   useRef,
@@ -8,7 +8,13 @@ import {
   type SetStateAction,
 } from "react";
 import type { ConnectionInfo } from "../gateway-client";
-import { session_create } from "./rpc";
+import {
+  bind_active_session,
+  get_active_session,
+  subscribe_active_session,
+  type SessionBinding,
+} from "../session/active_session";
+import { session_create } from "../session/session_rpc";
 
 export function use_serve_session(
   connection: ConnectionInfo,
@@ -17,10 +23,19 @@ export function use_serve_session(
   session_id: string | undefined;
   session_error: string | undefined;
   session_ref: MutableRefObject<string | undefined>;
+  binding: SessionBinding | undefined;
 } {
   const [session_id, set_session_id] = useState<string | undefined>();
   const [session_error, set_session_error] = useState<string | undefined>();
+  const [binding, set_binding] = useState<SessionBinding | undefined>();
   const session_ref = useRef<string | undefined>(undefined);
+
+  useEffect(() => subscribe_active_session((next) => {
+    session_ref.current = next.session_id;
+    set_session_id(next.session_id);
+    set_binding(next);
+    set_session_error(undefined);
+  }), []);
 
   useEffect(() => {
     if (connection.status !== "connected") {
@@ -29,17 +44,23 @@ export function use_serve_session(
       set_busy?.(false);
       return;
     }
+    const existing = get_active_session();
+    if (existing !== undefined) {
+      session_ref.current = existing.session_id;
+      set_session_id(existing.session_id);
+      set_binding(existing);
+      return;
+    }
     let cancelled = false;
     void session_create("ossuary")
       .then((id) => {
-        if (!cancelled) {
-          session_ref.current = id;
-          set_session_id(id);
-          set_session_error(undefined);
+        if (cancelled || get_active_session() !== undefined) {
+          return;
         }
+        bind_active_session({ session_id: id, source: "auto_create" });
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
+        if (!cancelled && get_active_session() === undefined) {
           set_session_error(error instanceof Error ? error.message : String(error));
         }
       });
@@ -48,5 +69,5 @@ export function use_serve_session(
     };
   }, [connection.status, set_busy]);
 
-  return { session_id, session_error, session_ref };
+  return { session_id, session_error, session_ref, binding };
 }

@@ -20,12 +20,14 @@ import { INITIAL_UI_STATE, type UiState } from "../chat/types";
 import { use_gateway_connection } from "../chat/use_gateway_connection";
 import { use_serve_session } from "../chat/use_serve_session";
 import { subscribe_notifications, type ConnectionInfo } from "../gateway-client";
+import type { SessionBinding } from "./active_session";
 
 export interface ServeRuntime {
   connection: ConnectionInfo;
   session_id: string | undefined;
   session_error: string | undefined;
   session_ref: MutableRefObject<string | undefined>;
+  binding: SessionBinding | undefined;
   ui: UiState;
   set_ui: Dispatch<SetStateAction<UiState>>;
   tool_log: readonly ToolLogEntry[];
@@ -37,7 +39,7 @@ const ServeRuntimeContext = createContext<ServeRuntime | null>(null);
 
 export function ServeRuntimeProvider({ children }: { children: ReactNode }) {
   const connection = use_gateway_connection();
-  const { session_id, session_error, session_ref } = use_serve_session(connection);
+  const { session_id, session_error, session_ref, binding } = use_serve_session(connection);
   const [ui, set_ui] = useState<UiState>(INITIAL_UI_STATE);
   const [tool_log, set_tool_log] = useState<readonly ToolLogEntry[]>([]);
 
@@ -66,12 +68,13 @@ export function ServeRuntimeProvider({ children }: { children: ReactNode }) {
       session_id,
       session_error,
       session_ref,
+      binding,
       ui,
       set_ui,
       tool_log,
       model: "unknown",
     }),
-    [connection, session_error, session_id, session_ref, tool_log, ui],
+    [binding, connection, session_error, session_id, session_ref, tool_log, ui],
   );
 
   return <ServeRuntimeContext.Provider value={value}>{children}</ServeRuntimeContext.Provider>;

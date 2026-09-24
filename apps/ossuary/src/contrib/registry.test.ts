@@ -130,6 +130,7 @@ describe("core contributions", () => {
     expect(chat_after?.render).not.toBe(stub_render);
     expect(list_panes().map((item) => item.id)).toEqual([
       "lich.chat",
+      "lich.sessions",
       "lich.status",
       "lich.tool_log",
     ]);
