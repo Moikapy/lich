@@ -57,6 +57,42 @@ function recording_agent(records: RunRecord[]): Agent {
   } as unknown as Agent;
 }
 
+/** Agent that pauses inside `gate_input` until `release.run` is called. */
+function blocking_agent(
+  records: RunRecord[],
+  gate_input: string,
+  release: { run: (() => void) | undefined },
+): Agent {
+  return {
+    run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+      if (options.input === gate_input) {
+        await new Promise<void>((resolve) => {
+          release.run = resolve;
+        });
+      }
+      const history = options.history ?? [];
+      records.push({ input: options.input, history_len: history.length });
+      const messages: Message[] = [
+        ...history,
+        { role: "user", content: options.input },
+        { role: "assistant", content: `echo:${options.input}` },
+      ];
+      return {
+        outcome: {
+          messages,
+          final: { role: "assistant", content: `echo:${options.input}` },
+          result: undefined,
+          turns_used: 1,
+          stopped_reason: "final",
+        },
+        messages,
+        usage_total: usage_zero,
+        session_path: undefined,
+      };
+    },
+  } as unknown as Agent;
+}
+
 describe("gateway max_conversations", () => {
   it("evicts the oldest conversation when the map is full", async () => {
     const work_dir = make_temp_dir();
@@ -85,4 +121,48 @@ describe("gateway max_conversations", () => {
     const c2 = records.find((record) => record.input === "c2");
     expect(c2?.history_len).toBeGreaterThan(0);
   });
+
+  it("keeps an in-flight chain when that conversation's history is evicted", async () => {
+    const work_dir = make_temp_dir();
+    const records: RunRecord[] = [];
+    const release: { run: (() => void) | undefined } = { run: undefined };
+    const bus = new GatewayBus(
+      {
+        config: parse_agent_config({
+          providers: [{ kind: "openai_compat", name: "main", model: "mock-model" }],
+          work_dir,
+        }),
+        agent_factory: () => blocking_agent(records, "a2", release),
+      },
+      { max_conversations: 1, history_cap: 40 },
+    );
+
+    expect(await bus.handle("webhook", "a", "u", "a1")).toBe("echo:a1");
+    const inflight = bus.handle("webhook", "a", "u", "a2");
+    await wait_for_release(release);
+    expect(await bus.handle("webhook", "b", "u", "b1")).toBe("echo:b1");
+
+    const follow = bus.handle("webhook", "a", "u", "a3");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(records.map((record) => record.input)).toEqual(["a1", "b1"]);
+
+    const resume = release.run;
+    if (resume === undefined) {
+      throw new Error("in-flight run did not reach its gate");
+    }
+    resume();
+    expect(await inflight).toBe("echo:a2");
+    expect(await follow).toBe("echo:a3");
+    expect(records.map((record) => record.input)).toEqual(["a1", "b1", "a2", "a3"]);
+  });
 });
+
+async function wait_for_release(release: { run: (() => void) | undefined }): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (release.run !== undefined) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("in-flight run did not reach its gate");
+}
