@@ -6,6 +6,7 @@ import { parse_serve_event_params } from "./parse_event";
 import { create_prompt_submit_settle } from "./prompt_submit_settle";
 import { submit_notice_blocks } from "./submit_notices";
 import { event_blocks } from "./event_blocks";
+import { cleared_chat_local_state } from "./chat_local_state";
 import { user_block } from "./transcript";
 import { INITIAL_UI_STATE, type HistoryBlock, type UiState } from "./types";
 
@@ -190,5 +191,11 @@ describe("create_prompt_submit_settle", () => {
     expect(set_blocks).toHaveBeenCalled();
     expect(blocks.some((block) => block.lines.some((line) => line.includes("stale")))).toBe(true);
     expect(set_busy).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("cleared_chat_local_state", () => {
+  it("returns empty blocks and idle busy for session changes", () => {
+    expect(cleared_chat_local_state()).toEqual({ blocks: [], busy: false });
   });
 });

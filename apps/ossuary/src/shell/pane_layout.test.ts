@@ -23,14 +23,14 @@ function pane(
 describe("plan_pane_layout", () => {
   it("puts main first and docks others relative to it", () => {
     const planned = plan_pane_layout([
-      pane("lich.scratch", "right"),
+      pane("lich.status", "right"),
       pane("lich.chat", "main", false),
       pane("lich.tool_log", "bottom"),
     ]);
 
     expect(planned.map((item) => item.id)).toEqual([
       "lich.chat",
-      "lich.scratch",
+      "lich.status",
       "lich.tool_log",
     ]);
     expect(planned[0]).toMatchObject({
@@ -62,9 +62,9 @@ describe("plan_pane_layout", () => {
 
 describe("build_dock_components", () => {
   it("maps contribution ids to render components", () => {
-    const panes = [pane("lich.chat", "main"), pane("lich.scratch", "right")];
+    const panes = [pane("lich.chat", "main"), pane("lich.status", "right")];
     const components = build_dock_components(panes);
-    expect(Object.keys(components)).toEqual(["lich.chat", "lich.scratch"]);
+    expect(Object.keys(components)).toEqual(["lich.chat", "lich.status"]);
     expect(typeof components["lich.chat"]).toBe("function");
   });
 });

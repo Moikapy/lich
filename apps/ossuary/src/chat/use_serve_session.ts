@@ -12,7 +12,7 @@ import { session_create } from "./rpc";
 
 export function use_serve_session(
   connection: ConnectionInfo,
-  set_busy: Dispatch<SetStateAction<boolean>>,
+  set_busy?: Dispatch<SetStateAction<boolean>>,
 ): {
   session_id: string | undefined;
   session_error: string | undefined;
@@ -26,7 +26,7 @@ export function use_serve_session(
     if (connection.status !== "connected") {
       session_ref.current = undefined;
       set_session_id(undefined);
-      set_busy(false);
+      set_busy?.(false);
       return;
     }
     let cancelled = false;
