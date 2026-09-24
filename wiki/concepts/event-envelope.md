@@ -1,7 +1,7 @@
 ---
 title: Event envelope (run/session-scoped events)
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 type: concept
 tags: [events, core, serve, ossuary]
 sources: [raw/audits/2026-09-23-core-engine-audit.md, "#113"]
@@ -22,7 +22,7 @@ confidence: high
 - Add a per-run `on_event` in `AgentRunOptions`.
 - Slim down `llm_end`: send usage and finish reason, not the whole `ChatResult`.
 
-**Why it's urgent:** [[ossuary]] panes render from serve `event` notifications. If the envelope lands after the panes are built, every pane has to change. That is why [[0002-serve-pr-merge-path]] puts it **before #102 merges**.
+**Why it mattered:** [[ossuary]] panes render from serve `event` notifications. [[0002-serve-pr-merge-path]] planned the envelope **before #102 merged**, but #101/#102 landed with the Ossuary wave (#123) without it, so the panes already read a few payload fields and an envelope change now touches their parse path. Landing it is #114 item 2.
 
 Events are the UI contract of any harness. Every surface (TUI, desktop, game) renders from the event stream, so the envelope is the one format they all depend on. [[streaming-deltas]] extends the same envelope.
 

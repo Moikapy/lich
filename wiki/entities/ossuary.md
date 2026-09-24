@@ -1,7 +1,7 @@
 ---
 title: Ossuary (desktop app)
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 type: entity
 tags: [ossuary, surface, serve]
 sources: [raw/issues/issue-79.md, raw/audits/2026-09-23-game-surface-audit.md]
@@ -12,7 +12,7 @@ confidence: medium
 
 Ossuary is a Hermes-shaped desktop app built with Electron, React and Dockview (epic #79). Its code lives in `apps/ossuary`. The scaffold (#85) is merged on origin (`bad1243`). It is a client of [[lich-serve]], and the rule in #79 is: "Do not build panels on webhook `POST /message`."
 
-## Tracks (issues #86–#94, all with open PRs)
+## Tracks (issues #86–#94)
 
 - spawn `lich serve` and connect a WebSocket client (#86)
 - a Chat pane (#87)
@@ -26,7 +26,7 @@ Ossuary is a Hermes-shaped desktop app built with Electron, React and Dockview (
 
 ## Coupling risk
 
-Every pane renders from serve `event` notifications, and those carry raw `AgentEvent` values with no run or session id. If the event shape changes after the panes exist, every pane has to change. That is why [[0002-serve-pr-merge-path]] adds the [[event-envelope]] before #102 merges.
+Every pane renders from serve `event` notifications, and those carry raw `AgentEvent` values with no run or session id. [[0002-serve-pr-merge-path]] planned the [[event-envelope]] before #102 merged, but #101/#102 went in with the Ossuary wave (#123) without it — the panes already read a few payload fields (`apps/ossuary/src/chat/event_blocks.ts:6-20@db5c797`), so an envelope change now touches their parse path too. The remaining work is #114 item 2.
 
 The Ossuary client depends only on the method names from #80, which are stable, so the gateway-hub plan does not block it ([[0001-gateway-as-hub]]).
 

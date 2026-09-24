@@ -1,7 +1,7 @@
 ---
 title: Wiki index
 type: index
-updated: 2026-09-23
+updated: 2026-09-24
 ---
 
 # Lich Wiki: Index
@@ -20,7 +20,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[lich-sessions]]: JSONL phylacteries used as combat logs. There is no search, and gateway files are supersets of each other.
 - [[lich-mcp]]: an MCP client and catalog. Redot is a real entry and Godot has none. The code is spread over 21 micro-files.
 - [[lich-gateway]]: familiars routed into one shared Agent. The per-chat bus and read-only defaults make it a good hub.
-- [[lich-serve]]: WebSocket JSON-RPC for Ossuary (PRs #99–#103). It has one global queue and one Agent per process.
+- [[lich-serve]]: WebSocket JSON-RPC for Ossuary, fully merged (#99–#103). It still has one global queue, one Agent per process, and no event envelope.
 - [[ossuary]]: the Electron + Dockview desktop app (#79). It renders from serve events, so the event envelope needs to land first.
 
 ## Entities: the ecosystem and games
@@ -36,7 +36,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[tao-loop]]: the think-act-observe loop and the invariants every harness has to keep.
 - [[action-terminal-mode]]: one LLM call per decision, using `stop_on_tools`, `tool_choice` and deadlines with a fallback action.
 - [[client-executed-tools]]: the game owns its tools through `tool.invoke`/`tool.result`, which replaces the file bus.
-- [[event-envelope]]: events scoped by run and session, JSON-safe, with a per-run `on_event`. Needed before #102.
+- [[event-envelope]]: events scoped by run and session, JSON-safe, with a per-run `on_event`. Still needed — the panes now read raw fields (#114 item 2).
 - [[runtime-profile-session]]: one Runtime per process, cheap Profiles, and a Session per NPC.
 - [[prompt-cache-tiers]]: a byte-stable system prompt built in tiers, plus `cache_control` breakpoints (the Hermes approach).
 - [[memory-vs-skills]]: declarative memory vs procedural skills, loaded by progressive disclosure. Lich has neither yet.
@@ -54,7 +54,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 ## Decisions
 
 - [[0001-gateway-as-hub]] (proposed): build around the gateway; serve becomes its interactive adapter.
-- [[0002-serve-pr-merge-path]] (proposed): merge #99 and #103 as they are; add the SessionManager and event envelope before #101 and #102.
+- [[0002-serve-pr-merge-path]] (superseded by events): the merge order fired — #101/#102 merged without the SessionManager/envelope steps; remaining work is #114 item 2.
 - [[0003-subpath-exports-over-packages]] (proposed): one package, `exports` subpaths, `ink`/`react` as optional peers, layers enforced by lint.
 - [[0004-dry-policy]] (proposed): remove real duplication, merge over-split modules, and don't DRY the wire mapping.
 - [[0005-kanban-and-single-issue-workflow]] (accepted): the Lich Roadmap project, one issue per batch of changes, and agents advancing cards only on facts.

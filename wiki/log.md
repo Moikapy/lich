@@ -17,3 +17,4 @@ Append-only. One line per action: `- YYYY-MM-DD <op> | <summary> | <pages>`. Ops
 - 2026-09-23 create | Comparisons: lich-vs-hermes, game-transports, subpaths-vs-packages | comparisons/*
 - 2026-09-23 decide | 0001–0006: gateway as hub, serve PR path, subpath exports, DRY policy, kanban + single-issue workflow, in-repo wiki | decisions/*
 - 2026-09-23 query | Filed answers: build around the gateway, LLM wiki vs docs, project vs user skill | queries/*
+- 2026-09-24 update | Re-pinned serve/Ossuary pages after #99–#103 and the Ossuary wave (#123) merged; decision 0002 revisit fired (envelope/SessionManager not done pre-merge, work now #114 item 2); kanban.sh audit PR-linkage + page-cap fixes with regression tests (PR #124 review) | entities/lich-serve.md, entities/ossuary.md, concepts/event-envelope.md, decisions/0002-serve-pr-merge-path.md, index.md

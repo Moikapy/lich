@@ -18,7 +18,13 @@ need gh; need jq
 
 project_id() { gh project view "$NUM" --owner "$OWNER" --format json -q .id; }
 status_field() { gh project field-list "$NUM" --owner "$OWNER" --format json | jq -c '.fields[] | select(.name=="Status")'; }
-items() { gh project item-list "$NUM" --owner "$OWNER" -L 500 --format json | jq -c '[.items[] | {id, number: .content.number, type: .content.type, title: .content.title, status, labels}]'; }
+items() {
+  local json count
+  json=$(gh project item-list "$NUM" --owner "$OWNER" -L 500 --format json)
+  count=$(jq -r '.totalCount // 0' <<<"$json")
+  [ "$count" -le 500 ] || { echo "board has $count items; raise the -L limit in kanban.sh items()" >&2; exit 1; }
+  jq -c '[.items[] | {id, number: .content.number, type: .content.type, title: .content.title, status, labels}]' <<<"$json"
+}
 
 option_id() {
   local want="$1"
@@ -67,8 +73,8 @@ case "$cmd" in
   audit)
     board=$(items)
     open_issues=$(gh issue list --repo "$REPO" --state open -L 500 --json number,labels | jq -c '[.[] | {number, labels: [.labels[].name]}]')
-    pr_linked=$(gh pr list --repo "$REPO" --state open -L 200 --json title,body,closingIssuesReferences \
-      | jq -c '[.[] | ([.closingIssuesReferences[].number] + ([(.title + " " + (.body // "")) | scan("#([0-9]+)") | .[0] | tonumber])) ] | flatten | unique')
+    pr_linked=$(gh pr list --repo "$REPO" --state open -L 200 --json closingIssuesReferences \
+      | jq -c '[.[] | .closingIssuesReferences[].number] | unique')
     jq -rn --argjson b "$board" --argjson o "$open_issues" --argjson p "$pr_linked" '
       ($o | map(.number)) as $open
       | ($b | map(select(.type=="Issue")) | map(.number)) as $onboard
@@ -78,7 +84,7 @@ case "$cmd" in
         ( $b[] | select(.number as $n | $p | index($n)) | select(.status!="In Review" and .status!="Done") | "HAS-PR    #\(.number) has an open PR but Status=\(.status)" ),
         ( $b[] | select((.labels // []) | index("deferred")) | select(.status!="Deferred" and .status!="Done") | "LABEL     #\(.number) has label deferred but Status=\(.status)" ),
         ( $b[] | select(.status=="Deferred") | select((.labels // []) | index("deferred") | not) | "LABEL     #\(.number) Status=Deferred but lacks the deferred label" )
-    ' || true
+    '
     echo "audit complete"
     ;;
   *)
