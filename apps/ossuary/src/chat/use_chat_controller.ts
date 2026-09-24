@@ -31,6 +31,11 @@ export function use_chat_controller(): ChatController {
     }
   }, [runtime.connection.status]);
 
+  useEffect(() => {
+    set_blocks([]);
+    set_busy(false);
+  }, [runtime.session_id]);
+
   use_serve_events(runtime.session_ref, set_blocks);
   const { send, abort } = use_prompt_actions(
     runtime.session_ref,
