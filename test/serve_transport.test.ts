@@ -104,7 +104,7 @@ describe("serve rpc health", () => {
     });
   });
 
-  it("returns method-not-found for prompt.submit until #83", async () => {
+  it("returns agent-not-configured for prompt.submit without an agent", async () => {
     const sessions = create_serve_session_store(path.join(await make_temp_dir("serve-stub"), "s"));
     const raw = await handle_serve_rpc_message(
       JSON.stringify({
@@ -115,8 +115,9 @@ describe("serve rpc health", () => {
       }),
       { version: "9.9.9", sessions },
     );
-    const body = JSON.parse(raw ?? "") as { error?: { code?: number } };
-    expect(body.error?.code).toBe(-32601);
+    const body = JSON.parse(raw ?? "") as { error?: { code?: number; message?: string } };
+    expect(body.error?.code).toBe(-32000);
+    expect(body.error?.message).toMatch(/agent not configured/);
   });
 });
 
@@ -224,6 +225,49 @@ describe("serve websocket transport", () => {
       await expect(server.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
       await expect(server.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
     } finally {
+      await new Promise<void>((resolve) => holder.close(() => resolve()));
+    }
+  });
+
+  it("closes owned agent and clears prompts when bind fails", async () => {
+    const { Agent } = await import("../src/agent/agent.js");
+    const holder = createServer();
+    await new Promise<void>((resolve, reject) => {
+      holder.once("error", reject);
+      holder.listen(0, "127.0.0.1", () => resolve());
+    });
+    const occupied = (holder.address() as { port: number }).port;
+    const work_dir = await make_temp_dir("serve-bind-owned-agent");
+    const close_spy = vi.spyOn(Agent.prototype, "close");
+    try {
+      const server = create_serve_server({
+        port: occupied,
+        boot_stdout: null,
+        agent_config: {
+          providers: [
+            {
+              kind: "openai_compat",
+              name: "mock",
+              model: "mock-model",
+              base_url: "http://mock.local/v1",
+              fetch_fn: async () => new Response("{}", { status: 500 }),
+            },
+          ],
+          work_dir,
+          session_dir: path.join(work_dir, "sessions"),
+          tools_enabled: [],
+          log_level: "error",
+        },
+      });
+      servers.push(server);
+      await expect(server.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
+      expect(close_spy).toHaveBeenCalled();
+      expect(server.prompts).toBeUndefined();
+      // Retry must still be allowed (resources cleared, not "already started").
+      await expect(server.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
+      expect(close_spy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      close_spy.mockRestore();
       await new Promise<void>((resolve) => holder.close(() => resolve()));
     }
   });

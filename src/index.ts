@@ -86,6 +86,8 @@ export {
 export type { ServeBootInfo, ServeOptions, ServeServer } from "./serve/server.js";
 export { handle_serve_rpc_message } from "./serve/rpc.js";
 export type { ServeRpcContext } from "./serve/rpc.js";
+export { create_serve_prompt_service } from "./serve/prompts.js";
+export type { ServeEventNotify, ServePromptService } from "./serve/prompts.js";
 export {
   create_serve_session_store,
   DEFAULT_SERVE_SESSION_LIMIT,

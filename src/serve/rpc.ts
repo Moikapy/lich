@@ -1,6 +1,6 @@
 /**
  * JSON-RPC 2.0 request handling for `lich serve`.
- * Implements health + session.*; prompt.* stays -32601 until #83.
+ * Implements health, session.*, and prompt.* (Agent via ServePromptService).
  */
 import { safe_json_parse } from "../util/json.js";
 import type {
@@ -11,6 +11,7 @@ import type {
   ServeMethod,
 } from "./protocol.js";
 import { SERVE_ERROR_CODES, SERVE_METHODS } from "./protocol.js";
+import type { ServeEventNotify, ServePromptService } from "./prompts.js";
 import type { ServeSessionStore } from "./sessions.js";
 
 const SERVE_METHOD_SET: ReadonlySet<string> = new Set(SERVE_METHODS);
@@ -18,6 +19,10 @@ const SERVE_METHOD_SET: ReadonlySet<string> = new Set(SERVE_METHODS);
 export interface ServeRpcContext {
   version: string;
   sessions: ServeSessionStore;
+  /** Present when the server was started with an Agent / agent_config. */
+  prompts?: ServePromptService;
+  /** Server→client event fan-out for the active WebSocket (or test sink). */
+  notify?: ServeEventNotify;
 }
 
 export async function handle_serve_rpc_message(
@@ -42,7 +47,7 @@ export async function handle_serve_rpc_message(
       error_response(as_id(body.id), SERVE_ERROR_CODES.INVALID_REQUEST, "Invalid Request"),
     );
   }
-  // Notifications (no id) are ignored until event fan-out needs client→server notify.
+  // Client→server notifications (no id) are ignored.
   if (body.id === undefined) {
     return undefined;
   }
@@ -80,6 +85,12 @@ async function dispatch_method(
   }
   if (method === "session.resume") {
     return dispatch_session_resume(id, params, context.sessions);
+  }
+  if (method === "prompt.submit") {
+    return dispatch_prompt_submit(id, params, context);
+  }
+  if (method === "prompt.abort") {
+    return dispatch_prompt_abort(id, params, context);
   }
   return error_response(
     id,
@@ -161,6 +172,47 @@ async function dispatch_session_resume(
   }
 }
 
+async function dispatch_prompt_submit(
+  id: JsonRpcId | null,
+  params: unknown,
+  context: ServeRpcContext,
+): Promise<JsonRpcSuccess | JsonRpcError> {
+  if (context.prompts === undefined) {
+    return error_response(id, SERVE_ERROR_CODES.APPLICATION_ERROR, "agent not configured");
+  }
+  const parsed = parse_prompt_submit(params);
+  if (parsed === undefined) {
+    return error_response(id, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params");
+  }
+  const notify = context.notify ?? (() => undefined);
+  try {
+    const result = await context.prompts.submit(parsed, notify);
+    return { jsonrpc: "2.0", id: id as JsonRpcId, result };
+  } catch (error) {
+    return error_response(id, SERVE_ERROR_CODES.APPLICATION_ERROR, error_message(error));
+  }
+}
+
+function dispatch_prompt_abort(
+  id: JsonRpcId | null,
+  params: unknown,
+  context: ServeRpcContext,
+): JsonRpcSuccess | JsonRpcError {
+  if (context.prompts === undefined) {
+    return error_response(id, SERVE_ERROR_CODES.APPLICATION_ERROR, "agent not configured");
+  }
+  const session_id = read_string_field(params, "session_id");
+  if (session_id === undefined) {
+    return error_response(id, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params");
+  }
+  try {
+    const result = context.prompts.abort({ session_id });
+    return { jsonrpc: "2.0", id: id as JsonRpcId, result };
+  } catch (error) {
+    return error_response(id, SERVE_ERROR_CODES.APPLICATION_ERROR, error_message(error));
+  }
+}
+
 function parse_session_create(
   params: unknown,
 ): { source: string; label?: string } | undefined {
@@ -178,6 +230,22 @@ function parse_session_create(
     return undefined;
   }
   return { source: body.source, label: body.label };
+}
+
+function parse_prompt_submit(
+  params: unknown,
+): { session_id: string; text: string } | undefined {
+  if (typeof params !== "object" || params === null || Array.isArray(params)) {
+    return undefined;
+  }
+  const body = params as Record<string, unknown>;
+  if (typeof body.session_id !== "string" || body.session_id.length === 0) {
+    return undefined;
+  }
+  if (typeof body.text !== "string") {
+    return undefined;
+  }
+  return { session_id: body.session_id, text: body.text };
 }
 
 function read_string_field(params: unknown, key: string): string | undefined {
