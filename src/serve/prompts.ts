@@ -19,6 +19,8 @@ export type ServeEventNotify = (notification: ServeEventNotification) => void;
 export interface ServePromptService {
   submit(params: PromptSubmitParams, notify: ServeEventNotify): Promise<PromptSubmitResult>;
   abort(params: PromptAbortParams): PromptAbortResult;
+  /** Abort every in-flight run and forget the controllers (server stop). */
+  abort_all(): void;
 }
 
 /**
@@ -34,10 +36,11 @@ export function create_serve_prompt_service(
 
   return {
     submit: async (params, notify) => {
-      const bag = sessions.get(params.session_id);
-      if (bag === undefined) {
+      const bag_before = sessions.get(params.session_id);
+      if (bag_before === undefined) {
         throw new Error(`session not found: ${params.session_id}`);
       }
+      const epoch_before = bag_before.epoch;
 
       const previous = run_tail;
       let release!: () => void;
@@ -45,10 +48,28 @@ export function create_serve_prompt_service(
         release = resolve;
       });
       run_tail = previous.then(() => gate).catch(() => gate);
-      await previous.catch(() => undefined);
 
+      // Register before the queue wait so prompt.abort can cancel a queued run.
       const controller = new AbortController();
       inflight.set(params.session_id, controller);
+      await previous.catch(() => undefined);
+
+      // Aborted while queued: release the gate without starting the run.
+      if (controller.signal.aborted === true) {
+        if (inflight.get(params.session_id) === controller) {
+          inflight.delete(params.session_id);
+        }
+        release();
+        return {
+          session_id: params.session_id,
+          reply: undefined,
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          session_path: undefined,
+          turns_used: 0,
+          stopped_reason: "aborted",
+        };
+      }
+
       const stop = agent.events.on((event) => {
         notify({
           jsonrpc: "2.0",
@@ -59,12 +80,16 @@ export function create_serve_prompt_service(
       try {
         const result = await agent.run({
           input: params.text,
-          history: bag.history,
+          history: bag_before.history,
           signal: controller.signal,
-          session: bag.handle,
-          label: bag.source,
+          session: bag_before.handle,
+          label: bag_before.source,
         });
-        bag.history = [...result.messages];
+        // Write back only if clear() (or eviction) did not reset the bag mid-run.
+        const bag_after = sessions.get(params.session_id);
+        if (bag_after === bag_before && bag_after.epoch === epoch_before) {
+          bag_after.history = [...result.messages];
+        }
         return map_submit_result(params.session_id, result);
       } finally {
         stop();
@@ -81,6 +106,12 @@ export function create_serve_prompt_service(
       }
       controller.abort();
       return { session_id: params.session_id, aborted: true };
+    },
+    abort_all: () => {
+      for (const controller of inflight.values()) {
+        controller.abort();
+      }
+      inflight.clear();
     },
   };
 }

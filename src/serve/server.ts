@@ -187,6 +187,9 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       wss = undefined;
       await close_http(http_server);
       http_server = undefined;
+      // Abort in-flight model calls so prompt.submit chains settle; otherwise
+      // the first SIGINT/SIGTERM waits out the whole run before draining.
+      prompts?.abort_all();
       while (inflight.size > 0) {
         await Promise.allSettled(inflight);
       }

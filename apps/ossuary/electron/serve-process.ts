@@ -48,13 +48,14 @@ export async function spawn_lich_serve(
   }
 }
 
-function wait_for_boot(child: ChildProcess, timeout_ms: number): Promise<ServeBootInfo> {
+export function wait_for_boot(child: ChildProcess, timeout_ms: number): Promise<ServeBootInfo> {
   return new Promise((resolve, reject) => {
     let buffer = "";
     let stderr = "";
     let settled = false;
     const timer = setTimeout(() => {
-      finish_reject(new Error(`serve boot timeout; stderr=${stderr}`));
+      console.error(`serve boot timeout after ${timeout_ms}ms; stderr=${stderr}`);
+      finish_reject(new Error("serve failed to start"));
     }, timeout_ms);
 
     const on_err = (chunk: Buffer | string): void => {
@@ -72,7 +73,8 @@ function wait_for_boot(child: ChildProcess, timeout_ms: number): Promise<ServeBo
       }
     };
     const on_exit = (code: number | null): void => {
-      finish_reject(new Error(`serve exited early with code ${code}; stderr=${stderr}`));
+      console.error(`serve exited early with code ${code}; stderr=${stderr}`);
+      finish_reject(new Error("serve failed to start"));
     };
     const on_error = (error: Error): void => {
       console.error("serve spawn error", error);

@@ -2,6 +2,14 @@
 
 ## 0.9.0
 
+- `lich serve`: headless loopback WebSocket JSON-RPC agent — token-gated
+  upgrade, session.create/list/clear/resume, prompt.submit/abort with event
+  streaming, LRU-capped in-memory session bags, and stable client-facing
+  errors (no absolute paths).
+- `lich ossuary`: Electron desktop shell entry point that spawns `lich serve`
+  and connects the Ossuary renderer over the gateway IPC bridge.
+- export `create_serve_prompt_service`, `ServePromptService`, and
+  `ServeEventNotify` from the public API.
 - serve `error` notifications serialize `Error` as `{ name, message }` so JSON
   clients no longer receive `{}` from `JSON.stringify`.
 - close agent should-fixes (A-7/A-8/A-10–A-13): a truncated summarizer no longer

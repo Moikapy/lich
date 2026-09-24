@@ -76,6 +76,25 @@ describe("parse_args serve flags", () => {
       "--port must be an integer between 0 and 65535",
     );
   });
+
+  it("rejects a blank --port", () => {
+    expect(() => parse_args(["serve", "--port", ""])).toThrow(
+      "--port must be an integer between 0 and 65535",
+    );
+  });
+
+  it("treats serve as a flag value, not the subcommand", () => {
+    expect(() => parse_args(["--resume", "serve", "--host", "127.0.0.1"])).toThrow(
+      "unknown flag: --host",
+    );
+  });
+
+  it("gates serve flags on the first positional, skipping flag values", () => {
+    const options = parse_args(["--work-dir", "serve", "serve", "--host", "127.0.0.1"]);
+    expect(options.positionals).toEqual(["serve"]);
+    expect(options.serve_flags).toEqual({ host: "127.0.0.1" });
+    expect(options.overrides["work_dir"]).toBe("serve");
+  });
 });
 
 describe("run_cli serve wiring", () => {

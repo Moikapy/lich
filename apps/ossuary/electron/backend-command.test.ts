@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   build_serve_command,
   build_ws_url,
@@ -80,5 +80,13 @@ describe("backend-command", () => {
   it("resolves repo root from dist/electron", () => {
     const electron_dir = path.join("/repo", "apps", "ossuary", "dist", "electron");
     expect(resolve_repo_root_from_electron_dir(electron_dir)).toBe(path.resolve("/repo"));
+  });
+
+  it("throws stable text for missing cli and logs the path", () => {
+    const error_spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const missing_root = path.resolve(import.meta.dirname, "does-not-exist");
+    expect(() => build_serve_command({ repo_root: missing_root })).toThrow("serve failed to start");
+    expect(error_spy).toHaveBeenCalledTimes(1);
+    expect(String(error_spy.mock.calls[0]?.[0])).toContain("src/cli.ts");
   });
 });

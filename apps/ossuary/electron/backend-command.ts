@@ -54,7 +54,8 @@ export function build_serve_command(options: BackendCommandOptions): BackendComm
 
   const cli_ts = path.join(options.repo_root, "src", "cli.ts");
   if (existsSync(cli_ts) === false) {
-    throw new Error(`lich cli not found at ${cli_ts}`);
+    console.error(`lich cli not found at ${cli_ts}`);
+    throw new Error("serve failed to start");
   }
   return {
     command: "bun",

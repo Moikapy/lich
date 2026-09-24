@@ -7,6 +7,15 @@ import {
 
 describe("ipc-policy", () => {
   it("allows health, prompt.*, and session.* methods used by the renderer", () => {
+    expect([...GATEWAY_METHOD_ALLOWLIST].sort()).toEqual([
+      "health",
+      "prompt.abort",
+      "prompt.submit",
+      "session.clear",
+      "session.create",
+      "session.list",
+      "session.resume",
+    ]);
     for (const method of GATEWAY_METHOD_ALLOWLIST) {
       expect(() => assert_gateway_method(method)).not.toThrow();
     }

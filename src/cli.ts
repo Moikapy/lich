@@ -154,6 +154,43 @@ function empty_serve_flags(): ServeCliFlags {
   return {};
 }
 
+/** Flags whose next argv item is a value (skipped when pre-scanning for the subcommand). */
+const VALUE_TAKING_FLAGS: ReadonlySet<string> = new Set([
+  ...Object.keys(FLAG_KEYS),
+  "--config",
+  "--resume",
+  "--command",
+  "--url",
+  "--project-path",
+  "--arg",
+]);
+
+/**
+ * First positional argument, skipping flag/value pairs. Serve-only flags are
+ * gated on this: `serve` must be the subcommand, not a flag value
+ * (e.g. `--resume serve` must not enable --host/--port).
+ */
+function first_positional_of(argv: readonly string[]): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "--version") {
+      continue;
+    }
+    if (VALUE_TAKING_FLAGS.has(arg) === true) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--") === true) {
+      continue;
+    }
+    return arg;
+  }
+  return undefined;
+}
+
 /** Consume one serve-only flag. Returns the new index, or undefined if not ours. */
 function take_serve_flag(argv: readonly string[], index: number, flags: ServeCliFlags): number | undefined {
   const arg = argv[index];
@@ -168,11 +205,11 @@ function take_serve_flag(argv: readonly string[], index: number, flags: ServeCli
     flags.host = value;
     return index + 1;
   }
-  const port = Number(value);
-  if (Number.isInteger(port) === false || port < 0 || port > 65535) {
+  // /^\d+$/ rejects "" (Number("") is 0 → silent port 0) and non-integers.
+  if (/^\d+$/.test(value) === false || Number(value) > 65535) {
     throw new Error("--port must be an integer between 0 and 65535");
   }
-  flags.port = port;
+  flags.port = Number(value);
   return index + 1;
 }
 
@@ -184,7 +221,7 @@ export function parse_args(argv: string[]): CliOptions {
     serve_flags: empty_serve_flags(),
   };
   const mcp = argv.includes("mcp");
-  const serve = argv.includes("serve");
+  const serve = first_positional_of(argv) === "serve";
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) {

@@ -173,6 +173,146 @@ describe("serve prompt rpc", () => {
     expect(result.stopped_reason).toBe("aborted");
   });
 
+  it("returns an aborted result for a prompt aborted while queued", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-queued-abort");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    let release_first!: () => void;
+    const first_gate = new Promise<void>((resolve) => {
+      release_first = resolve;
+    });
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async () => {
+      fetch_calls += 1;
+      if (fetch_calls === 1) {
+        fetch_started();
+        await first_gate;
+      }
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "done" }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const first_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "first" },
+      2,
+    );
+    await started;
+    // Second submit queues behind the first; its controller must be registered
+    // before the queue wait so prompt.abort can cancel it.
+    const second_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "second" },
+      3,
+    );
+    const abort_response = await rpc(
+      context,
+      "prompt.abort",
+      { session_id: created.session_id },
+      4,
+    );
+    expect(abort_response.result).toEqual({ session_id: created.session_id, aborted: true });
+
+    release_first();
+    const first = (await first_promise).result as { stopped_reason: string; reply: string };
+    expect(first.stopped_reason).toBe("final");
+    expect(first.reply).toBe("done");
+    const second = (await second_promise).result as {
+      stopped_reason: string;
+      turns_used: number;
+      reply: string | undefined;
+      usage: { total_tokens: number };
+    };
+    expect(second.stopped_reason).toBe("aborted");
+    expect(second.turns_used).toBe(0);
+    expect(second.usage.total_tokens).toBe(0);
+    expect(second.reply).toBeUndefined();
+    expect(fetch_calls).toBe(1);
+  });
+
+  it("does not resurrect stale history after session.clear mid-run", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-clear-race");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    let release_first!: () => void;
+    const first_gate = new Promise<void>((resolve) => {
+      release_first = resolve;
+    });
+    const request_bodies: string[] = [];
+    const replies = ["stale-reply", "after-clear"];
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_calls += 1;
+      request_bodies.push(String(init?.body ?? ""));
+      if (fetch_calls === 1) {
+        fetch_started();
+        await first_gate;
+      }
+      return new Response(
+        JSON.stringify(
+          completion_body({ role: "assistant", content: replies[Math.min(fetch_calls, 2) - 1] }, "stop"),
+        ),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const submit_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "clear-me" },
+      2,
+    );
+    await started;
+    const cleared = await rpc(context, "session.clear", { session_id: created.session_id }, 3);
+    expect(cleared.result).toEqual({ session_id: created.session_id });
+
+    release_first();
+    const submit = (await submit_promise).result as { stopped_reason: string; reply: string };
+    expect(submit.stopped_reason).toBe("final");
+    // The finished run must not write its messages back into the cleared bag.
+    expect(sessions.get(created.session_id)?.history).toEqual([]);
+
+    // A subsequent submit works and starts from the cleared (empty) history.
+    const second = (await rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "after-clear" },
+      4,
+    )).result as { reply: string };
+    expect(second.reply).toBe("after-clear");
+    expect(request_bodies).toHaveLength(2);
+    expect(request_bodies[1]).toContain("after-clear");
+    expect(request_bodies[1]).not.toContain("stale-reply");
+    expect(request_bodies[1]).not.toContain("clear-me");
+    const history_after = sessions.get(created.session_id)?.history ?? [];
+    expect(JSON.stringify(history_after)).not.toContain("stale-reply");
+    expect(JSON.stringify(history_after)).not.toContain("clear-me");
+  });
+
   it("reuses one SessionHandle transcript across multi-turn submits", async () => {
     const work_dir = await make_temp_dir("serve-prompt-multi");
     const session_dir = path.join(work_dir, "sessions");
@@ -333,6 +473,69 @@ describe("serve prompt over websocket", () => {
       const result_index = messages.findIndex((message) => message.id === 2);
       const last_event_index = messages.map((message) => message.method).lastIndexOf("event");
       expect(last_event_index).toBeLessThan(result_index);
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("stop() aborts an in-flight prompt instead of draining the model call", async () => {
+    const work_dir = await make_temp_dir("serve-stop-abort");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_started();
+      const signal = init?.signal;
+      await new Promise<void>((_resolve, reject) => {
+        const fail = (): void => {
+          const error = new Error("fetch aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (signal?.aborted === true) {
+          fail();
+          return;
+        }
+        signal?.addEventListener("abort", fail, { once: true });
+      });
+      throw new Error("unreachable");
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      session_dir,
+      agent,
+      version: "9.9.9",
+    });
+    servers.push(server);
+    const boot = await server.start();
+
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session.create",
+        params: { source: "test" },
+      });
+      const session_id = (create_resp.result as { session_id: string }).session_id;
+      // Fire-and-forget: the reply may be lost to the concurrent close handshake.
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "prompt.submit",
+          params: { session_id, text: "hang" },
+        }),
+      );
+      await started;
+      const t0 = Date.now();
+      await server.stop();
+      // Without prompts.abort_all() the drain would wait out the hanging fetch.
+      expect(Date.now() - t0).toBeLessThan(5000);
     } finally {
       ws.close();
     }
