@@ -26,9 +26,10 @@ export function use_session_list(): SessionListState {
     [],
   );
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((): boolean => {
     if (connection.status !== "connected") {
-      return;
+      set_busy(false);
+      return false;
     }
     set_busy(true);
     void session_list()
@@ -38,6 +39,7 @@ export function use_session_list(): SessionListState {
       })
       .catch((err: unknown) => set_error(error_text(err)))
       .finally(() => set_busy(false));
+    return true;
   }, [connection.status]);
 
   useEffect(() => {

@@ -44,10 +44,17 @@ export function use_serve_session(
       set_busy?.(false);
       return;
     }
+    const existing = get_active_session();
+    if (existing !== undefined) {
+      session_ref.current = existing.session_id;
+      set_session_id(existing.session_id);
+      set_binding(existing);
+      return;
+    }
     let cancelled = false;
     void session_create("ossuary")
       .then((id) => {
-        if (cancelled || (get_active_session()?.seq ?? 0) > 0) {
+        if (cancelled || get_active_session() !== undefined) {
           return;
         }
         bind_active_session({ session_id: id, source: "auto_create" });

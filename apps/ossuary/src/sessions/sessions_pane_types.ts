@@ -10,7 +10,7 @@ export interface SessionListState {
   error: string | undefined;
   set_busy: (value: boolean) => void;
   set_error: (value: string | undefined) => void;
-  refresh: () => void;
+  refresh: () => boolean;
 }
 
 export interface SessionsPaneModel {
@@ -20,7 +20,7 @@ export interface SessionsPaneModel {
   highlight_id: string | undefined;
   busy: boolean;
   error: string | undefined;
-  refresh: () => void;
+  refresh: () => boolean;
   resume: (id: string) => void;
   start_fresh: () => void;
   clear_active: () => void;

@@ -41,15 +41,31 @@ describe("session_actions", () => {
     });
   });
 
-  it("start_fresh clears current then creates", async () => {
+  it("start_fresh creates first then clears the previous bag", async () => {
     bind_active_session({ session_id: "old", source: "auto_create" });
     clear_rpc.mockResolvedValueOnce("old");
     create_rpc.mockResolvedValueOnce("fresh-1");
     await start_fresh_session();
-    expect(clear_rpc).toHaveBeenCalledWith("old");
     expect(create_rpc).toHaveBeenCalledWith("ossuary", "fresh");
+    expect(clear_rpc).toHaveBeenCalledWith("old");
+    const create_order = create_rpc.mock.invocationCallOrder[0];
+    const clear_order = clear_rpc.mock.invocationCallOrder[0];
+    expect(create_order).toBeDefined();
+    expect(clear_order).toBeDefined();
+    expect(create_order!).toBeLessThan(clear_order!);
     expect(get_active_session()).toMatchObject({
       session_id: "fresh-1",
+      source: "create",
+    });
+  });
+
+  it("start_fresh still binds when create succeeds and previous clear fails", async () => {
+    bind_active_session({ session_id: "old", source: "auto_create" });
+    create_rpc.mockResolvedValueOnce("fresh-2");
+    clear_rpc.mockRejectedValueOnce(new Error("clear failed"));
+    await start_fresh_session();
+    expect(get_active_session()).toMatchObject({
+      session_id: "fresh-2",
       source: "create",
     });
   });

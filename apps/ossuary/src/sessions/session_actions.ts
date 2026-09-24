@@ -12,14 +12,14 @@ export async function resume_listed_session(id: string): Promise<void> {
   });
 }
 
-/** Clear current bag (if any), then create a fresh serve session. */
+/** Create a fresh serve session first, then clear the previous bag if any. */
 export async function start_fresh_session(): Promise<void> {
-  const current = get_active_session()?.session_id;
-  if (current !== undefined) {
-    await session_clear(current);
-  }
+  const previous = get_active_session()?.session_id;
   const session_id = await session_create("ossuary", "fresh");
   bind_active_session({ session_id, source: "create" });
+  if (previous !== undefined && previous !== session_id) {
+    await session_clear(previous).catch(() => undefined);
+  }
 }
 
 export async function clear_active_session(): Promise<void> {

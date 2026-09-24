@@ -19,7 +19,9 @@ export function use_sessions_pane(): SessionsPaneModel {
         .then(() => {
           set_error(undefined);
           if (then_refresh) {
-            refresh();
+            if (refresh() === false) {
+              set_busy(false);
+            }
           } else {
             set_busy(false);
           }
