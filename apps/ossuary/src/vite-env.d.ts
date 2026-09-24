@@ -12,6 +12,8 @@ declare global {
         error?: string;
       }>;
       requestGateway: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+      loadLayout: () => Promise<unknown | null>;
+      saveLayout: (layout: unknown) => Promise<void>;
       onConnection: (
         handler: (info: {
           status: "connecting" | "connected" | "error" | "stopped";
