@@ -146,6 +146,11 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
         http_server = undefined;
         wss = undefined;
         boot = undefined;
+        // Bind failed after resolve_agent: drop prompts and close an owned
+        // agent so a retry of start() does not leak MCP children.
+        prompts = undefined;
+        owned_agent?.close();
+        owned_agent = undefined;
         throw error;
       }
     },

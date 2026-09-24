@@ -74,8 +74,11 @@ export function create_serve_prompt_service(
             session: bag.handle,
             label: bag.source,
           });
-          if (bag.history === seed) {
-            bag.history = [...result.messages];
+          // Re-read after the run: LRU may have evicted this id, and
+          // session.clear may have replaced history — skip orphan writeback.
+          const live = sessions.get(params.session_id);
+          if (live !== undefined && live.history === seed) {
+            live.history = [...result.messages];
           }
           return map_submit_result(params.session_id, result);
         } finally {

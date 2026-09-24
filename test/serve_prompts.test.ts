@@ -349,6 +349,58 @@ describe("serve prompt rpc", () => {
     await submit_promise;
     expect(sessions.get(created.session_id)?.history).toEqual([]);
   });
+
+  it("skips history writeback when the session bag was LRU-evicted mid-run", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-lru-evict");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_fetch!: () => void;
+    const fetch_gate = new Promise<void>((resolve) => {
+      release_fetch = resolve;
+    });
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async () => {
+      fetch_started();
+      await fetch_gate;
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "late" }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir, 1);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const first = (await rpc(context, "session.create", { source: "a" }, 1)).result as {
+      session_id: string;
+    };
+    const bag = sessions.get(first.session_id)!;
+    const seed = bag.history;
+
+    const submit_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: first.session_id, text: "hang" },
+      2,
+    );
+    await started;
+
+    const second = (await rpc(context, "session.create", { source: "b" }, 3)).result as {
+      session_id: string;
+    };
+    expect(second.session_id).not.toBe(first.session_id);
+    expect(sessions.get(first.session_id)).toBeUndefined();
+
+    release_fetch();
+    const submit = await submit_promise;
+    expect((submit.result as { stopped_reason: string }).stopped_reason).toBe("final");
+    // Orphan bag must not receive the run transcript; store still has no entry.
+    expect(bag.history).toBe(seed);
+    expect(sessions.get(first.session_id)).toBeUndefined();
+  });
 });
 
 describe("serve prompt over websocket", () => {
