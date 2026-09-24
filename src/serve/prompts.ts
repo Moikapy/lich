@@ -31,8 +31,31 @@ export function create_serve_prompt_service(
   agent: Agent,
   sessions: ServeSessionStore,
 ): ServePromptService {
-  const inflight = new Map<string, AbortController>();
+  /** session_id → live AbortControllers (one running + any queued). */
+  const inflight = new Map<string, Set<AbortController>>();
   let run_tail: Promise<unknown> = Promise.resolve();
+
+  /** Add the controller to the session's set, creating the set on first use. */
+  function register_controller(session_id: string, controller: AbortController): void {
+    let controllers = inflight.get(session_id);
+    if (controllers === undefined) {
+      controllers = new Set<AbortController>();
+      inflight.set(session_id, controllers);
+    }
+    controllers.add(controller);
+  }
+
+  /** Drop the controller; forget the session's set once nothing is in flight. */
+  function unregister_controller(session_id: string, controller: AbortController): void {
+    const controllers = inflight.get(session_id);
+    if (controllers === undefined) {
+      return;
+    }
+    controllers.delete(controller);
+    if (controllers.size === 0) {
+      inflight.delete(session_id);
+    }
+  }
 
   return {
     submit: async (params, notify) => {
@@ -51,14 +74,12 @@ export function create_serve_prompt_service(
 
       // Register before the queue wait so prompt.abort can cancel a queued run.
       const controller = new AbortController();
-      inflight.set(params.session_id, controller);
+      register_controller(params.session_id, controller);
       await previous.catch(() => undefined);
 
       // Aborted while queued: release the gate without starting the run.
       if (controller.signal.aborted === true) {
-        if (inflight.get(params.session_id) === controller) {
-          inflight.delete(params.session_id);
-        }
+        unregister_controller(params.session_id, controller);
         release();
         return {
           session_id: params.session_id,
@@ -93,23 +114,25 @@ export function create_serve_prompt_service(
         return map_submit_result(params.session_id, result);
       } finally {
         stop();
-        if (inflight.get(params.session_id) === controller) {
-          inflight.delete(params.session_id);
-        }
+        unregister_controller(params.session_id, controller);
         release();
       }
     },
     abort: (params) => {
-      const controller = inflight.get(params.session_id);
-      if (controller === undefined) {
+      const controllers = inflight.get(params.session_id);
+      if (controllers === undefined || controllers.size === 0) {
         return { session_id: params.session_id, aborted: false };
       }
-      controller.abort();
+      for (const controller of controllers) {
+        controller.abort();
+      }
       return { session_id: params.session_id, aborted: true };
     },
     abort_all: () => {
-      for (const controller of inflight.values()) {
-        controller.abort();
+      for (const controllers of inflight.values()) {
+        for (const controller of controllers) {
+          controller.abort();
+        }
       }
       inflight.clear();
     },

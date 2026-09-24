@@ -3,13 +3,14 @@
  */
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
+import type { AgentConfig } from "../src/agent/config.js";
 import { create_agent } from "../src/agent/agent.js";
 import type { AgentEvent } from "../src/agent/events.js";
 import { handle_serve_rpc_message, type ServeRpcContext } from "../src/serve/rpc.js";
 import { create_serve_prompt_service } from "../src/serve/prompts.js";
-import { create_serve_server, type ServeServer } from "../src/serve/server.js";
+import { create_serve_server, run_serve, type ServeServer } from "../src/serve/server.js";
 import { create_serve_session_store } from "../src/serve/sessions.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
@@ -180,16 +181,27 @@ describe("serve prompt rpc", () => {
     const started = new Promise<void>((resolve) => {
       fetch_started = resolve;
     });
-    let release_first!: () => void;
-    const first_gate = new Promise<void>((resolve) => {
-      release_first = resolve;
-    });
     let fetch_calls = 0;
-    const fetch_fn: typeof fetch = async () => {
+    const fetch_fn: typeof fetch = async (_url, init) => {
       fetch_calls += 1;
       if (fetch_calls === 1) {
         fetch_started();
-        await first_gate;
+        // The running run must observe the abort even while a queued submit
+        // exists, so hang on the abort signal like a real provider call.
+        const signal = init?.signal;
+        await new Promise<void>((_resolve, reject) => {
+          const fail = (): void => {
+            const error = new Error("fetch aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (signal?.aborted === true) {
+            fail();
+            return;
+          }
+          signal?.addEventListener("abort", fail, { once: true });
+        });
+        throw new Error("unreachable");
       }
       return new Response(
         JSON.stringify(completion_body({ role: "assistant", content: "done" }, "stop")),
@@ -227,10 +239,10 @@ describe("serve prompt rpc", () => {
     );
     expect(abort_response.result).toEqual({ session_id: created.session_id, aborted: true });
 
-    release_first();
+    // Both controllers are aborted: the running run's fetch rejects and the
+    // queued submit settles with the zero-usage result.
     const first = (await first_promise).result as { stopped_reason: string; reply: string };
-    expect(first.stopped_reason).toBe("final");
-    expect(first.reply).toBe("done");
+    expect(first.stopped_reason).toBe("aborted");
     const second = (await second_promise).result as {
       stopped_reason: string;
       turns_used: number;
@@ -241,6 +253,152 @@ describe("serve prompt rpc", () => {
     expect(second.turns_used).toBe(0);
     expect(second.usage.total_tokens).toBe(0);
     expect(second.reply).toBeUndefined();
+    expect(fetch_calls).toBe(1);
+  });
+
+  it("abort cancels the running run even when another submit is queued", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-queued-cancel");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_calls += 1;
+      if (fetch_calls === 1) {
+        fetch_started();
+        const signal = init?.signal;
+        await new Promise<void>((_resolve, reject) => {
+          const fail = (): void => {
+            const error = new Error("fetch aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (signal?.aborted === true) {
+            fail();
+            return;
+          }
+          signal?.addEventListener("abort", fail, { once: true });
+        });
+        throw new Error("unreachable");
+      }
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "done" }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const first_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "first" },
+      2,
+    );
+    await started;
+    const second_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "second" },
+      3,
+    );
+    const abort_response = await rpc(
+      context,
+      "prompt.abort",
+      { session_id: created.session_id },
+      4,
+    );
+    expect(abort_response.result).toEqual({ session_id: created.session_id, aborted: true });
+
+    // The running run must be cancelled too, not just the queued one.
+    const first = (await first_promise).result as { stopped_reason: string };
+    expect(first.stopped_reason).toBe("aborted");
+    const second = (await second_promise).result as {
+      stopped_reason: string;
+      turns_used: number;
+      usage: { total_tokens: number };
+    };
+    expect(second.stopped_reason).toBe("aborted");
+    expect(second.turns_used).toBe(0);
+    expect(second.usage.total_tokens).toBe(0);
+    // The queued submit never started its model call.
+    expect(fetch_calls).toBe(1);
+  });
+
+  it("stop() aborts a running and a queued submit instead of draining the model call", async () => {
+    const work_dir = await make_temp_dir("serve-stop-queued-abort");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_calls += 1;
+      if (fetch_calls === 1) {
+        fetch_started();
+        const signal = init?.signal;
+        await new Promise<void>((_resolve, reject) => {
+          const fail = (): void => {
+            const error = new Error("fetch aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (signal?.aborted === true) {
+            fail();
+            return;
+          }
+          signal?.addEventListener("abort", fail, { once: true });
+        });
+        throw new Error("unreachable");
+      }
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "done" }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      session_dir,
+      agent,
+      version: "9.9.9",
+    });
+    servers.push(server);
+    await server.start();
+    const prompts = server.prompts;
+    if (prompts === undefined) {
+      throw new Error("prompts service missing");
+    }
+    const created = (await server.sessions.create({ source: "test" })).session_id;
+
+    const first_promise = prompts.submit(
+      { session_id: created, text: "first" },
+      () => undefined,
+    );
+    await started;
+    const second_promise = prompts.submit(
+      { session_id: created, text: "second" },
+      () => undefined,
+    );
+    const t0 = Date.now();
+    await server.stop();
+    // Without abort_all() the drain would wait out the hanging fetch.
+    expect(Date.now() - t0).toBeLessThan(5000);
+    const first = await first_promise;
+    expect(first.stopped_reason).toBe("aborted");
+    const second = await second_promise;
+    expect(second.stopped_reason).toBe("aborted");
+    expect(second.turns_used).toBe(0);
+    expect(second.usage.total_tokens).toBe(0);
     expect(fetch_calls).toBe(1);
   });
 
@@ -538,6 +696,30 @@ describe("serve prompt over websocket", () => {
       expect(Date.now() - t0).toBeLessThan(5000);
     } finally {
       ws.close();
+    }
+  });
+});
+
+describe("run_serve signal cleanup", () => {
+  it("removes SIGINT/SIGTERM handlers when start() rejects", async () => {
+    const once_spy = vi.spyOn(process, "once");
+    const off_spy = vi.spyOn(process, "off");
+    try {
+      // Empty providers fails config parsing inside create_agent_with_plugins,
+      // so start() rejects before binding any port.
+      const bad_config = { providers: [] } as unknown as AgentConfig;
+      await expect(run_serve(bad_config, {})).rejects.toThrow();
+      for (const signal of ["SIGINT", "SIGTERM"]) {
+        const once_call = once_spy.mock.calls.find((call) => String(call[0]) === signal);
+        expect(once_call).toBeDefined();
+        const listener = once_call?.[1];
+        expect(off_spy.mock.calls.some((call) => call[0] === signal && call[1] === listener)).toBe(
+          true,
+        );
+      }
+    } finally {
+      once_spy.mockRestore();
+      off_spy.mockRestore();
     }
   });
 });

@@ -77,7 +77,16 @@ export async function run_serve(
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
-  await server.start();
+  try {
+    await server.start();
+  } catch (error) {
+    // Detach the handlers and tear down the partial server so start() failure
+    // does not leak them (or a half-listening socket) for the process lifetime.
+    process.off("SIGINT", shutdown);
+    process.off("SIGTERM", shutdown);
+    await server.stop().catch(() => undefined);
+    throw error;
+  }
   return await new Promise<number>(() => undefined);
 }
 
