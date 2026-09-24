@@ -1,7 +1,16 @@
 /**
  * Pure IPC policy for the ossuary ↔ serve gateway bridge.
+ * Deny-by-default: only methods the renderer actually invokes.
  */
-export const GATEWAY_METHOD_ALLOWLIST: ReadonlySet<string> = new Set(["health"]);
+export const GATEWAY_METHOD_ALLOWLIST: ReadonlySet<string> = new Set([
+  "health",
+  "prompt.abort",
+  "prompt.submit",
+  "session.clear",
+  "session.create",
+  "session.list",
+  "session.resume",
+]);
 
 export function is_allowed_sender_url(
   url: string | undefined,
