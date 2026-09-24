@@ -51,5 +51,5 @@ export async function run_ossuary(
   if (ossuary_dir === undefined) {
     throw new Error(MISSING_OSSUARY);
   }
-  return runner(ossuary_dir, work_dir);
+  return runner(ossuary_dir, path.resolve(work_dir));
 }

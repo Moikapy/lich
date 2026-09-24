@@ -49,7 +49,7 @@ describe("run_ossuary", () => {
     await expect(run_ossuary(root, root)).rejects.toThrow(/ossuary is not available/);
   });
 
-  it("passes ossuary dir and work_dir to the runner", async () => {
+  it("passes ossuary dir and absolute work_dir to the runner", async () => {
     const root = await make_temp_dir("ossuary-run");
     const ossuary = path.join(root, "apps", "ossuary");
     await mkdir(ossuary, { recursive: true });
@@ -57,7 +57,23 @@ describe("run_ossuary", () => {
     const work_dir = path.join(root, "project");
     const runner = vi.fn(async () => 0);
     expect(await run_ossuary(root, work_dir, runner)).toBe(0);
-    expect(runner).toHaveBeenCalledWith(ossuary, work_dir);
+    expect(runner).toHaveBeenCalledWith(ossuary, path.resolve(work_dir));
+  });
+
+  it("resolves relative work_dir against process.cwd", async () => {
+    const root = await make_temp_dir("ossuary-rel");
+    const ossuary = path.join(root, "apps", "ossuary");
+    await mkdir(ossuary, { recursive: true });
+    await writeFile(path.join(ossuary, "package.json"), "{}");
+    const runner = vi.fn(async () => 0);
+    const previous = process.cwd();
+    process.chdir(root);
+    try {
+      expect(await run_ossuary(root, "./project", runner)).toBe(0);
+      expect(runner).toHaveBeenCalledWith(ossuary, path.resolve(root, "project"));
+    } finally {
+      process.chdir(previous);
+    }
   });
 });
 
