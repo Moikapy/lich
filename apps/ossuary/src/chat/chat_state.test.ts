@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { apply_event } from "./apply_event";
 import { apply_submit_result } from "./apply_submit_result";
+import { error_text } from "./error_text";
 import { parse_serve_event_params } from "./parse_event";
+import { create_prompt_submit_settle } from "./prompt_submit_settle";
 import { submit_notice_blocks } from "./submit_notices";
 import { event_blocks } from "./event_blocks";
 import { user_block } from "./transcript";
-import { INITIAL_UI_STATE, type UiState } from "./types";
+import { INITIAL_UI_STATE, type HistoryBlock, type UiState } from "./types";
 
 const usage = (total_tokens: number) => ({
   prompt_tokens: total_tokens,
@@ -44,6 +46,11 @@ describe("apply_event", () => {
       error: { message: "boom" },
     });
     expect(errored.last_error).toBe("boom");
+  });
+
+  it("falls back for empty wire error objects", () => {
+    const errored = apply_event(INITIAL_UI_STATE, { type: "error", error: {} });
+    expect(errored.last_error).toBe("unknown error");
   });
 });
 
@@ -102,5 +109,86 @@ describe("transcript helpers", () => {
     });
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.role).toBe("tool");
+  });
+
+  it("maps empty wire error objects to a notice without [object Object]", () => {
+    const blocks = event_blocks({ type: "error", error: {} });
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.role).toBe("error");
+    expect(blocks[0]?.lines.join("\n")).toContain("unknown error");
+    expect(blocks[0]?.lines.join("\n")).not.toContain("[object Object]");
+  });
+});
+
+describe("error_text", () => {
+  it("prefers message on wire-shaped objects and falls back for empty payloads", () => {
+    expect(error_text({ message: "boom" })).toBe("boom");
+    expect(error_text({})).toBe("unknown error");
+    expect(error_text({ message: 12 })).toBe("unknown error");
+    expect(error_text(new Error("live"))).toBe("live");
+    expect(error_text("plain")).toBe("plain");
+  });
+});
+
+describe("create_prompt_submit_settle", () => {
+  const result = {
+    session_id: "old",
+    reply: "stale",
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    session_path: "/tmp/s.jsonl",
+    turns_used: 1,
+    stopped_reason: "final" as const,
+  };
+
+  it("leaves transcript and busy unchanged when session_ref no longer matches", () => {
+    const session_ref = { current: "old" as string | undefined };
+    const set_ui = vi.fn() as unknown as (value: never) => void;
+    const set_blocks = vi.fn() as unknown as (value: never) => void;
+    const set_busy = vi.fn() as unknown as (value: never) => void;
+    const settle = create_prompt_submit_settle(
+      "old",
+      session_ref,
+      set_ui as never,
+      set_blocks as never,
+      set_busy as never,
+    );
+    session_ref.current = undefined;
+    settle.on_fulfilled(result);
+    settle.on_rejected(new Error("late"));
+    settle.on_settled();
+    expect(set_ui).not.toHaveBeenCalled();
+    expect(set_blocks).not.toHaveBeenCalled();
+    expect(set_busy).not.toHaveBeenCalled();
+  });
+
+  it("applies result and clears busy when the submitted session is still active", () => {
+    const session_ref = { current: "old" as string | undefined };
+    const blocks: HistoryBlock[] = [];
+    const set_ui = vi.fn((value: UiState | ((current: UiState) => UiState)) => {
+      if (typeof value === "function") {
+        value(INITIAL_UI_STATE);
+      }
+    });
+    const set_blocks = vi.fn(
+      (value: readonly HistoryBlock[] | ((current: readonly HistoryBlock[]) => readonly HistoryBlock[])) => {
+        if (typeof value === "function") {
+          blocks.splice(0, blocks.length, ...value(blocks));
+        }
+      },
+    );
+    const set_busy = vi.fn();
+    const settle = create_prompt_submit_settle(
+      "old",
+      session_ref,
+      set_ui,
+      set_blocks,
+      set_busy,
+    );
+    settle.on_fulfilled(result);
+    settle.on_settled();
+    expect(set_ui).toHaveBeenCalled();
+    expect(set_blocks).toHaveBeenCalled();
+    expect(blocks.some((block) => block.lines.some((line) => line.includes("stale")))).toBe(true);
+    expect(set_busy).toHaveBeenCalledWith(false);
   });
 });

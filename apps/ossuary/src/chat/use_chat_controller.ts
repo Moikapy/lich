@@ -1,5 +1,5 @@
 /** Compose Chat pane hooks: shared serve runtime + local transcript / composer. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { use_serve_runtime } from "../session/serve_runtime";
 import { use_prompt_actions } from "./use_prompt_actions";
 import { use_serve_events } from "./use_serve_events";
@@ -24,6 +24,12 @@ export function use_chat_controller(): ChatController {
   const [blocks, set_blocks] = useState<readonly HistoryBlock[]>([]);
   const [draft, set_draft] = useState("");
   const [busy, set_busy] = useState(false);
+
+  useEffect(() => {
+    if (runtime.connection.status !== "connected") {
+      set_busy(false);
+    }
+  }, [runtime.connection.status]);
 
   use_serve_events(runtime.session_ref, set_blocks);
   const { send, abort } = use_prompt_actions(

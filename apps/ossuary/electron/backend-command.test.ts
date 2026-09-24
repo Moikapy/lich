@@ -50,11 +50,31 @@ describe("backend-command", () => {
     expect(build_ws_url(boot)).toBe("ws://127.0.0.1:41234/?token=abc");
   });
 
+  it("omits boot line and token from parse errors", () => {
+    expect(() => parse_serve_boot_line("{not-json")).toThrow("invalid serve boot JSON");
+    expect(() => parse_serve_boot_line('{"port":0,"token":"secret-token"}')).toThrow(
+      "invalid serve boot port",
+    );
+    expect(() => parse_serve_boot_line('{"port":9,"token":""}')).toThrow("invalid serve boot token");
+    try {
+      parse_serve_boot_line('{"port":0,"token":"secret-token"}');
+    } catch (error) {
+      expect(String(error)).not.toContain("secret-token");
+    }
+  });
+
   it("extracts boot from chunked stdout", () => {
     const first = extract_boot_from_stdout('noise\n{"port":9,"tok', "");
     expect(first.boot).toBeUndefined();
+    expect(first.buffer).toBe('{"port":9,"tok');
     const second = extract_boot_from_stdout('en":"x"}\n', first.buffer);
     expect(second.boot).toEqual({ port: 9, token: "x" });
+  });
+
+  it("drops finished non-JSON lines from the buffer", () => {
+    const result = extract_boot_from_stdout("log line\nanother\n", "");
+    expect(result.boot).toBeUndefined();
+    expect(result.buffer).toBe("");
   });
 
   it("resolves repo root from dist/electron", () => {

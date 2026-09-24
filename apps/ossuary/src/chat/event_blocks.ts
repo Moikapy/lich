@@ -1,4 +1,5 @@
 /** Map one wire event to optional transcript blocks (tool rows, notices). */
+import { error_text } from "./error_text";
 import { compress_notice_block, error_notice_block, tool_result_block } from "./transcript";
 import type { HistoryBlock, WireAgentEvent } from "./types";
 
@@ -13,13 +14,7 @@ export function event_blocks(event: WireAgentEvent): readonly HistoryBlock[] {
     return [compress_notice_block(event.summary_chars)];
   }
   if (event.type === "error") {
-    const message =
-      event.error instanceof Error
-        ? event.error.message
-        : typeof event.error === "string"
-          ? event.error
-          : String(event.error);
-    return [error_notice_block(message)];
+    return [error_notice_block(error_text(event.error))];
   }
   return [];
 }

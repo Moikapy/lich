@@ -52,35 +52,59 @@ function wait_for_boot(child: ChildProcess, timeout_ms: number): Promise<ServeBo
   return new Promise((resolve, reject) => {
     let buffer = "";
     let stderr = "";
+    let settled = false;
     const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`serve boot timeout; stderr=${stderr}`));
+      finish_reject(new Error(`serve boot timeout; stderr=${stderr}`));
     }, timeout_ms);
 
     const on_err = (chunk: Buffer | string): void => {
       stderr += String(chunk);
     };
     const on_out = (chunk: Buffer | string): void => {
-      const extracted = extract_boot_from_stdout(String(chunk), buffer);
-      buffer = extracted.buffer;
-      if (extracted.boot !== undefined) {
-        cleanup();
-        resolve(extracted.boot);
+      try {
+        const extracted = extract_boot_from_stdout(String(chunk), buffer);
+        buffer = extracted.buffer;
+        if (extracted.boot !== undefined) {
+          finish_resolve(extracted.boot);
+        }
+      } catch (error) {
+        finish_reject(error instanceof Error ? error : new Error(String(error)));
       }
     };
     const on_exit = (code: number | null): void => {
-      cleanup();
-      reject(new Error(`serve exited early with code ${code}; stderr=${stderr}`));
+      finish_reject(new Error(`serve exited early with code ${code}; stderr=${stderr}`));
+    };
+    const on_error = (error: Error): void => {
+      console.error("serve spawn error", error);
+      finish_reject(new Error("serve failed to start"));
     };
     const cleanup = (): void => {
       clearTimeout(timer);
       child.stdout?.off("data", on_out);
       child.stderr?.off("data", on_err);
       child.off("exit", on_exit);
+      child.off("error", on_error);
+    };
+    const finish_resolve = (boot: ServeBootInfo): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(boot);
+    };
+    const finish_reject = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
     };
 
     child.stdout?.on("data", on_out);
     child.stderr?.on("data", on_err);
     child.once("exit", on_exit);
+    child.once("error", on_error);
   });
 }

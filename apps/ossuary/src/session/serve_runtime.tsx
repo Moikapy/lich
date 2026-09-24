@@ -42,6 +42,11 @@ export function ServeRuntimeProvider({ children }: { children: ReactNode }) {
   const [tool_log, set_tool_log] = useState<readonly ToolLogEntry[]>([]);
 
   useEffect(() => {
+    set_ui(INITIAL_UI_STATE);
+    set_tool_log([]);
+  }, [session_id]);
+
+  useEffect(() => {
     return subscribe_notifications((method, params) => {
       if (method !== "event") {
         return;

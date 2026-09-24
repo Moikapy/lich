@@ -228,6 +228,47 @@ describe("serve prompt rpc", () => {
     const response = await rpc(context, "prompt.abort", { session_id: created.session_id }, 2);
     expect(response.result).toEqual({ session_id: created.session_id, aborted: false });
   });
+
+  it("notifies JSON-safe error payloads instead of empty Error objects", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-error-wire");
+    const session_dir = path.join(work_dir, "sessions");
+    const agent = mock_agent(work_dir, async () => {
+      throw new Error("provider down");
+    });
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const events: AgentEvent[] = [];
+    const context: ServeRpcContext = {
+      version: "9.9.9",
+      sessions,
+      prompts,
+      notify: (notification) => {
+        events.push(JSON.parse(JSON.stringify(notification.params.event)) as AgentEvent);
+      },
+    };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const response = await rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "ping" },
+      2,
+    );
+    expect(response.error).toBeDefined();
+
+    const error_event = events.find((event) => event.type === "error");
+    expect(error_event?.type).toBe("error");
+    if (error_event?.type !== "error") {
+      return;
+    }
+    const payload = error_event.error as { name?: unknown; message?: unknown };
+    expect(typeof payload.name).toBe("string");
+    expect(typeof payload.message).toBe("string");
+    expect(String(payload.message).length).toBeGreaterThan(0);
+    expect(Object.keys(payload).sort()).toEqual(["message", "name"]);
+  });
 });
 
 describe("serve prompt over websocket", () => {

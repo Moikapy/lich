@@ -1,4 +1,5 @@
 /** Live tool_call_start / tool_call_end log docked beside Chat. */
+import { useEffect, useRef } from "react";
 import { truncate_text } from "../chat/transcript";
 import type { ToolLogEntry } from "../chat/tool_log";
 import { use_serve_runtime } from "../session/serve_runtime";
@@ -34,19 +35,28 @@ function format_row(entry: ToolLogEntry): string {
 
 export function ToolLogPane() {
   const { tool_log } = use_serve_runtime();
+  const list_ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = list_ref.current;
+    if (node === null) {
+      return;
+    }
+    node.scrollTop = node.scrollHeight;
+  }, [tool_log.length]);
 
   return (
     <section className="pane pane-tool-log" aria-label="Tool log" data-testid="tool-log-pane">
       <header className="pane-header">
         <h1>tool log</h1>
       </header>
-      <div className="tool-log-list" data-testid="tool-log-list">
+      <div className="tool-log-list" data-testid="tool-log-list" ref={list_ref}>
         {tool_log.length === 0 ? (
           <p className="pane-empty">Tool calls appear here during a run.</p>
         ) : (
           tool_log.map((entry) => (
             <pre
-              key={entry.id}
+              key={entry.key}
               className={`tool-log-row tool-log-${entry.status}`}
               data-testid="tool-log-row"
             >

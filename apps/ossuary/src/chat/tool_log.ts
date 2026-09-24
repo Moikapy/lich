@@ -6,6 +6,8 @@ export const TOOL_LOG_CAP = 100;
 export type ToolLogStatus = "running" | "ok" | "error" | "cancelled";
 
 export interface ToolLogEntry {
+  /** Stable React / upsert key; survives empty or repeated provider call ids. */
+  readonly key: string;
   readonly id: string;
   readonly turn: number;
   readonly name: string;
@@ -15,7 +17,12 @@ export interface ToolLogEntry {
   readonly error?: string;
 }
 
+export function tool_log_entry_key(turn: number, call: ToolCall, slot: number): string {
+  return `${turn}:${call.id}:${slot}`;
+}
+
 function entry_from_call(
+  key: string,
   turn: number,
   call: ToolCall,
   status: ToolLogStatus,
@@ -23,6 +30,7 @@ function entry_from_call(
   cancelled?: boolean,
 ): ToolLogEntry {
   return {
+    key,
     id: call.id,
     turn,
     name: call.name,
@@ -33,14 +41,29 @@ function entry_from_call(
   };
 }
 
-function upsert(entries: readonly ToolLogEntry[], next: ToolLogEntry): readonly ToolLogEntry[] {
-  const index = entries.findIndex((item) => item.id === next.id);
-  if (index < 0) {
-    return [...entries, next].slice(-TOOL_LOG_CAP);
+/** Latest running row with the same provider id + name (and turn when present). */
+function find_running_index(
+  entries: readonly ToolLogEntry[],
+  turn: number,
+  call: ToolCall,
+): number {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const item = entries[index];
+    if (
+      item !== undefined &&
+      item.status === "running" &&
+      item.turn === turn &&
+      item.id === call.id &&
+      item.name === call.name
+    ) {
+      return index;
+    }
   }
-  const copy = [...entries];
-  copy[index] = next;
-  return copy;
+  return -1;
+}
+
+function append(entries: readonly ToolLogEntry[], next: ToolLogEntry): readonly ToolLogEntry[] {
+  return [...entries, next].slice(-TOOL_LOG_CAP);
 }
 
 /** Append or update tool_log rows for tool_call_* wire events; ignore others. */
@@ -49,15 +72,34 @@ export function apply_tool_log_event(
   event: WireAgentEvent,
 ): readonly ToolLogEntry[] {
   if (event.type === "tool_call_start") {
-    return upsert(entries, entry_from_call(event.turn, event.call, "running"));
+    const key = tool_log_entry_key(event.turn, event.call, entries.length);
+    return append(entries, entry_from_call(key, event.turn, event.call, "running"));
   }
   if (event.type === "tool_call_end") {
     const status: ToolLogStatus =
       event.cancelled === true ? "cancelled" : event.result.ok === true ? "ok" : "error";
-    return upsert(
-      entries,
-      entry_from_call(event.turn, event.call, status, event.result, event.cancelled),
+    const index = find_running_index(entries, event.turn, event.call);
+    if (index < 0) {
+      const key = tool_log_entry_key(event.turn, event.call, entries.length);
+      return append(
+        entries,
+        entry_from_call(key, event.turn, event.call, status, event.result, event.cancelled),
+      );
+    }
+    const prior = entries[index];
+    if (prior === undefined) {
+      return entries;
+    }
+    const copy = [...entries];
+    copy[index] = entry_from_call(
+      prior.key,
+      event.turn,
+      event.call,
+      status,
+      event.result,
+      event.cancelled,
     );
+    return copy;
   }
   return entries;
 }

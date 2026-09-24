@@ -8,9 +8,12 @@ export function error_text(error: unknown): string {
   }
   if (error !== null && typeof error === "object" && "message" in error) {
     const message = (error as { message?: unknown }).message;
-    if (typeof message === "string") {
+    if (typeof message === "string" && message.length > 0) {
       return message;
     }
+  }
+  if (error !== null && typeof error === "object") {
+    return "unknown error";
   }
   return String(error);
 }

@@ -16,10 +16,9 @@ body,
   height: 100%;
 }
 
-.hello {
+.shell {
+  height: 100%;
   min-height: 100%;
-  display: grid;
-  place-items: center;
 }
 
 .hello h1,
@@ -30,11 +29,6 @@ body,
   letter-spacing: 0.08em;
   text-transform: lowercase;
   font-size: 1.1rem;
-}
-
-.shell {
-  height: 100%;
-  min-height: 100%;
 }
 
 .ossuary-dock {

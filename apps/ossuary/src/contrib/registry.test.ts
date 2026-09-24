@@ -118,6 +118,23 @@ describe("core contributions", () => {
     expect(list_panes()).toHaveLength(count);
   });
 
+  it("updates render and fills missing core panes on re-register", () => {
+    register_pane(pane("lich.chat"));
+    const chat_before = contrib_registry.get("lich.chat");
+    expect(chat_before?.render).toBe(stub_render);
+    expect(list_panes().map((item) => item.id)).toEqual(["lich.chat"]);
+
+    register_core_contributions();
+
+    const chat_after = contrib_registry.get("lich.chat");
+    expect(chat_after?.render).not.toBe(stub_render);
+    expect(list_panes().map((item) => item.id)).toEqual([
+      "lich.chat",
+      "lich.status",
+      "lich.tool_log",
+    ]);
+  });
+
   it("re-registers after clear()", () => {
     register_core_contributions();
     const count = list_panes().length;
