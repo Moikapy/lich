@@ -228,6 +228,127 @@ describe("serve prompt rpc", () => {
     const response = await rpc(context, "prompt.abort", { session_id: created.session_id }, 2);
     expect(response.result).toEqual({ session_id: created.session_id, aborted: false });
   });
+
+  it("aborts a queued submit before it starts running", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-queued-abort");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_hang!: () => void;
+    const hang = new Promise<void>((resolve) => {
+      release_hang = resolve;
+    });
+    let hang_started!: () => void;
+    const hang_ready = new Promise<void>((resolve) => {
+      hang_started = resolve;
+    });
+    let fetch_calls = 0;
+    const gated_fetch: typeof fetch = async () => {
+      fetch_calls += 1;
+      if (fetch_calls === 1) {
+        hang_started();
+        await hang;
+        return new Response(
+          JSON.stringify(completion_body({ role: "assistant", content: "first" }, "stop")),
+          { status: 200 },
+        );
+      }
+      throw new Error("queued submit should not fetch");
+    };
+    const agent = mock_agent(work_dir, gated_fetch);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const first_session = (await rpc(context, "session.create", { source: "a" }, 1)).result as {
+      session_id: string;
+    };
+    const second_session = (await rpc(context, "session.create", { source: "b" }, 2)).result as {
+      session_id: string;
+    };
+
+    const first_submit = rpc(
+      context,
+      "prompt.submit",
+      { session_id: first_session.session_id, text: "hang" },
+      3,
+    );
+    await hang_ready;
+
+    const queued_submit = rpc(
+      context,
+      "prompt.submit",
+      { session_id: second_session.session_id, text: "queued" },
+      4,
+    );
+    // Let the queued submit register on the run queue before aborting.
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    const abort_response = await rpc(
+      context,
+      "prompt.abort",
+      { session_id: second_session.session_id },
+      5,
+    );
+    expect(abort_response.result).toEqual({
+      session_id: second_session.session_id,
+      aborted: true,
+    });
+
+    release_hang();
+    const first = await first_submit;
+    const queued = await queued_submit;
+    expect((first.result as { stopped_reason: string }).stopped_reason).toBe("final");
+    expect((queued.result as { stopped_reason: string }).stopped_reason).toBe("aborted");
+    expect(fetch_calls).toBe(1);
+  });
+
+  it("does not restore history after session.clear during a run", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-clear-race");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_fetch!: () => void;
+    const fetch_gate = new Promise<void>((resolve) => {
+      release_fetch = resolve;
+    });
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async () => {
+      fetch_started();
+      await fetch_gate;
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "late" }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    // Seed history so clear empties a non-empty bag.
+    sessions.get(created.session_id)!.history = [
+      { role: "user", content: "old" },
+      { role: "assistant", content: "seed" },
+    ];
+
+    const submit_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "new" },
+      2,
+    );
+    await started;
+    const clear_response = await rpc(context, "session.clear", { session_id: created.session_id }, 3);
+    expect(clear_response.result).toEqual({ session_id: created.session_id });
+    expect(sessions.get(created.session_id)?.history).toEqual([]);
+
+    release_fetch();
+    await submit_promise;
+    expect(sessions.get(created.session_id)?.history).toEqual([]);
+  });
 });
 
 describe("serve prompt over websocket", () => {
@@ -292,6 +413,100 @@ describe("serve prompt over websocket", () => {
       const result_index = messages.findIndex((message) => message.id === 2);
       const last_event_index = messages.map((message) => message.method).lastIndexOf("event");
       expect(last_event_index).toBeLessThan(result_index);
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("serializes abort error events with name and message", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-ws-error");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_started();
+      const signal = init?.signal;
+      await new Promise<void>((_resolve, reject) => {
+        const fail = (): void => {
+          const error = new Error("fetch aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (signal?.aborted === true) {
+          fail();
+          return;
+        }
+        signal?.addEventListener("abort", fail, { once: true });
+      });
+      throw new Error("unreachable");
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      session_dir,
+      agent,
+      version: "9.9.9",
+    });
+    servers.push(server);
+    const boot = await server.start();
+
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session.create",
+        params: { source: "ossuary" },
+      });
+      const session_id = (create_resp.result as { session_id: string }).session_id;
+
+      const messages: Array<Record<string, unknown>> = [];
+      const done = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("ws abort timeout")), 10_000);
+        ws.on("message", (data) => {
+          const body = JSON.parse(String(data)) as Record<string, unknown>;
+          messages.push(body);
+          if (body.id === 2) {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "prompt.submit",
+          params: { session_id, text: "hang" },
+        }),
+      );
+      await started;
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "prompt.abort",
+          params: { session_id },
+        }),
+      );
+      await done;
+
+      const error_events = messages.filter((message) => {
+        if (message.method !== "event") {
+          return false;
+        }
+        const params = message.params as { event?: { type?: string } };
+        return params.event?.type === "error";
+      });
+      expect(error_events.length).toBeGreaterThan(0);
+      const error_params = error_events[0]?.params as {
+        event: { type: string; error: { name: string; message: string } };
+      };
+      expect(error_params.event.error.message.length).toBeGreaterThan(0);
+      expect(error_params.event.error.name.length).toBeGreaterThan(0);
     } finally {
       ws.close();
     }

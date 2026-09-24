@@ -140,6 +140,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       await close_http(http_server);
       http_server = undefined;
       boot = undefined;
+      prompts?.abort_all();
       prompts = undefined;
       owned_agent?.close();
       owned_agent = undefined;
