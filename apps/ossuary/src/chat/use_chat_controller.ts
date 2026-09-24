@@ -22,11 +22,11 @@ export interface ChatController {
 
 export function use_chat_controller(): ChatController {
   const connection = use_gateway_connection();
-  const { session_id, session_error, session_ref } = use_serve_session(connection);
   const [ui, set_ui] = useState<UiState>(INITIAL_UI_STATE);
   const [blocks, set_blocks] = useState<readonly HistoryBlock[]>([]);
   const [draft, set_draft] = useState("");
   const [busy, set_busy] = useState(false);
+  const { session_id, session_error, session_ref } = use_serve_session(connection, set_busy);
 
   use_serve_events(session_ref, set_ui, set_blocks);
   const { send, abort } = use_prompt_actions(

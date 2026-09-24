@@ -1,6 +1,7 @@
 /** prompt.submit / prompt.abort actions for the Chat pane. */
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { apply_submit_result } from "./apply_submit_result";
+import { error_text } from "./error_text";
 import { prompt_abort, prompt_submit } from "./rpc";
 import { submit_notice_blocks } from "./submit_notices";
 import { error_notice_block, user_block } from "./transcript";
@@ -24,7 +25,12 @@ export function use_prompt_actions(
     set_draft("");
     set_busy(true);
     set_blocks((current) => [...current, user_block(text)].slice(-HISTORY_CAP));
-    set_ui((current) => ({ ...current, phase: "thinking", active_tool: undefined }));
+    set_ui((current) => ({
+      ...current,
+      phase: "thinking",
+      active_tool: undefined,
+      last_error: undefined,
+    }));
     void prompt_submit(id, text)
       .then((result) => {
         set_ui((current) => apply_submit_result(current, result));
@@ -32,9 +38,7 @@ export function use_prompt_actions(
       })
       .catch((error: unknown) => {
         set_blocks((current) =>
-          [...current, error_notice_block(error instanceof Error ? error.message : String(error))].slice(
-            -HISTORY_CAP,
-          ),
+          [...current, error_notice_block(error_text(error))].slice(-HISTORY_CAP),
         );
         set_ui((current) => ({ ...current, phase: "idle" }));
       })
@@ -45,10 +49,23 @@ export function use_prompt_actions(
 
   const abort = useCallback(() => {
     const id = session_ref.current;
-    if (id !== undefined) {
-      void prompt_abort(id).catch(() => undefined);
+    if (id === undefined) {
+      return;
     }
-  }, [session_ref]);
+    void prompt_abort(id)
+      .then((aborted) => {
+        if (aborted === false) {
+          set_blocks((current) =>
+            [...current, error_notice_block("abort failed")].slice(-HISTORY_CAP),
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        set_blocks((current) =>
+          [...current, error_notice_block(error_text(error))].slice(-HISTORY_CAP),
+        );
+      });
+  }, [session_ref, set_blocks]);
 
   return { send, abort };
 }

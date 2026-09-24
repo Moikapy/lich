@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { apply_event } from "./apply_event";
 import { apply_submit_result } from "./apply_submit_result";
+import { error_text } from "./error_text";
 import { parse_serve_event_params } from "./parse_event";
 import { submit_notice_blocks } from "./submit_notices";
 import { event_blocks } from "./event_blocks";
@@ -44,6 +45,11 @@ describe("apply_event", () => {
       error: { message: "boom" },
     });
     expect(errored.last_error).toBe("boom");
+  });
+
+  it("falls back for empty wire error objects", () => {
+    const errored = apply_event(INITIAL_UI_STATE, { type: "error", error: {} });
+    expect(errored.last_error).toBe("unknown error");
   });
 });
 
@@ -102,5 +108,23 @@ describe("transcript helpers", () => {
     });
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.role).toBe("tool");
+  });
+
+  it("maps empty wire error objects to a notice without [object Object]", () => {
+    const blocks = event_blocks({ type: "error", error: {} });
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.role).toBe("error");
+    expect(blocks[0]?.lines.join("\n")).toContain("unknown error");
+    expect(blocks[0]?.lines.join("\n")).not.toContain("[object Object]");
+  });
+});
+
+describe("error_text", () => {
+  it("prefers message on wire-shaped objects and falls back for empty payloads", () => {
+    expect(error_text({ message: "boom" })).toBe("boom");
+    expect(error_text({})).toBe("unknown error");
+    expect(error_text({ message: 12 })).toBe("unknown error");
+    expect(error_text(new Error("live"))).toBe("live");
+    expect(error_text("plain")).toBe("plain");
   });
 });

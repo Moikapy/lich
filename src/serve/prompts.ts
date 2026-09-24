@@ -3,6 +3,7 @@
  * serialized runs, AbortSignal cancel, AgentEvent → WS notify.
  */
 import type { Agent, AgentRunResult } from "../agent/agent.js";
+import type { AgentEvent } from "../agent/events.js";
 import type {
   PromptAbortParams,
   PromptAbortResult,
@@ -52,7 +53,7 @@ export function create_serve_prompt_service(
         notify({
           jsonrpc: "2.0",
           method: SERVE_NOTIFICATION_EVENT,
-          params: { session_id: params.session_id, event },
+          params: { session_id: params.session_id, event: wire_agent_event(event) },
         });
       });
       try {
@@ -93,4 +94,19 @@ function map_submit_result(session_id: string, result: AgentRunResult): PromptSu
     turns_used: result.outcome.turns_used,
     stopped_reason: result.outcome.stopped_reason,
   };
+}
+
+/** JSON-safe AgentEvent — raw Error becomes `{}` under JSON.stringify. */
+function wire_agent_event(event: AgentEvent): AgentEvent {
+  if (event.type !== "error") {
+    return event;
+  }
+  return { type: "error", error: wire_error(event.error) };
+}
+
+function wire_error(error: unknown): unknown {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message };
+  }
+  return error;
 }
