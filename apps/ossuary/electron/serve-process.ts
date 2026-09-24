@@ -75,7 +75,8 @@ function wait_for_boot(child: ChildProcess, timeout_ms: number): Promise<ServeBo
       finish_reject(new Error(`serve exited early with code ${code}; stderr=${stderr}`));
     };
     const on_error = (error: Error): void => {
-      finish_reject(error);
+      console.error("serve spawn error", error);
+      finish_reject(new Error("serve failed to start"));
     };
     const cleanup = (): void => {
       clearTimeout(timer);

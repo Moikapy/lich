@@ -47,6 +47,6 @@ jobs:
         run: bun run typecheck
       - name: Test
         # Smoke spawn needs monorepo root deps; keep unit tests in this job.
-        run: bun x vitest run --exclude '**/*.smoke.test.ts'
+        run: node node_modules/vitest/vitest.mjs run --exclude '**/*.smoke.test.ts'
       - name: Build
         run: bun run build
