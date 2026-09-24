@@ -300,9 +300,12 @@ describe("process_list", () => {
     // present on any CI runner, unlike a spawned marker whose /proc cmdline is
     // transiently empty mid-exec, which raced on ubuntu runners (#118).
     const runner = path.basename(process.execPath);
-    const self_filter = await executor.execute("process_list", { filter: runner });
+    const self_filter = await executor.execute("process_list", { filter: runner, max_results: 500 });
     expect(self_filter.ok).toBe(true);
     expect(self_filter.output.includes(runner)).toBe(true);
+    // Require our own row via its pid prefix: the bare substring match above
+    // would also pass on any foreign cmdline mentioning the runner token (#119).
+    expect(self_filter.output.split("\n").some((line) => line.startsWith(`${process.pid}\t`))).toBe(true);
     const filtered = await executor.execute("process_list", { filter: "no_such_filter_xyz" });
     expect(filtered.ok).toBe(true);
     expect(filtered.output).toBe("no matching processes");
