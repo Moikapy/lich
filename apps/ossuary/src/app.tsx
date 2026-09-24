@@ -1,10 +1,24 @@
-import { ChatPane } from "./panes/chat";
+import { register_core_contributions } from "./contrib/register_core";
+import { list_panes } from "./contrib/registry";
+import { DockShell } from "./shell/dock_shell";
 
-/** Full-window Chat until Dockview (#89) hosts registered `lich.chat`. */
+register_core_contributions();
+
+/** Dockview shell over contribution-registered panes (`lich.chat` is main). */
 export function App() {
+  const panes = list_panes();
+  if (panes.length === 0) {
+    return (
+      <main className="hello">
+        <h1>ossuary</h1>
+        <p>No panes registered.</p>
+      </main>
+    );
+  }
+
   return (
-    <main className="shell" data-pane-id="lich.chat">
-      <ChatPane />
+    <main className="shell" data-testid="dock-shell">
+      <DockShell panes={panes} />
     </main>
   );
 }
