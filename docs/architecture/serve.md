@@ -11,7 +11,7 @@ This page documents the shared contract in
 [`src/serve/protocol.ts`](../../src/serve/protocol.ts), the loopback
 WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts),
 and prompt/event handling in [`src/serve/prompts.ts`](../../src/serve/prompts.ts).
-The `lich serve` CLI lands in #84.
+Start it with `lich serve` (or `bun src/cli.ts serve`).
 
 ## Role in the system
 
@@ -119,14 +119,9 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
   in-order replies even when earlier requests hit slower filesystem awaits.
   Exception: `prompt.abort` bypasses the per-connection queue so it can cancel
   an in-flight `prompt.submit` on the same socket.
-- `session_dir` defaults to `<cwd>/.lich/sessions` until the #84 CLI passes the
-  agent config's `session_dir` (derived from `work_dir`) explicitly.
+- `session_dir` defaults to `<cwd>/.lich/sessions` when omitted; the CLI passes
+  `config.session_dir` (`${work_dir}/.lich/sessions`) explicitly.
 - Pass `agent` or `agent_config` (same shape as CLI / `create_agent_with_plugins`) so
   `prompt.*` is available; without an agent, those methods return an application error.
-
-## Not in this layer yet
-
-- No `lich serve` CLI entry (#84). The CLI must pass `config.session_dir`
-  explicitly — the library default is `process.cwd()/.lich/sessions`, which
-  diverges from `AgentConfig`'s `${work_dir}/.lich/sessions` when launched
-  from another directory.
+- **CLI:** `lich serve [--host 127.0.0.1] [--port 0]` builds the Agent from the same
+  config resolution as TUI/chat and passes it as `agent_config` (plus `session_dir`).

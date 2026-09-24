@@ -8,6 +8,7 @@ import path from "node:path";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { LICH_VERSION } from "../version.js";
 import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
+import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
 import { create_serve_prompt_service, type ServePromptService } from "./prompts.js";
 import { handle_serve_rpc_message } from "./rpc.js";
@@ -55,14 +56,46 @@ export interface ServeServer {
   readonly prompts: ServePromptService | undefined;
 }
 
+/**
+ * CLI entry: bind loopback with the same Agent config as `lich tui` / chat,
+ * emit boot JSON, then stay alive until SIGINT/SIGTERM.
+ */
+export async function run_serve(
+  config: AgentConfig,
+  options: { host?: string; port?: number } = {},
+): Promise<number> {
+  const server = create_serve_server({
+    host: options.host,
+    port: options.port,
+    agent_config: config,
+    session_dir: config.session_dir,
+  });
+  const shutdown = (): void => {
+    void server.stop().finally(() => {
+      process.exit(0);
+    });
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  try {
+    await server.start();
+  } catch (error) {
+    process.off("SIGINT", shutdown);
+    process.off("SIGTERM", shutdown);
+    // stop() closes owned_agent even when listen never succeeded.
+    await server.stop();
+    throw error;
+  }
+  return await new Promise<number>(() => undefined);
+}
+
 export function create_serve_server(options: ServeOptions = {}): ServeServer {
   const host = options.host ?? DEFAULT_SERVE_HOST;
   const want_port = options.port ?? DEFAULT_SERVE_PORT;
   const token = options.token ?? randomBytes(TOKEN_BYTES).toString("hex");
   const version = options.version ?? LICH_VERSION;
-  // TODO(#84): derive from the loaded agent config (`config.session_dir`)
-  // rather than cwd — until the CLI passes it explicitly, `lich serve`
-  // launched from a different work_dir would read a different transcript dir.
+  // Library default is cwd-based; `run_serve` / callers should pass
+  // `config.session_dir` (`${work_dir}/.lich/sessions`) explicitly.
   const session_dir = options.session_dir ?? path.join(process.cwd(), ".lich", "sessions");
   const sessions = create_serve_session_store(session_dir, options.max_session_bags);
   assert_loopback_host(host);
