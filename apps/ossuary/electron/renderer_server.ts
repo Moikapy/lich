@@ -1,5 +1,5 @@
 /** Loopback static server for Vite renderer — Dockview needs http://127.0.0.1 (#93). */
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -29,12 +29,22 @@ function resolve_safe(root: string, url_path: string): string | null {
   return full === root || full.startsWith(prefix) ? full : null;
 }
 
+function host_allowed(req: IncomingMessage, port: number): boolean {
+  const host = req.headers.host;
+  return host === `127.0.0.1:${port}`;
+}
+
 /** Serve `root_dir` on `http://127.0.0.1:<ephemeral>`. */
 export async function start_renderer_server(root_dir: string): Promise<RendererServer> {
   const root = path.resolve(root_dir);
-  const server = createServer((req, res) => {
+  let bound_port = 0;
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     void (async () => {
       try {
+        if (host_allowed(req, bound_port) === false) {
+          res.writeHead(403).end();
+          return;
+        }
         const file = resolve_safe(root, req.url ?? "/");
         if (file === null || (await stat(file)).isFile() === false) {
           res.writeHead(file === null ? 403 : 404).end();
@@ -53,8 +63,13 @@ export async function start_renderer_server(root_dir: string): Promise<RendererS
   });
   const addr = server.address();
   if (addr === null || typeof addr === "string") throw new Error("renderer server has no TCP address");
+  bound_port = addr.port;
   return {
     origin: `http://127.0.0.1:${addr.port}`,
-    close: () => new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.closeAllConnections();
+        server.close((err) => (err ? reject(err) : resolve()));
+      }),
   };
 }

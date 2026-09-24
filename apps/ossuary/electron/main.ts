@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolve_repo_root_from_electron_dir } from "./backend-command.js";
@@ -92,6 +92,14 @@ function window_web_prefs() {
   };
 }
 
+function attach_navigation_guard(win: BrowserWindow): void {
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!is_allowed_navigation(url)) {
+      event.preventDefault();
+    }
+  });
+}
+
 function attach_popout_handler(win: BrowserWindow): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (is_allowed_popout_url(url, renderer_origin) === false) {
@@ -104,6 +112,10 @@ function attach_popout_handler(win: BrowserWindow): void {
       },
     };
   });
+  win.webContents.on("did-create-window", (child) => {
+    child.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    attach_navigation_guard(child);
+  });
 }
 
 function create_window(): BrowserWindow {
@@ -114,11 +126,7 @@ function create_window(): BrowserWindow {
     webPreferences: window_web_prefs(),
   });
   attach_popout_handler(win);
-  win.webContents.on("will-navigate", (event, url) => {
-    if (!is_allowed_navigation(url)) {
-      event.preventDefault();
-    }
-  });
+  attach_navigation_guard(win);
   void win.loadURL(renderer_origin);
   return win;
 }
@@ -229,7 +237,7 @@ function stop_backend(): void {
 
 async function resolve_renderer_origin(): Promise<string> {
   const dev_url = process.env.VITE_DEV_SERVER_URL;
-  if (dev_url) {
+  if (dev_url && app.isPackaged === false) {
     return dev_url.replace(/\/$/, "");
   }
   renderer_server = await start_renderer_server(path.join(__dirname, "../renderer"));
@@ -238,7 +246,14 @@ async function resolve_renderer_origin(): Promise<string> {
 
 app.whenReady().then(async () => {
   register_ipc();
-  renderer_origin = await resolve_renderer_origin();
+  try {
+    renderer_origin = await resolve_renderer_origin();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    dialog.showErrorBox("ossuary", `Failed to start renderer: ${message}`);
+    app.quit();
+    return;
+  }
   main_window = create_window();
   try {
     await start_backend();

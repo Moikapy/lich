@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,7 +18,7 @@ describe("start_renderer_server", () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "ossuary-renderer-"));
     created.push(root);
     await writeFile(path.join(root, "index.html"), "<html><body>main</body></html>\n");
-    await writeFile(path.join(root, "popout.html"), "<html><body></body></html>\n");
+    await writeFile(path.join(root, "popout.html"), "<html><body><main></main></body></html>\n");
 
     const server = await start_renderer_server(root);
     servers.push(server);
@@ -29,7 +30,7 @@ describe("start_renderer_server", () => {
 
     const popout = await fetch(`${server.origin}/popout.html`);
     expect(popout.status).toBe(200);
-    expect(await popout.text()).toContain("<body></body>");
+    expect(await popout.text()).toContain("<main></main>");
   });
 
   it("rejects path traversal outside the renderer root", async () => {
@@ -40,7 +41,37 @@ describe("start_renderer_server", () => {
 
     const server = await start_renderer_server(root);
     servers.push(server);
-    const res = await fetch(`${server.origin}/../package.json`);
-    expect([403, 404]).toContain(res.status);
+    const port = Number(new URL(server.origin).port);
+    const res = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = http.get(
+        { host: "127.0.0.1", port, path: "/%2e%2e/package.json" },
+        (response) => {
+          response.resume();
+          resolve({ status: response.statusCode ?? 0 });
+        },
+      );
+      req.on("error", reject);
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects requests with a non-loopback Host header", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ossuary-renderer-"));
+    created.push(root);
+    await writeFile(path.join(root, "index.html"), "ok\n");
+    const server = await start_renderer_server(root);
+    servers.push(server);
+    const port = Number(new URL(server.origin).port);
+    const res = await new Promise<{ status: number }>((resolve, reject) => {
+      const req = http.get(
+        { host: "127.0.0.1", port, path: "/", headers: { Host: `evil.example:${port}` } },
+        (response) => {
+          response.resume();
+          resolve({ status: response.statusCode ?? 0 });
+        },
+      );
+      req.on("error", reject);
+    });
+    expect(res.status).toBe(403);
   });
 });
