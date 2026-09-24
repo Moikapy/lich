@@ -8,9 +8,10 @@ Twitch, or an HTTP webhook; serve owns sessions, live `AgentEvent` streaming,
 and abort.
 
 This page documents the shared contract in
-[`src/serve/protocol.ts`](../../src/serve/protocol.ts) and the loopback
-WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts).
-Prompt RPC and the `lich serve` CLI land in follow-up issues.
+[`src/serve/protocol.ts`](../../src/serve/protocol.ts), the loopback
+WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts),
+and prompt/event handling in [`src/serve/prompts.ts`](../../src/serve/prompts.ts).
+Start it with `lich serve` (or `bun src/cli.ts serve`).
 
 ## Role in the system
 
@@ -53,8 +54,7 @@ method `event` (no `id`).
 `params: {}`, because `ServeRequest` requires `params`. JSON-RPC 2.0 also
 allows omitting `params`; serve handlers accept that omission the same as `{}`.
 
-`prompt.*` may extend this map in later issues (#83); clients must not invent
-method names outside the locked set above until those land.
+Clients must not invent method names outside the locked set above.
 
 `session.create` opens one `SessionHandle` and an empty in-memory history bag,
 and eagerly creates the (empty) `.jsonl` transcript so `session.list` sees the
@@ -64,10 +64,10 @@ transcript is untouched). `session.list` / `session.resume` reuse
 [`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
 semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds
 history from disk and opens a fresh `SessionHandle` for later `prompt.submit`
-(#83) — like CLI `--resume`, each resume forks a new transcript; it does not
+— like CLI `--resume`, each resume forks a new transcript; it does not
 re-bind the original. The fork is written from the filtered bag history
 (every trailing user already dropped by `read_session_messages`), not a raw byte
-copy, and the handle is marked seeded so a later `prompt.submit` (#83)
+copy, and the handle is marked seeded so a later `prompt.submit`
 `recorder.seed` appends only the new turn. A later `latest` resume (or the
 fork id after a restart) reloads that filtered history. A transcript that is
 deleted between resolve and read resumes as `not_found`, never as an empty
@@ -80,8 +80,14 @@ oldest is evicted first, and `ServeServer.stop()` drops all of them — after
 draining in-flight RPC handlers, so a mid-I/O `session.create` /
 `session.resume` cannot resurrect a bag after shutdown. Eviction is log-only
 — there is no client notification; a client operating on an evicted id learns
-about it from the next `session.clear` (or #83 `prompt.submit`) failing with
+about it from the next `session.clear` or `prompt.submit` failing with
 `not_found`. Evicted transcripts stay on disk and can be resumed again.
+
+`prompt.submit` runs the server Agent with that bag's history and
+`AgentRunOptions.session` (one JSONL file per serve session). Runs are serialized
+so AgentEvent fan-out stays correctly tagged with `session_id`. While a run is
+in flight, `prompt.abort` aborts it via `AbortSignal`. The submit result mirrors
+`AgentRunResult` (`reply`, `usage`, `session_path`, `turns_used`, `stopped_reason`).
 
 ## Notifications
 
@@ -91,7 +97,8 @@ about it from the next `session.clear` (or #83 `prompt.submit`) failing with
 
 Events are 1:1 with the in-process emitter — `turn_start`, `llm_*`,
 `tool_call_*`, `final`, `error`, and the rest — so a Chat pane can mirror TUI
-semantics without embedding `Agent` in Electron.
+semantics without embedding `Agent` in Electron. Notifications are pushed on the
+same WebSocket that issued `prompt.submit` while the call is still in flight.
 
 ## Transport (loopback)
 
@@ -108,14 +115,9 @@ semantics without embedding `Agent` in Electron.
 - `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
 - Frames are handled per-connection in arrival order: pipelined requests get
   in-order replies even when earlier requests hit slower filesystem awaits.
-- `session_dir` defaults to `<cwd>/.lich/sessions` until the #84 CLI passes the
-  agent config's `session_dir` (derived from `work_dir`) explicitly.
-
-## Not in this layer yet
-
-- No `lich serve` CLI entry (#84). The CLI must pass `config.session_dir`
-  explicitly — the library default is `process.cwd()/.lich/sessions`, which
-  diverges from `AgentConfig`'s `${work_dir}/.lich/sessions` when launched
-  from another directory.
-- No `prompt.*` handlers (#83) — locked names return method-not-found until implemented.
-- No Agent construction yet (also #83).
+- Pass `agent` or `agent_config` (same shape as CLI / `create_agent_with_plugins`) so
+  `prompt.*` is available; without an agent, those methods return an application error.
+- **CLI:** `lich serve [--host 127.0.0.1] [--port 0]` builds the Agent from the same
+  config resolution as TUI/chat and passes it as `agent_config` with
+  `session_dir` from the agent config (`${work_dir}/.lich/sessions`). The library
+  default when `session_dir` is omitted remains `<cwd>/.lich/sessions`.

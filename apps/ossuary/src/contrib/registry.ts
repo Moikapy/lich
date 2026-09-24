@@ -8,6 +8,8 @@ export type ContribArea = "panes" | (string & {});
 
 export interface PaneContributionData {
   placement: PanePlacement;
+  /** When false, Dockview hides the tab close control. Defaults to true. */
+  closable?: boolean;
 }
 
 /**
@@ -26,7 +28,6 @@ export type PaneContribution = Contribution<PaneContributionData>;
 
 /** Pane input without `area`; the registry pins it to `"panes"`. */
 export type PaneContributionInput = Omit<PaneContribution, "area">;
-
 /**
  * In-memory contribution registry. Registration rejects duplicate ids so
  * conflicting core/plugin panes fail loudly at startup.

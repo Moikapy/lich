@@ -33,7 +33,8 @@ describe("contrib registry", () => {
 
   it("registers and lists panes in registration order", () => {
     registry.register_pane(pane("lich.chat", "main"));
-    registry.register_pane(pane("lich.tool_log", "right"));
+    registry.register_pane(pane("lich.status", "right"));
+    registry.register_pane(pane("lich.tool_log", "bottom"));
     registry.register({
       id: "other.commands",
       area: "commands",
@@ -43,10 +44,16 @@ describe("contrib registry", () => {
     });
 
     const panes = registry.list_panes();
-    expect(panes.map((item) => item.id)).toEqual(["lich.chat", "lich.tool_log"]);
+    expect(panes.map((item) => item.id)).toEqual([
+      "lich.chat",
+      "lich.status",
+      "lich.tool_log",
+    ]);
     expect(panes[0]?.area).toBe("panes");
     expect(panes[0]?.data).toEqual({ placement: "main" });
-    expect(registry.list("panes")).toHaveLength(2);
+    expect(panes[1]?.data).toEqual({ placement: "right" });
+    expect(panes[2]?.data).toEqual({ placement: "bottom" });
+    expect(registry.list("panes")).toHaveLength(3);
     expect(registry.list("commands")).toHaveLength(1);
     expect(registry.list("missing")).toEqual([]);
   });
@@ -100,21 +107,41 @@ describe("core contributions", () => {
   it("registers lich.chat as the main pane", () => {
     register_core_contributions();
     const panes = list_panes();
-    expect(panes.map((item) => item.id)).toEqual(["lich.chat"]);
-    expect(panes[0]?.data.placement).toBe("main");
+    const chat = panes.find((item) => item.id === "lich.chat");
+    expect(chat?.data.placement).toBe("main");
   });
 
   it("is idempotent under HMR-style re-registration", () => {
     register_core_contributions();
+    const count = list_panes().length;
     expect(() => register_core_contributions()).not.toThrow();
-    expect(list_panes()).toHaveLength(1);
+    expect(list_panes()).toHaveLength(count);
+  });
+
+  it("updates render and fills missing core panes on re-register", () => {
+    register_pane(pane("lich.chat"));
+    const chat_before = contrib_registry.get("lich.chat");
+    expect(chat_before?.render).toBe(stub_render);
+    expect(list_panes().map((item) => item.id)).toEqual(["lich.chat"]);
+
+    register_core_contributions();
+
+    const chat_after = contrib_registry.get("lich.chat");
+    expect(chat_after?.render).not.toBe(stub_render);
+    expect(list_panes().map((item) => item.id)).toEqual([
+      "lich.chat",
+      "lich.sessions",
+      "lich.status",
+      "lich.tool_log",
+    ]);
   });
 
   it("re-registers after clear()", () => {
     register_core_contributions();
+    const count = list_panes().length;
     contrib_registry.clear();
     expect(list_panes()).toEqual([]);
     register_core_contributions();
-    expect(list_panes()).toHaveLength(1);
+    expect(list_panes()).toHaveLength(count);
   });
 });

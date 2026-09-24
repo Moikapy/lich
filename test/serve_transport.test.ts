@@ -104,7 +104,7 @@ describe("serve rpc health", () => {
     });
   });
 
-  it("returns method-not-found for prompt.submit until #83", async () => {
+  it("returns agent-not-configured for prompt.submit without an agent", async () => {
     const sessions = create_serve_session_store(path.join(await make_temp_dir("serve-stub"), "s"));
     const raw = await handle_serve_rpc_message(
       JSON.stringify({
@@ -115,8 +115,9 @@ describe("serve rpc health", () => {
       }),
       { version: "9.9.9", sessions },
     );
-    const body = JSON.parse(raw ?? "") as { error?: { code?: number } };
-    expect(body.error?.code).toBe(-32601);
+    const body = JSON.parse(raw ?? "") as { error?: { code?: number; message?: string } };
+    expect(body.error?.code).toBe(-32000);
+    expect(body.error?.message).toMatch(/agent not configured/);
   });
 });
 

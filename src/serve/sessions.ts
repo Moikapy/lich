@@ -89,6 +89,8 @@ export interface ServeSessionBag {
   readonly handle: SessionHandle;
   readonly source: string;
   history: Message[];
+  /** Bumped by clear() so in-flight runs can detect a mid-run clear. */
+  epoch: number;
 }
 
 export interface ServeSessionStore {
@@ -139,7 +141,7 @@ export function create_serve_session_store(
       } catch (error) {
         throw client_error(error);
       }
-      put(handle.id, { handle, source: params.source, history: [] });
+      put(handle.id, { handle, source: params.source, history: [], epoch: 0 });
       return { session_id: handle.id };
     },
     clear: (params) => {
@@ -151,6 +153,8 @@ export function create_serve_session_store(
         );
       }
       bag.history = [];
+      // Same bag object is mutated in place, so writers compare epoch, not identity.
+      bag.epoch += 1;
       touch(params.session_id);
       return { session_id: params.session_id };
     },
@@ -193,7 +197,7 @@ export function create_serve_session_store(
       } catch (error) {
         throw client_error(error);
       }
-      put(handle.id, { handle, source: params.source ?? "resume", history: [...messages] });
+      put(handle.id, { handle, source: params.source ?? "resume", history: [...messages], epoch: 0 });
       return {
         session_id: handle.id,
         message_count: messages.length,

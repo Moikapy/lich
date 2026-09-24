@@ -22,11 +22,17 @@ import {
 } from "./cli_config.js";
 import { run_mcp } from "./cli_mcp.js";
 import { empty_mcp_flags, take_mcp_flag, type McpCliFlags } from "./cli_mcp_flags.js";
+import { package_root_from_module_url, run_ossuary } from "./cli_ossuary.js";
 import { run_update } from "./cli_update.js";
 import type { Message } from "./providers/types.js";
 import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
 import { is_enoent } from "./util/fs.js";
 import { load_theme, notice_flavor } from "./util/theme.js";
+
+interface ServeCliFlags {
+  host?: string;
+  port?: number;
+}
 
 interface CliOptions {
   config_path?: string;
@@ -36,6 +42,7 @@ interface CliOptions {
   overrides: Record<string, string>;
   positionals: string[];
   mcp_flags: McpCliFlags;
+  serve_flags: ServeCliFlags;
 }
 
 const FLAG_KEYS: Record<string, string> = {
@@ -61,6 +68,8 @@ function usage_text(): string {
     '  lich "one shot task"   run a single task and print the reply',
     "  lich chat              interactive chat (commands: /exit, /quit)",
     "  lich tui               interactive terminal UI (ink)",
+    "  lich serve             headless WebSocket JSON-RPC agent (loopback)",
+    "  lich ossuary           Electron desktop shell (requires apps/ossuary)",
     "  lich gateway <plat..>  messaging gateway (webhook|telegram|discord|twitch)",
     "  lich config            print a starter config template (save as .lich/config.json)",
     "  lich update            install a newer @moikapy/lich from npm, if one exists",
@@ -83,6 +92,8 @@ function usage_text(): string {
     "  --resume <id|latest>   TUI only: load an existing session transcript",
     "  --log-level <level>    debug | info | warn | error",
     "  --theme <name>         display theme (default lich; files in ~/.lich/themes)",
+    "  --host <addr>          serve only: bind address (loopback; default 127.0.0.1)",
+    "  --port <n>             serve only: TCP port (0 = ephemeral; default 0)",
     "  --command <bin>        mcp add: local stdio binary",
     "  --arg <value>          mcp add: repeatable stdio arg (may start with --)",
     "  --url <url>            mcp add: loopback http url",
@@ -113,7 +124,9 @@ function non_tui_resume_mode(first: string | undefined): string | undefined {
     first === "mcp" ||
     first === "update" ||
     first === "chat" ||
-    first === "gateway"
+    first === "gateway" ||
+    first === "serve" ||
+    first === "ossuary"
   ) {
     return first;
   }
@@ -128,15 +141,87 @@ function error_for_mode(mode: string, base_message: string): string {
   if (mode === "gateway") {
     return "lich gateway: no model configured — set LICH_MODEL (e.g. glm-5.3-flash:cloud), pass --model, or create .lich/config.json (`lich config` prints a template)";
   }
+  if (mode === "serve") {
+    return "lich serve: no model configured — set LICH_MODEL (e.g. glm-5.3-flash:cloud), pass --model, or create .lich/config.json (`lich config` prints a template)";
+  }
   if (mode === "chat") {
     return "lich chat: no model configured — set LICH_MODEL (e.g. glm-5.3-flash:cloud), pass --model, or create .lich/config.json (`lich config` prints a template)";
   }
   return base_message;
 }
 
+function empty_serve_flags(): ServeCliFlags {
+  return {};
+}
+
+/** Flags whose next argv item is a value (skipped when pre-scanning for the subcommand). */
+const VALUE_TAKING_FLAGS: ReadonlySet<string> = new Set([
+  ...Object.keys(FLAG_KEYS),
+  "--config",
+  "--resume",
+  "--command",
+  "--url",
+  "--project-path",
+  "--arg",
+]);
+
+/**
+ * First positional argument, skipping flag/value pairs. Serve-only flags are
+ * gated on this: `serve` must be the subcommand, not a flag value
+ * (e.g. `--resume serve` must not enable --host/--port).
+ */
+function first_positional_of(argv: readonly string[]): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === undefined) {
+      break;
+    }
+    if (arg === "--help" || arg === "--version") {
+      continue;
+    }
+    if (VALUE_TAKING_FLAGS.has(arg) === true) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--") === true) {
+      continue;
+    }
+    return arg;
+  }
+  return undefined;
+}
+
+/** Consume one serve-only flag. Returns the new index, or undefined if not ours. */
+function take_serve_flag(argv: readonly string[], index: number, flags: ServeCliFlags): number | undefined {
+  const arg = argv[index];
+  if (arg !== "--host" && arg !== "--port") {
+    return undefined;
+  }
+  const value = argv[index + 1];
+  if (value === undefined || value.startsWith("--") === true) {
+    throw new Error(`${arg} requires a value`);
+  }
+  if (arg === "--host") {
+    flags.host = value;
+    return index + 1;
+  }
+  // /^\d+$/ rejects "" (Number("") is 0 → silent port 0) and non-integers.
+  if (/^\d+$/.test(value) === false || Number(value) > 65535) {
+    throw new Error("--port must be an integer between 0 and 65535");
+  }
+  flags.port = Number(value);
+  return index + 1;
+}
+
 export function parse_args(argv: string[]): CliOptions {
-  const options: CliOptions = { overrides: {}, positionals: [], mcp_flags: empty_mcp_flags() };
+  const options: CliOptions = {
+    overrides: {},
+    positionals: [],
+    mcp_flags: empty_mcp_flags(),
+    serve_flags: empty_serve_flags(),
+  };
   const mcp = argv.includes("mcp");
+  const serve = first_positional_of(argv) === "serve";
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) {
@@ -170,6 +255,13 @@ export function parse_args(argv: string[]): CliOptions {
     }
     if (mcp === true) {
       const consumed = take_mcp_flag(argv, index, options.mcp_flags);
+      if (consumed !== undefined) {
+        index = consumed;
+        continue;
+      }
+    }
+    if (serve === true) {
+      const consumed = take_serve_flag(argv, index, options.serve_flags);
       if (consumed !== undefined) {
         index = consumed;
         continue;
@@ -537,6 +629,11 @@ async function run_gateway_entry(config: AgentConfig, platforms: string[]): Prom
   return run_gateway(config, gateway_platforms(config, platforms));
 }
 
+async function run_serve_entry(config: AgentConfig, flags: ServeCliFlags): Promise<number> {
+  const { run_serve } = await import("./serve/server.js");
+  return run_serve(config, { host: flags.host, port: flags.port });
+}
+
 export interface CliEntryInput {
   bun: boolean;
   import_meta_main: boolean | undefined;
@@ -624,6 +721,18 @@ export async function run_cli(argv: string[]): Promise<number> {
   }
   if (first === "gateway") {
     return run_gateway_entry(build_config_for(options, first), options.positionals.slice(1));
+  }
+  if (first === "serve") {
+    if (options.positionals.length > 1) {
+      throw new Error("serve takes no arguments");
+    }
+    return run_serve_entry(build_config_for(options, first), options.serve_flags);
+  }
+  if (first === "ossuary") {
+    if (options.positionals.length > 1) {
+      throw new Error("ossuary takes no arguments");
+    }
+    return run_ossuary(package_root_from_module_url(import.meta.url), work_dir_of(options));
   }
   return run_one_shot(build_config_for(options, "one-shot"), options.positionals.join(" "));
 }

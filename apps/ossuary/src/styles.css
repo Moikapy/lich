@@ -18,26 +18,276 @@ body,
 
 .hello,
 .shell {
+  height: 100%;
   min-height: 100%;
-  display: grid;
-  place-items: center;
 }
 
 .hello h1,
-.pane-header h1 {
+.pane-header h1,
+.chat-header h1 {
   margin: 0;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: lowercase;
+  font-size: 1.1rem;
 }
 
-.pane {
-  width: min(36rem, 100%);
-  padding: 2rem;
-  text-align: center;
+.ossuary-dock {
+  width: 100%;
+  height: 100%;
 }
 
-.pane-body {
-  margin: 0.75rem 0 0;
-  opacity: 0.7;
+.pane-chat {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.chat-status {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.chat-transcript {
+  overflow: auto;
+  border: 1px solid #2a2a2a;
+  border-radius: 0.35rem;
+  padding: 0.85rem 1rem;
+  background: #161616;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.chat-empty {
+  margin: 0;
+  opacity: 0.55;
+}
+
+.chat-block {
+  margin: 0 0 0.65rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-block:last-child {
+  margin-bottom: 0;
+}
+
+.chat-block-user {
+  color: #cde;
+}
+
+.chat-block-lich {
+  color: #ded;
+}
+
+.chat-block-tool {
+  color: #9a9;
+  opacity: 0.9;
+}
+
+.chat-block-meta {
+  color: #888;
+}
+
+.chat-block-error {
+  color: #f88;
+}
+
+.chat-composer {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+}
+
+.chat-input,
+.chat-composer button {
+  font: inherit;
+  border-radius: 0.3rem;
+  border: 1px solid #333;
+  background: #1b1b1b;
+  color: inherit;
+  padding: 0.55rem 0.75rem;
+}
+
+.chat-composer button {
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-composer button:disabled,
+.chat-input:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chat-composer button:not(:disabled):hover {
+  border-color: #555;
+  background: #222;
+}
+
+.pane-tool-log,
+.pane-status {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.pane-empty {
+  margin: 0;
+  opacity: 0.55;
+}
+
+.tool-log-list {
+  overflow: auto;
+  border: 1px solid #2a2a2a;
+  border-radius: 0.35rem;
+  padding: 0.75rem 0.9rem;
+  background: #161616;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.tool-log-row {
+  margin: 0 0 0.65rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #9a9;
+}
+
+.tool-log-row:last-child {
+  margin-bottom: 0;
+}
+
+.tool-log-running {
+  color: #cb8;
+}
+
+.tool-log-ok {
+  color: #9a9;
+}
+
+.tool-log-error,
+.tool-log-cancelled {
+  color: #f88;
+}
+
+.status-fields {
+  margin: 0;
+  display: grid;
+  gap: 0.55rem;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.85rem;
+}
+
+.status-fields > div {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: 0.5rem;
+}
+
+.status-fields dt {
+  margin: 0;
+  opacity: 0.55;
+}
+
+.status-fields dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.status-path {
+  opacity: 0.85;
+}
+
+.pane-sessions {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 0.65rem;
+  padding: 1rem 1rem 1.25rem;
+}
+
+.sessions-status {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.sessions-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.sessions-actions button,
+.sessions-item {
+  font: inherit;
+  border-radius: 0.3rem;
+  border: 1px solid #333;
+  background: #1b1b1b;
+  color: inherit;
+  padding: 0.4rem 0.65rem;
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+.sessions-actions button:disabled,
+.sessions-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sessions-actions button:not(:disabled):hover,
+.sessions-item:not(:disabled):hover {
+  border-color: #555;
+  background: #222;
+}
+
+.sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sessions-empty {
+  opacity: 0.55;
+  font-size: 0.85rem;
+}
+
+.sessions-item {
+  width: 100%;
+  display: grid;
+  gap: 0.15rem;
+  text-align: left;
+  text-transform: none;
+}
+
+.sessions-item-active {
+  border-color: #5a7;
+  background: #1a221a;
+}
+
+.sessions-item-id {
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.sessions-item-mtime {
+  font-size: 0.75rem;
+  opacity: 0.65;
 }
