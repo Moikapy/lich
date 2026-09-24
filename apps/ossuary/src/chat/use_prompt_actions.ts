@@ -1,9 +1,8 @@
 /** prompt.submit / prompt.abort actions for the Chat pane. */
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import { apply_submit_result } from "./apply_submit_result";
 import { error_text } from "./error_text";
+import { create_prompt_submit_settle } from "./prompt_submit_settle";
 import { prompt_abort, prompt_submit } from "./rpc";
-import { submit_notice_blocks } from "./submit_notices";
 import { error_notice_block, user_block } from "./transcript";
 import { HISTORY_CAP, type HistoryBlock, type UiState } from "./types";
 
@@ -31,28 +30,11 @@ export function use_prompt_actions(
       active_tool: undefined,
       last_error: undefined,
     }));
+    const settle = create_prompt_submit_settle(id, session_ref, set_ui, set_blocks, set_busy);
     void prompt_submit(id, text)
-      .then((result) => {
-        if (session_ref.current !== id) {
-          return;
-        }
-        set_ui((current) => apply_submit_result(current, result));
-        set_blocks((current) => [...current, ...submit_notice_blocks(result)].slice(-HISTORY_CAP));
-      })
-      .catch((error: unknown) => {
-        if (session_ref.current !== id) {
-          return;
-        }
-        set_blocks((current) =>
-          [...current, error_notice_block(error_text(error))].slice(-HISTORY_CAP),
-        );
-        set_ui((current) => ({ ...current, phase: "idle" }));
-      })
-      .finally(() => {
-        if (session_ref.current === id) {
-          set_busy(false);
-        }
-      });
+      .then(settle.on_fulfilled)
+      .catch(settle.on_rejected)
+      .finally(settle.on_settled);
   }, [busy, draft, session_ref, set_blocks, set_busy, set_draft, set_ui]);
 
   const abort = useCallback(() => {
