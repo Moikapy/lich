@@ -1,14 +1,16 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolve_repo_root_from_electron_dir } from "./backend-command.js";
-import { GatewaySession } from "./gateway-session.js";
+import { GatewaySession, type GatewayConnectionInfo } from "./gateway-session.js";
 import { spawn_lich_serve, type RunningServe } from "./serve-process.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 /** Default UI surface: packaged/dev file load is always this exact page. */
 const RENDERER_INDEX_PATH = path.resolve(__dirname, "../renderer/index.html");
+/** Methods the renderer may call until a prompt UI lands. */
+const GATEWAY_METHOD_ALLOWLIST = new Set(["health"]);
 
 /** Future plugin/extension pages may register here; empty until needed. */
 function plugin_allowed_file_paths(): readonly string[] {
@@ -55,9 +57,24 @@ function is_allowed_navigation(url: string): boolean {
   }
 }
 
+function is_allowed_ipc_sender(url: string | undefined): boolean {
+  if (url === undefined || url.length === 0) {
+    return false;
+  }
+  return is_allowed_navigation(url);
+}
+
 let main_window: BrowserWindow | undefined;
 let running_serve: RunningServe | undefined;
 let gateway: GatewaySession | undefined;
+let last_connection_info: GatewayConnectionInfo = { status: "connecting" };
+
+function publish_connection(info: GatewayConnectionInfo): void {
+  last_connection_info = info;
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send("ossuary:connection", info);
+  }
+}
 
 function create_window(): BrowserWindow {
   const win = new BrowserWindow({
@@ -89,20 +106,32 @@ function create_window(): BrowserWindow {
 }
 
 function register_ipc(): void {
-  ipcMain.handle("ossuary:get-connection", () => gateway?.get_info() ?? { status: "connecting" });
-  ipcMain.handle("ossuary:request-gateway", async (_event, method: unknown, params: unknown) => {
-    if (typeof method !== "string" || method.length === 0) {
-      throw new Error("method must be a non-empty string");
-    }
-    if (gateway === undefined) {
-      throw new Error("gateway not ready");
-    }
-    const body =
-      params !== undefined && typeof params === "object" && params !== null && Array.isArray(params) === false
-        ? (params as Record<string, unknown>)
-        : {};
-    return gateway.request(method, body);
-  });
+  ipcMain.handle("ossuary:get-connection", () => gateway?.get_info() ?? last_connection_info);
+  ipcMain.handle(
+    "ossuary:request-gateway",
+    async (event: IpcMainInvokeEvent, method: unknown, params: unknown) => {
+      if (is_allowed_ipc_sender(event.senderFrame?.url) === false) {
+        throw new Error("gateway request from disallowed frame");
+      }
+      if (typeof method !== "string" || method.length === 0) {
+        throw new Error("method must be a non-empty string");
+      }
+      if (GATEWAY_METHOD_ALLOWLIST.has(method) === false) {
+        throw new Error(`method not allowed: ${method}`);
+      }
+      if (gateway === undefined) {
+        throw new Error("gateway not ready");
+      }
+      const body =
+        params !== undefined &&
+        typeof params === "object" &&
+        params !== null &&
+        Array.isArray(params) === false
+          ? (params as Record<string, unknown>)
+          : {};
+      return gateway.request(method, body);
+    },
+  );
 }
 
 function wire_gateway_notifications(session: GatewaySession): void {
@@ -113,14 +142,34 @@ function wire_gateway_notifications(session: GatewaySession): void {
   });
 }
 
+function wire_serve_exit(child: RunningServe["child"]): void {
+  child.once("exit", () => {
+    gateway?.close();
+    gateway = undefined;
+    running_serve = undefined;
+    publish_connection({ status: "stopped" });
+  });
+}
+
+function default_work_dir(repo_root: string): string {
+  if (process.env.LICH_WORK_DIR) {
+    return process.env.LICH_WORK_DIR;
+  }
+  if (app.isPackaged) {
+    return app.getPath("userData");
+  }
+  return repo_root;
+}
+
 async function start_backend(): Promise<void> {
   const repo_root = resolve_repo_root_from_electron_dir(__dirname);
-  const work_dir = process.env.LICH_WORK_DIR ?? repo_root;
+  const work_dir = default_work_dir(repo_root);
   running_serve = await spawn_lich_serve({ repo_root, work_dir });
+  wire_serve_exit(running_serve.child);
   gateway = new GatewaySession();
   wire_gateway_notifications(gateway);
   await gateway.connect(running_serve.ws_url, running_serve.boot.port);
-  main_window?.webContents.send("ossuary:connection", gateway.get_info());
+  publish_connection(gateway.get_info());
 }
 
 function stop_backend(): void {
@@ -137,7 +186,7 @@ app.whenReady().then(async () => {
     await start_backend();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    main_window.webContents.send("ossuary:connection", {
+    publish_connection({
       status: "error",
       error: message,
     });

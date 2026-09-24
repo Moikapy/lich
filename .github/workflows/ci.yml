@@ -45,5 +45,8 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Typecheck
         run: bun run typecheck
+      - name: Test
+        # Smoke spawn needs monorepo root deps; keep unit tests in this job.
+        run: bun x vitest run --exclude '**/*.smoke.test.ts'
       - name: Build
         run: bun run build
