@@ -80,12 +80,8 @@ function is_message(value: unknown): value is Message {
 }
 
 export async function read_session_messages(file_path: string): Promise<Message[]> {
-  let raw: string;
-  try {
-    raw = await readFile(file_path, "utf8");
-  } catch {
-    return [];
-  }
+  // Missing files rethrow (ENOENT) so callers can tell "vanished" from "empty".
+  const raw = await readFile(file_path, "utf8");
   const messages: Message[] = [];
   for (const line of raw.split("\n")) {
     const record = safe_json_parse<SessionRecord>(line);
@@ -94,9 +90,10 @@ export async function read_session_messages(file_path: string): Promise<Message[
     }
   }
   // Provider throw / abort-before-turn can leave a dangling user seed with no
-  // assistant reply. Drop it so resume does not start with two consecutive users.
-  const last = messages.at(-1);
-  if (last?.role === "user") {
+  // assistant reply, and repeated failures stack several. Drop them all so
+  // resume never starts with consecutive users and the result is idempotent
+  // (a serve fork written from it reads back unchanged).
+  while (messages.at(-1)?.role === "user") {
     messages.pop();
   }
   return messages;

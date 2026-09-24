@@ -25,6 +25,7 @@ import { empty_mcp_flags, take_mcp_flag, type McpCliFlags } from "./cli_mcp_flag
 import { run_update } from "./cli_update.js";
 import type { Message } from "./providers/types.js";
 import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
+import { is_enoent } from "./util/fs.js";
 import { load_theme, notice_flavor } from "./util/theme.js";
 
 interface CliOptions {
@@ -512,7 +513,13 @@ async function run_tui_entry(config: ReturnType<typeof build_config>, resume?: s
   const { resolve_session_path } = await import("./session/resolve.js");
   const { read_session_messages } = await import("./session/store.js");
   const transcript = await resolve_session_path(config.session_dir, resume);
-  const initial_history = await read_session_messages(transcript);
+  const initial_history = await read_session_messages(transcript).catch((error: unknown) => {
+    // Vanished transcript: same stable text serve uses (no absolute paths).
+    if (is_enoent(error) === true) {
+      throw new Error("session not found (transcript deleted)");
+    }
+    throw error;
+  });
   const resumed_id = path.basename(transcript, ".jsonl");
   return run_tui(config, { initial_history, resumed_id });
 }

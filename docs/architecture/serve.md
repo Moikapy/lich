@@ -10,7 +10,7 @@ and abort.
 This page documents the shared contract in
 [`src/serve/protocol.ts`](../../src/serve/protocol.ts) and the loopback
 WebSocket transport in [`src/serve/server.ts`](../../src/serve/server.ts).
-Session/prompt RPC and the `lich serve` CLI land in follow-up issues.
+Prompt RPC and the `lich serve` CLI land in follow-up issues.
 
 ## Role in the system
 
@@ -45,6 +45,7 @@ method `event` (no `id`).
 | `session.create` | `{ label?, source }` | `{ session_id }` |
 | `session.list` | `{}` | `{ sessions: [{ id, mtime_ms }, ...] }` |
 | `session.clear` | `{ session_id }` | `{ session_id }` |
+| `session.resume` | `{ id, source? }` | `{ session_id, resumed_id, message_count }` |
 | `prompt.submit` | `{ session_id, text }` | reply, usage, `session_path`, `stopped_reason`, … |
 | `prompt.abort` | `{ session_id }` | `{ session_id, aborted }` |
 
@@ -52,9 +53,35 @@ method `event` (no `id`).
 `params: {}`, because `ServeRequest` requires `params`. JSON-RPC 2.0 also
 allows omitting `params`; serve handlers accept that omission the same as `{}`.
 
-`session.resume` and other session RPCs may extend this map in later issues;
-clients must not invent method names outside the locked set above until those
-land.
+`prompt.*` may extend this map in later issues (#83); clients must not invent
+method names outside the locked set above until those land.
+
+`session.create` opens one `SessionHandle` and an empty in-memory history bag,
+and eagerly creates the (empty) `.jsonl` transcript so `session.list` sees the
+new id immediately — before any prompt appends to it.
+`session.clear` resets that bag's in-memory history (handle stays; the on-disk
+transcript is untouched). `session.list` / `session.resume` reuse
+[`resolve_session_path`](../../src/session/resolve.ts) / transcript listing
+semantics from CLI `--resume` and TUI `/sessions`. `session.resume` seeds
+history from disk and opens a fresh `SessionHandle` for later `prompt.submit`
+(#83) — like CLI `--resume`, each resume forks a new transcript; it does not
+re-bind the original. The fork is written from the filtered bag history
+(every trailing user already dropped by `read_session_messages`), not a raw byte
+copy, and the handle is marked seeded so a later `prompt.submit` (#83)
+`recorder.seed` appends only the new turn. A later `latest` resume (or the
+fork id after a restart) reloads that filtered history. A transcript that is
+deleted between resolve and read resumes as `not_found`, never as an empty
+history.
+`SessionResumeResult.resumed_id` reports which
+transcript was resolved, even for `latest` / prefix resumes.
+
+In-memory bags are capped (LRU, default 32 via `max_session_bags`): the
+oldest is evicted first, and `ServeServer.stop()` drops all of them — after
+draining in-flight RPC handlers, so a mid-I/O `session.create` /
+`session.resume` cannot resurrect a bag after shutdown. Eviction is log-only
+— there is no client notification; a client operating on an evicted id learns
+about it from the next `session.clear` (or #83 `prompt.submit`) failing with
+`not_found`. Evicted transcripts stay on disk and can be resumed again.
 
 ## Notifications
 
@@ -79,9 +106,16 @@ semantics without embedding `Agent` in Electron.
   do not assume `file://` / `app://` behavior here.
 - Frame size capped at ~1 MiB (`maxPayload`).
 - `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
+- Frames are handled per-connection in arrival order: pipelined requests get
+  in-order replies even when earlier requests hit slower filesystem awaits.
+- `session_dir` defaults to `<cwd>/.lich/sessions` until the #84 CLI passes the
+  agent config's `session_dir` (derived from `work_dir`) explicitly.
 
 ## Not in this layer yet
 
-- No `lich serve` CLI entry (#84).
-- No `session.*` / `prompt.*` handlers (#82 / #83) — locked names return method-not-found until implemented.
-- No Agent construction or session file I/O.
+- No `lich serve` CLI entry (#84). The CLI must pass `config.session_dir`
+  explicitly — the library default is `process.cwd()/.lich/sessions`, which
+  diverges from `AgentConfig`'s `${work_dir}/.lich/sessions` when launched
+  from another directory.
+- No `prompt.*` handlers (#83) — locked names return method-not-found until implemented.
+- No Agent construction yet (also #83).

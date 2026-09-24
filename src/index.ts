@@ -13,6 +13,7 @@ export type { AgentEvent, AgentEventHandler, AgentEvents } from "./agent/events.
 export { run_conversation } from "./agent/loop.js";
 export type { LoopDeps, LoopOutcome, LoopParams, ToolRunner } from "./agent/loop.js";
 export { open_session, read_session_messages } from "./session/store.js";
+export type { SessionHandle } from "./session/store.js";
 export type {
   AssistantMessage,
   ChatOptions,
@@ -74,6 +75,8 @@ export type {
   SessionListEntry,
   SessionListParams,
   SessionListResult,
+  SessionResumeParams,
+  SessionResumeResult,
 } from "./serve/protocol.js";
 export {
   create_serve_server,
@@ -82,3 +85,12 @@ export {
 } from "./serve/server.js";
 export type { ServeBootInfo, ServeOptions, ServeServer } from "./serve/server.js";
 export { handle_serve_rpc_message } from "./serve/rpc.js";
+export type { ServeRpcContext } from "./serve/rpc.js";
+export {
+  create_serve_session_store,
+  DEFAULT_SERVE_SESSION_LIMIT,
+  ServeSessionError,
+} from "./serve/sessions.js";
+export type { ServeSessionBag, ServeSessionErrorKind, ServeSessionStore } from "./serve/sessions.js";
+export { resolve_session_path, SessionResolveError } from "./session/resolve.js";
+export type { SessionResolveErrorKind } from "./session/resolve.js";

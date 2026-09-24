@@ -1,29 +1,101 @@
 /**
  * Serve transport tests: loopback WS JSON-RPC, health, and token rejection.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect as net_connect } from "node:net";
+import path from "node:path";
 import { Writable } from "node:stream";
 import WebSocket from "ws";
 import { LICH_VERSION } from "../src/index.js";
 import { handle_serve_rpc_message } from "../src/serve/rpc.js";
 import { create_serve_server, type ServeServer } from "../src/serve/server.js";
+import { create_serve_session_store } from "../src/serve/sessions.js";
+import { TMP_BASE } from "./helpers/tmp_base.js";
+
+/**
+ * File-wide spy on the session store: records create/dispose ordering and can
+ * gate `create` so a test can hold an RPC handler mid-I/O while stop() runs.
+ */
+const serve_store_spy = vi.hoisted(() => {
+  type ReleaseFn = () => void;
+  const state = {
+    events: [] as string[],
+    gate: null as Promise<void> | null,
+    release_gate: null as ReleaseFn | null,
+    reset(): void {
+      state.events.length = 0;
+      state.gate = null;
+      state.release_gate = null;
+    },
+    /** Clear recorded events and hold the next create until released. */
+    arm(): void {
+      state.reset();
+      state.hold();
+    },
+    /** Hold the next (and later) creates until `release_gate` is called. */
+    hold(): void {
+      state.gate = new Promise<void>((resolve) => {
+        state.release_gate = resolve;
+      });
+    },
+  };
+  return state;
+});
+
+vi.mock("../src/serve/sessions.js", async (import_original) => {
+  const actual = await import_original<typeof import("../src/serve/sessions.js")>();
+  const wrap_store = (store: ReturnType<typeof actual.create_serve_session_store>) => ({
+    ...store,
+    create: async (params: Parameters<typeof store.create>[0]) => {
+      serve_store_spy.events.push("create_start");
+      if (serve_store_spy.gate !== null) {
+        await serve_store_spy.gate;
+      }
+      const result = await store.create(params);
+      serve_store_spy.events.push("create_done");
+      return result;
+    },
+    dispose: () => {
+      serve_store_spy.events.push("dispose");
+      store.dispose();
+    },
+  });
+  return {
+    ...actual,
+    create_serve_session_store: (dir: string, max_bags?: number) =>
+      wrap_store(actual.create_serve_session_store(dir, max_bags)),
+  };
+});
 
 const servers: ServeServer[] = [];
+const created: string[] = [];
+
+async function make_temp_dir(prefix: string): Promise<string> {
+  await mkdir(TMP_BASE, { recursive: true });
+  const dir = await mkdtemp(path.join(TMP_BASE, `${prefix}-`));
+  created.push(dir);
+  return dir;
+}
 
 afterEach(async () => {
+  serve_store_spy.reset();
   while (servers.length > 0) {
     const server = servers.pop();
     await server?.stop();
   }
+  for (const dir of created.splice(0)) {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 describe("serve rpc health", () => {
-  it("returns status and version for health", () => {
-    const raw = handle_serve_rpc_message(
+  it("returns status and version for health", async () => {
+    const sessions = create_serve_session_store(path.join(await make_temp_dir("serve-health"), "s"));
+    const raw = await handle_serve_rpc_message(
       JSON.stringify({ jsonrpc: "2.0", id: 1, method: "health", params: {} }),
-      "9.9.9",
+      { version: "9.9.9", sessions },
     );
     expect(JSON.parse(raw ?? "")).toEqual({
       jsonrpc: "2.0",
@@ -32,15 +104,16 @@ describe("serve rpc health", () => {
     });
   });
 
-  it("returns method-not-found for session.create until later issues", () => {
-    const raw = handle_serve_rpc_message(
+  it("returns method-not-found for prompt.submit until #83", async () => {
+    const sessions = create_serve_session_store(path.join(await make_temp_dir("serve-stub"), "s"));
+    const raw = await handle_serve_rpc_message(
       JSON.stringify({
         jsonrpc: "2.0",
         id: 2,
-        method: "session.create",
-        params: { source: "test" },
+        method: "prompt.submit",
+        params: { session_id: "s1", text: "hi" },
       }),
-      "9.9.9",
+      { version: "9.9.9", sessions },
     );
     const body = JSON.parse(raw ?? "") as { error?: { code?: number } };
     expect(body.error?.code).toBe(-32601);
@@ -216,6 +289,108 @@ describe("serve websocket transport", () => {
       await expect(server.stop()).resolves.toBeUndefined();
     } finally {
       process.off("uncaughtException", on_uncaught);
+    }
+  });
+
+  it("round-trips session.create and session.resume over WS", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-ws-sessions"), "sessions");
+    await mkdir(session_dir, { recursive: true });
+    await writeFile(
+      path.join(session_dir, "ws-demo-1.jsonl"),
+      [
+        JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", kind: "message", message: { role: "user", content: "hi" } }),
+        JSON.stringify({ ts: "2026-01-01T00:00:01.000Z", kind: "message", message: { role: "assistant", content: "hello" } }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir });
+    servers.push(server);
+    const boot = await server.start();
+
+    const created = await rpc_over_ws(boot.port, boot.token, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "session.create",
+      params: { source: "ossuary", label: "ws-demo" },
+    });
+    const session_id = (created as { result: { session_id: string } }).result.session_id;
+    expect(session_id.length).toBeGreaterThan(0);
+
+    const resumed = await rpc_over_ws(boot.port, boot.token, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "session.resume",
+      params: { id: "ws-demo-1" },
+    });
+    expect(resumed).toMatchObject({
+      id: 2,
+      result: { session_id: expect.any(String), resumed_id: "ws-demo-1", message_count: 2 },
+    });
+    // The server's store carries the resumed history for prompt.submit (#83).
+    const bag = server.sessions.get(
+      (resumed as { result: { session_id: string } }).result.session_id,
+    );
+    expect(bag?.history).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ]);
+  });
+
+  it("drains a create held mid-I/O before stop() disposes the store", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-ws-drain"), "sessions");
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir });
+    servers.push(server);
+    const boot = await server.start();
+
+    serve_store_spy.arm();
+    const url = `ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`;
+    const ws = await open_ws(url);
+    try {
+      ws.send(
+        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: { source: "ossuary" } }),
+      );
+      // Wait until the handler is parked inside create() before stopping.
+      await vi.waitFor(() => {
+        expect(serve_store_spy.events).toContain("create_start");
+      });
+
+      const stopped = server.stop();
+      serve_store_spy.release_gate?.();
+      await stopped;
+      // The bag was put strictly before dispose dropped the store; the reply
+      // itself may be lost to the concurrent close handshake (not asserted).
+      expect(serve_store_spy.events).toEqual(["create_start", "create_done", "dispose"]);
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("replies to pipelined frames in order, per connection", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-ws-order"), "sessions");
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir });
+    servers.push(server);
+    const boot = await server.start();
+
+    const url = `ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`;
+    const ws = await open_ws(url);
+    try {
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.list", params: {} }));
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "health", params: {} }));
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "session.list", params: {} }));
+      const ids: number[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("pipeline timeout")), 5000);
+        ws.on("message", (data) => {
+          ids.push((JSON.parse(String(data)) as { id: number }).id);
+          if (ids.length === 3) {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+      expect(ids).toEqual([1, 2, 3]);
+    } finally {
+      ws.close();
     }
   });
 });
