@@ -32,6 +32,7 @@ mythology lives in display strings only.
 | [Getting started](docs/getting-started.md) | Zero-to-first-reply: install, config paths, one-shot, TUI, gateway. |
 | [CLI reference](docs/user-guide/cli.md) | Modes, flags, provider resolution, config schema, `lich mcp`, recipes. |
 | [TUI guide](docs/user-guide/tui.md) | Launch, slash commands, status bar, memory semantics. |
+| [Ossuary guide](docs/user-guide/ossuary.md) | Electron desktop shell from a clone; Chat via `lich serve`. |
 | [Gateway guide](docs/user-guide/gateway.md) | Webhook/Telegram/Discord/Twitch setup and the webhook API. |
 | [Library guide](docs/user-guide/library.md) | Embedding: `create_agent`, events, multi-turn history, errors. |
 | [Plugins guide](docs/user-guide/plugins.md) | User tools and hooks, and the self-improvement loop. |

@@ -89,6 +89,9 @@ describe("run_cli --resume mode guard", () => {
     await expect(run_cli(["serve", "--resume", "latest"])).rejects.toThrow(
       "--resume is only supported in TUI mode (not serve)",
     );
+    await expect(run_cli(["ossuary", "--resume", "latest"])).rejects.toThrow(
+      "--resume is only supported in TUI mode (not ossuary)",
+    );
     await expect(run_cli(["init", "--resume", "latest"])).rejects.toThrow(
       "--resume is only supported in TUI mode (not init)",
     );
