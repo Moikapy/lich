@@ -77,6 +77,13 @@ async function restore_or_default(
       return;
     } catch {
       // corrupt / incompatible → default
+      try {
+        event.api.clear();
+      } catch {
+        // disposed
+      }
+      apply_default_layout(event, panes);
+      return;
     }
   }
   apply_default_layout(event, panes);
