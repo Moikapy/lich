@@ -126,6 +126,13 @@ describe("serve prompt rpc", () => {
     expect(result.session_path).toContain(created.session_id);
     expect(events.some((event) => event.type === "final")).toBe(true);
     expect(events.some((event) => event.type === "turn_start")).toBe(true);
+    expect(events.some((event) => event.type === "run_start")).toBe(true);
+    expect(events.some((event) => event.type === "run_end")).toBe(true);
+    const start = events.find((event) => event.type === "run_start");
+    expect(start?.run_id).toEqual(expect.any(String));
+    expect(start?.session_id).toBe(created.session_id);
+    expect(start?.seq).toBe(1);
+    expect(typeof start?.ts).toBe("number");
   });
 
   it("aborts an in-flight run via prompt.abort", async () => {
@@ -561,11 +568,110 @@ describe("serve prompt rpc", () => {
     if (error_event?.type !== "error") {
       return;
     }
-    const payload = error_event.error as { name?: unknown; message?: unknown };
-    expect(typeof payload.name).toBe("string");
+    const payload = error_event.error;
+    expect(typeof payload.kind).toBe("string");
     expect(typeof payload.message).toBe("string");
-    expect(String(payload.message).length).toBeGreaterThan(0);
-    expect(Object.keys(payload).sort()).toEqual(["message", "name"]);
+    expect(payload.message.length).toBeGreaterThan(0);
+    expect(Object.keys(payload).sort()).toEqual(["kind", "message"]);
+  });
+
+  it("isolates concurrent sessions: events stay tagged and runs overlap", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-concurrent");
+    const session_dir = path.join(work_dir, "sessions");
+    const started: string[] = [];
+    const release_gates = new Map<string, () => void>();
+    const agent = mock_agent(work_dir, async (_input, init) => {
+      const signal = init?.signal;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 80);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            const error = new Error("fetch aborted");
+            error.name = "AbortError";
+            reject(error);
+          },
+          { once: true },
+        );
+      });
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "ok" }, "stop")),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    // Patch run to record session start ordering via on_event session_id.
+    const original_run = agent.run.bind(agent);
+    agent.run = async (options) => {
+      started.push(options.session_id ?? "");
+      const release = release_gates.get(options.session_id ?? "");
+      if (release !== undefined) {
+        release();
+      }
+      return original_run(options);
+    };
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const events: AgentEvent[] = [];
+    const context: ServeRpcContext = {
+      version: "9.9.9",
+      sessions,
+      prompts,
+      notify: (notification) => {
+        events.push(notification.params.event);
+      },
+    };
+
+    const a = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const b = (await rpc(context, "session.create", { source: "test" }, 2)).result as {
+      session_id: string;
+    };
+
+    const both_started = Promise.all([
+      new Promise<void>((resolve) => {
+        release_gates.set(a.session_id, resolve);
+      }),
+      new Promise<void>((resolve) => {
+        release_gates.set(b.session_id, resolve);
+      }),
+    ]);
+
+    const submit_a = rpc(
+      context,
+      "prompt.submit",
+      { session_id: a.session_id, text: "a" },
+      3,
+    );
+    const submit_b = rpc(
+      context,
+      "prompt.submit",
+      { session_id: b.session_id, text: "b" },
+      4,
+    );
+
+    await both_started;
+    expect(new Set(started)).toEqual(new Set([a.session_id, b.session_id]));
+
+    const [result_a, result_b] = await Promise.all([submit_a, submit_b]);
+    expect((result_a.result as { stopped_reason: string }).stopped_reason).toBe("final");
+    expect((result_b.result as { stopped_reason: string }).stopped_reason).toBe("final");
+
+    for (const event of events) {
+      expect(event.session_id === a.session_id || event.session_id === b.session_id).toBe(true);
+      expect(typeof event.run_id).toBe("string");
+      expect(typeof event.seq).toBe("number");
+    }
+    const run_ids_a = new Set(
+      events.filter((event) => event.session_id === a.session_id).map((event) => event.run_id),
+    );
+    const run_ids_b = new Set(
+      events.filter((event) => event.session_id === b.session_id).map((event) => event.run_id),
+    );
+    expect(run_ids_a.size).toBe(1);
+    expect(run_ids_b.size).toBe(1);
+    expect([...run_ids_a][0]).not.toBe([...run_ids_b][0]);
   });
 });
 

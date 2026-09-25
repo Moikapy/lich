@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./agent/agent.js";
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
-import { AgentEmitter } from "./agent/events.js";
+import type { EnvelopedAgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
 import {
   load_config,
@@ -414,7 +414,7 @@ function build_config_for(options: CliOptions, mode: string): AgentConfig {
   }
 }
 
-function attach_progress(emitter: AgentEmitter): () => void {
+function attach_progress(emitter: EnvelopedAgentEmitter): () => void {
   return emitter.on((event) => {
     if (event.type === "turn_start") {
       process.stderr.write(`\n[lich] turn ${event.turn}`);

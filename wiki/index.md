@@ -37,7 +37,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[tao-loop]]: the think-act-observe loop and the invariants every harness has to keep.
 - [[action-terminal-mode]]: one LLM call per decision, using `stop_on_tools`, `tool_choice` and deadlines with a fallback action.
 - [[client-executed-tools]]: the game owns its tools through `tool.invoke`/`tool.result`, which replaces the file bus.
-- [[event-envelope]]: events scoped by run and session, JSON-safe, with a per-run `on_event`. Still needed — the panes now read raw fields (#114 item 2).
+- [[event-envelope]]: events scoped by run and session, JSON-safe, with a per-run `on_event`. Landed in #134 (0.10.0); gateway adapter adoption still #114.
 - [[runtime-profile-session]]: one Runtime per process, cheap Profiles, and a Session per NPC.
 - [[prompt-cache-tiers]]: a byte-stable system prompt built in tiers, plus `cache_control` breakpoints (the Hermes approach).
 - [[memory-vs-skills]]: declarative memory vs procedural skills, loaded by progressive disclosure. Lich has neither yet.

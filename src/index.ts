@@ -8,12 +8,28 @@ export type { AgentRunOptions, AgentRunResult } from "./agent/agent.js";
 export type { AgentConfig } from "./agent/config.js";
 export { parse_agent_config } from "./agent/config.js";
 export { catalog_client_entry } from "./mcp/mcp_catalog_entry.js";
-export { AgentEmitter } from "./agent/events.js";
-export type { AgentEvent, AgentEventHandler, AgentEvents } from "./agent/events.js";
+export {
+  AgentEmitter,
+  EnvelopedAgentEmitter,
+  to_agent_error_payload,
+} from "./agent/events.js";
+export type {
+  AgentErrorPayload,
+  AgentEvent,
+  AgentEventBody,
+  AgentEventBodyHandler,
+  AgentEventHandler,
+  AgentEventBodies,
+  AgentEvents,
+  EventEnvelope,
+  RunStoppedReason,
+} from "./agent/events.js";
 export { run_conversation } from "./agent/loop.js";
 export type { LoopDeps, LoopOutcome, LoopParams, ToolRunner } from "./agent/loop.js";
 export { open_session, read_session_messages } from "./session/store.js";
 export type { SessionHandle } from "./session/store.js";
+export { create_session_manager } from "./session/manager.js";
+export type { SessionManager } from "./session/manager.js";
 export type {
   AssistantMessage,
   ChatOptions,

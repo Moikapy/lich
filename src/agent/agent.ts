@@ -19,8 +19,9 @@ import { open_session, type SessionHandle } from "../session/store.js";
 import type { ToolContext } from "../tools/types.js";
 import type { AgentConfig } from "./config.js";
 import { parse_agent_config } from "./config.js";
-import type { AgentEvent } from "./events.js";
-import { AgentEmitter } from "./events.js";
+import { randomUUID } from "node:crypto";
+import type { AgentEvent, AgentEventBody } from "./events.js";
+import { AgentEmitter, EnvelopedAgentEmitter } from "./events.js";
 import type { LoopDeps, LoopOutcome } from "./loop.js";
 import { run_conversation } from "./loop.js";
 import { logger } from "../util/log.js";
@@ -37,6 +38,10 @@ export interface AgentRunOptions {
   label?: string;
   /** Shared transcript handle (TUI: one file per launch). When set, Agent reuses it. */
   session?: SessionHandle;
+  /** Session routing id for the event envelope (serve). Defaults to session.id. */
+  session_id?: string;
+  /** Per-run enveloped callback; preferred over Agent.events for concurrent runs. */
+  on_event?: (event: AgentEvent) => void;
 }
 
 export interface AgentRunResult {
@@ -68,8 +73,8 @@ function add_usage(total: Usage, usage: Usage): void {
   total.total_tokens += usage.total_tokens;
 }
 
-function collect_usage(total: Usage): (event: AgentEvent) => void {
-  return (event: AgentEvent): void => {
+function collect_usage(total: Usage): (event: AgentEventBody) => void {
+  return (event: AgentEventBody): void => {
     if (event.type === "llm_end") {
       add_usage(total, event.result.usage);
       return;
@@ -114,7 +119,7 @@ function tool_env(config: AgentConfig): Record<string, string> {
 }
 
 export class Agent {
-  readonly events: AgentEmitter;
+  readonly events: EnvelopedAgentEmitter;
   readonly config: AgentConfig;
   private readonly router: ProviderRouter;
   private readonly registry: ToolRegistry;
@@ -127,7 +132,7 @@ export class Agent {
   constructor(config: AgentConfig, plugins: readonly LoadedPlugin[] = [], runtime?: { mcp?: McpRuntime }) {
     this.config = config;
     this.mcp_runtime = runtime?.mcp;
-    this.events = new AgentEmitter();
+    this.events = new EnvelopedAgentEmitter();
     this.router = new ProviderRouter(config.providers);
     const base_registry = new ToolRegistry();
     register_builtin_tools(base_registry);
@@ -166,13 +171,29 @@ export class Agent {
 
   private async run_body(options: AgentRunOptions): Promise<AgentRunResult> {
     const usage_total: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    const run_id = randomUUID();
+    const session_id = options.session_id ?? options.session?.id ?? "";
+    let seq = 0;
+    const emit_enveloped = (body: AgentEventBody): void => {
+      seq += 1;
+      const event: AgentEvent = {
+        ...body,
+        run_id,
+        session_id,
+        seq,
+        ts: Date.now(),
+      };
+      this.events.emit(event);
+      options.on_event?.(event);
+    };
     const run_events = new AgentEmitter();
-    const stop_forwarding = run_events.on((event) => this.events.emit(event));
+    const stop_forwarding = run_events.on(emit_enveloped);
     const stop_collecting = run_events.on(collect_usage(usage_total));
     const recorder = await this.open_recorder(options);
     const stop_recording =
       recorder === undefined ? undefined : run_events.on((event) => recorder.on_event(event));
     await this.call_plugin_run_start(options.input);
+    emit_enveloped({ type: "run_start" });
     let outcome: LoopOutcome | undefined;
     try {
       if (recorder !== undefined) {
@@ -200,6 +221,13 @@ export class Agent {
         signal: options.signal,
       });
     } finally {
+      if (outcome !== undefined) {
+        emit_enveloped({
+          type: "run_end",
+          stopped_reason: outcome.stopped_reason,
+          turns_used: outcome.turns_used,
+        });
+      }
       stop_recording?.();
       stop_collecting();
       stop_forwarding();
@@ -239,7 +267,7 @@ export class Agent {
   }
 
   /** Per-run deps: the built-once ToolContext threads through every tool execution. */
-  private loop_deps(tool_context: ToolContext, emitter: AgentEmitter = this.events): LoopDeps {
+  private loop_deps(tool_context: ToolContext, emitter: AgentEmitter): LoopDeps {
     return {
       chat: (messages, tools, chat_options) => this.router.chat_with_failover(messages, tools, chat_options),
       tools: this.executor,

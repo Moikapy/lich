@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.0
+
+- **Breaking:** `AgentEvent` is always enveloped with `{ run_id, session_id, seq, ts }`
+  plus the payload. `error` is JSON-safe `{ kind, message }` (was `unknown` /
+  `{ name, message }` on the wire). New `run_start` / `run_end` events; aborts
+  no longer emit `type: "error"`.
+- `AgentRunOptions` gains `session_id` and per-run `on_event`. Serve uses
+  `on_event` only (no process-wide `agent.events` subscription for routing).
+- `SessionManager` (`create_session_manager`) queues runs per session id so
+  concurrent sessions no longer share serve's global `run_tail`.
+- Ossuary wire parse accepts envelope fields and `run_start` / `run_end`.
+- Export `EnvelopedAgentEmitter`, `AgentEventBody`, `AgentErrorPayload`,
+  `EventEnvelope`, `to_agent_error_payload`, `create_session_manager`, and
+  related types.
+
 ## 0.9.0
 
 - `lich serve`: headless loopback WebSocket JSON-RPC agent — token-gated

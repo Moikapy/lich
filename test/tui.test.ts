@@ -106,9 +106,15 @@ describe("apply_event transitions", () => {
   it("flags budget exhaustion and errors", () => {
     const budgeted = apply_event(INITIAL_UI_STATE, ({ type: "budget_exhausted", turns_used: 25 }));
     expect(budgeted.budget_exhausted).toBe(true);
-    const errored = apply_event(INITIAL_UI_STATE, ({ type: "error", error: new Error("nope") }));
+    const errored = apply_event(INITIAL_UI_STATE, {
+      type: "error",
+      error: { kind: "Error", message: "nope" },
+    });
     expect(errored.last_error).toBe("nope");
-    const string_errored = apply_event(INITIAL_UI_STATE, ({ type: "error", error: "plain" }));
+    const string_errored = apply_event(INITIAL_UI_STATE, {
+      type: "error",
+      error: { kind: "Error", message: "plain" },
+    });
     expect(string_errored.last_error).toBe("plain");
   });
 

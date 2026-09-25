@@ -54,8 +54,16 @@ export interface HistoryBlock {
   readonly lines: readonly string[];
 }
 
+/** Optional run/session envelope fields from serve AgentEvent notifications. */
+export type WireEnvelopeFields = {
+  run_id?: string;
+  session_id?: string;
+  seq?: number;
+  ts?: number;
+};
+
 /** Subset of AgentEvent fields needed after JSON-RPC notification decode. */
-export type WireAgentEvent =
+export type WireAgentEventBody =
   | { type: "turn_start"; turn: number }
   | { type: "llm_start"; turn: number }
   | {
@@ -76,7 +84,15 @@ export type WireAgentEvent =
   | { type: "turn_end"; turn: number }
   | { type: "final"; message: { content: string }; result: { usage: Usage } }
   | { type: "budget_exhausted"; turns_used: number }
+  | { type: "run_start" }
+  | {
+      type: "run_end";
+      stopped_reason: "final" | "budget" | "aborted";
+      turns_used: number;
+    }
   | { type: "error"; error: unknown };
+
+export type WireAgentEvent = WireAgentEventBody & WireEnvelopeFields;
 
 export interface PromptSubmitResult {
   session_id: string;
