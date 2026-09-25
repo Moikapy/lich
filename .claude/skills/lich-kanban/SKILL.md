@@ -95,7 +95,7 @@ If you're about to exceed it, finish or park something first, or ask.
 - **#113**: architecture and gap audit plus addenda (the gateway as hub, serve PR decision, modularity and DRY). This is the current plan of record.
 - **#114**: deferred work, each item with a revisit trigger.
 - **#79**: Ossuary epic (serve #81–#84, desktop #86–#94).
-- **#46 / #47**: remaining REVIEW.md follow-ups.
+- **#46 / #47**: closed v0.7.0 REVIEW track; leftover test depth is #114 item 10.
 
 ## Limits of the API
 
