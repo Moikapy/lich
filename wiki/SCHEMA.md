@@ -7,10 +7,10 @@ This wiki is the working knowledge base for **Lich**, the TypeScript Think-Act-O
 - how Lich works internally, and why it is shaped that way
 - architectural decisions and their revisit triggers
 - research on comparable agents (Hermes, and others)
-- game-engine and game-agent knowledge for Lich's three goals:
-  - **code games** (help build games)
-  - **play games** (act as a player)
-  - **live in games** (NPC brains, game masters, simulations)
+- knowledge for Lich's **idea-agnostic** harness (#113 Addendum 5 / [[0008-idea-agnostic-extensible-harness]]), including dogfood verticals:
+  - **code / play / live-in games**
+  - **create content** (video, Shorts, clipping, art — Addendum 4 / [[0007-content-as-fourth-goal]])
+  - and any other vertical users build via plugins and tools
 
 ### How it relates to the other sources of truth
 
@@ -82,7 +82,7 @@ Add a tag here before you use it.
 
 - **Layers:** core, runtime, surface, gateway, serve, ossuary, cli, tui
 - **Subsystems:** providers, tools, plugins, mcp, sessions, events, context, memory, skills, security
-- **Games:** games, npc, play, editor, engines
+- **Games:** games, npc, play, editor, engines, content
 - **Comparisons:** hermes, ecosystem
 - **Meta:** decision, roadmap, process, docs, performance, research
 
