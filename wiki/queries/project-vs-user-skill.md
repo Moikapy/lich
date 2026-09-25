@@ -1,7 +1,7 @@
 ---
 title: "Query: should the kanban skill be project-level or user-level?"
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-25
 type: query
 tags: [process, roadmap]
 sources: ["#113"]
@@ -18,7 +18,7 @@ The skill lives at `.claude/skills/lich-kanban/` inside the lich repository.
 
 **Reasons:**
 1. **It only works for this repository.** `scripts/kanban.sh` hard-codes `Moikapy/lich` and GitHub Project #2. At user level (`~/.claude/skills/`) it would load in every session, including unrelated Blender and ComfyUI work, and only add noise.
-2. **It is meant for collaboration.** Committed to the repository, it reaches every worktree (`~/code/lich-wt-issue-*`), every clone and every collaborator. A user-level skill exists only on one machine.
+2. **It is meant for collaboration.** Committed to the repository, it reaches every worktree (including gitignored `.worktrees/issue-*` checkouts), every clone and every collaborator. A user-level skill exists only on one machine.
 3. **The rules evolve with the repository.** Column definitions, key issues ([[roadmap-issues]]) and label conventions are versioned alongside the code they describe, and changes go through PRs.
 4. **Other agents depend on the path inside the repository.** The AGENTS.md text points Cursor, Herdr, Hermes and Lich at `.claude/skills/lich-kanban/scripts/kanban.sh`.
 
