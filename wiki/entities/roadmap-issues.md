@@ -1,7 +1,7 @@
 ---
 title: Roadmap issues map
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-25
 type: entity
 tags: [roadmap, process]
 sources: [raw/issues/issue-113.md, raw/issues/issue-114.md, raw/issues/issue-79.md]
@@ -15,9 +15,9 @@ This page is a **map of what each key issue is for**. It does not track status: 
 | Issue | Role | Wiki pages |
 |---|---|---|
 | **#113** | Plan of record: the architecture and gap audit. Covers games (code, play, embed), parity with Hermes, reorganization, and the doc drafts. Addenda: 1 = gateway as hub, 2 = the serve PR path plus modularity and DRY, 3 = this wiki. | [[0001-gateway-as-hub]], [[0002-serve-pr-merge-path]], [[0003-subpath-exports-over-packages]], [[0004-dry-policy]], [[0006-in-repo-llm-wiki]] |
-| **#114** | Deferred work, each item with a revisit trigger: package split, adapter migration, file-bus retirement, SDKs, TLS, memory follow-ups, parked platform features, play-harness extensions | [[subpaths-vs-packages]], [[npc-memory-namespaces]] |
-| **#79** | Ossuary and serve epic. Serve is #80–#84 (#80 is merged); desktop is #85–#94 (#85 is merged). | [[ossuary]], [[lich-serve]] |
-| **#46 / #47** | Follow-ups from REVIEW.md: remaining test depth, and the v0.7.0 epic | [[lich-tools-and-guardrails]] |
+| **#114** | Deferred work, each item with a revisit trigger: package split, adapter migration, file-bus retirement, SDKs, TLS, memory follow-ups, parked platform features, play-harness extensions, and remaining REVIEW test depth (item 10 from #46) | [[subpaths-vs-packages]], [[npc-memory-namespaces]] |
+| **#79** | Ossuary and serve epic (#80–#95). Closed after the wave landed in #123; remaining envelope/SessionManager follow-ups live under #114. | [[ossuary]], [[lich-serve]] |
+| **#46 / #47** | v0.7.0 REVIEW epic and Tests & CI tracker — **closed**. Leftover T-3/T-4 depth is #114 item 10. | [[lich-tools-and-guardrails]] |
 
 ## Six phases (from #113 §6, revised by Addendum 1)
 

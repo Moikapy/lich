@@ -10,10 +10,11 @@ confidence: medium
 
 # Ossuary
 
-Ossuary is a Hermes-shaped desktop app built with Electron, React and Dockview (epic #79). Its code lives in `apps/ossuary`. The scaffold (#85) is merged on origin (`bad1243`). It is a client of [[lich-serve]], and the rule in #79 is: "Do not build panels on webhook `POST /message`."
+Ossuary is a Hermes-shaped desktop app built with Electron, React and Dockview (epic #79, closed after #123). Its code lives in `apps/ossuary`. It is a client of [[lich-serve]], and the rule from #79 remains: "Do not build panels on webhook `POST /message`."
 
-## Tracks (issues #86–#94)
+## Shipped tracks (issues #85–#94 via #123)
 
+- Electron + React scaffold (#85)
 - spawn `lich serve` and connect a WebSocket client (#86)
 - a Chat pane (#87)
 - a contribution registry for panes (#88)

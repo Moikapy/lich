@@ -21,7 +21,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[lich-mcp]]: an MCP client and catalog. Redot is a real entry and Godot has none. The code is spread over 21 micro-files.
 - [[lich-gateway]]: familiars routed into one shared Agent. The per-chat bus and read-only defaults make it a good hub.
 - [[lich-serve]]: WebSocket JSON-RPC for Ossuary, fully merged (#99–#103). It still has one global queue, one Agent per process, and no event envelope.
-- [[ossuary]]: the Electron + Dockview desktop app (#79). It renders from serve events, so the event envelope needs to land first.
+- [[ossuary]]: the Electron + Dockview desktop app (#79 closed after #123). It renders from serve events; the event envelope is still #114 item 2.
 
 ## Entities: the ecosystem and games
 
@@ -29,7 +29,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[godot-and-redot]]: the game→Lich direction (webhook plus file bus) and the Lich→editor direction (Redot MCP). `WebSocketPeer` is the path to a GDScript SDK.
 - [[game-bridge-example]]: the file-bus enemy commander. It's racy, needs 2 LLM calls per decision, and will retire once client tools exist.
 - [[persona-orchestrator-example]]: one Agent per NPC persona, which collapses to ~20 lines once Profiles and Sessions exist.
-- [[roadmap-issues]]: what #113, #114, #79 and #46/#47 are each for, and the six phases. Status lives on the kanban, not here.
+- [[roadmap-issues]]: what #113, #114, #79 (closed) and #46/#47 (closed; leftovers in #114) are each for, and the six phases. Status lives on the kanban, not here.
 
 ## Concepts
 
