@@ -1,15 +1,16 @@
 ---
 title: Wiki index
 type: index
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # Lich Wiki: Index
 
-Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md) for recent activity. There are 37 pages.
+Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md) for recent activity. There are 39 pages.
 
-**New to the codebase?** Read [[tao-loop]], then [[lich-agent-loop]], [[lich-vs-hermes]] and [[roadmap-issues]].
+**New to the codebase?** Read [[tao-loop]], then [[lich-agent-loop]], [[lich-vs-hermes]], [[0008-idea-agnostic-extensible-harness]] and [[roadmap-issues]].
 **Working on the game features?** Read [[game-transports]], then [[action-terminal-mode]], [[client-executed-tools]] and [[embedded-safety-profile]].
+**Working on content (video / Shorts / art)?** Same harness — a dogfood vertical under [[0008-idea-agnostic-extensible-harness]] (see also [[0007-content-as-fourth-goal]]).
 
 ## Entities: Lich subsystems
 
@@ -29,7 +30,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[godot-and-redot]]: the game→Lich direction (webhook plus file bus) and the Lich→editor direction (Redot MCP). `WebSocketPeer` is the path to a GDScript SDK.
 - [[game-bridge-example]]: the file-bus enemy commander. It's racy, needs 2 LLM calls per decision, and will retire once client tools exist.
 - [[persona-orchestrator-example]]: one Agent per NPC persona, which collapses to ~20 lines once Profiles and Sessions exist.
-- [[roadmap-issues]]: what #113, #114, #79 (closed) and #46/#47 (closed; leftovers in #114) are each for, and the six phases. Status lives on the kanban, not here.
+- [[roadmap-issues]]: what #113, #114, #79 (closed) and #46/#47 (closed) are each for; north star + verticals + six phases. Status lives on the kanban, not here.
 
 ## Concepts
 
@@ -59,6 +60,8 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[0004-dry-policy]] (proposed): remove real duplication, merge over-split modules, and don't DRY the wire mapping.
 - [[0005-kanban-and-single-issue-workflow]] (accepted): the Lich Roadmap project, one issue per batch of changes, and agents advancing cards only on facts.
 - [[0006-in-repo-llm-wiki]] (accepted): this wiki, kept in the repo, with guardrails.
+- [[0007-content-as-fourth-goal]] (superseded): content as an explicit vertical — framing folded into [[0008-idea-agnostic-extensible-harness]].
+- [[0008-idea-agnostic-extensible-harness]] (accepted): idea-agnostic harness; win on plugins, tools, and user control; verticals are dogfood.
 
 ## Queries
 
