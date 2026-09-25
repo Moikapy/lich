@@ -98,7 +98,7 @@ git worktree add ".worktrees/issue-<N>-<slug>" -b "issue-<N>-<slug>"
 
 ## Key issues
 
-- **#113**: plan of record — idea-agnostic harness (Addendum 5); games/content as dogfood verticals; gateway/serve/wiki/DRY addenda.
+- **#113**: phased epic — idea-agnostic harness; children #133 (P0), #134 (P1); P2–P7 filed when started.
 - **#114**: deferred work, each item with a revisit trigger.
 - **#79**: Ossuary epic (serve #81–#84, desktop #86–#94).
 - **#46 / #47**: closed v0.7.0 REVIEW track; leftover test depth is #114 item 10.
