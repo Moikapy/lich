@@ -81,7 +81,7 @@ Use the `lich-kanban` skill (`.claude/skills/lich-kanban/`) for all board operat
 
 - **Start of a session:** run `kanban.sh audit`, then `board`, and propose next items. Don't pick priorities yourself.
 - **Move cards forward only when it's factually true:**
-  - branch or worktree exists (`~/code/lich-wt-issue-<N>`) → In Progress
+  - branch or worktree exists (`.worktrees/issue-<N>-<slug>` under the repo root) → In Progress
   - PR opened, with `Closes #N` in the body → In Review
   - merging moves it to Done
 - **Ask before** moving into Todo or Deferred, moving out of Deferred, moving backwards, or closing issues. Never delete cards, issues, or labels.

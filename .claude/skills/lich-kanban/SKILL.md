@@ -67,9 +67,15 @@ If you're about to exceed it, finish or park something first, or ask.
    new work), then the top of Todo.
 3. Propose 1–3 next items with a one-line reason each. The maintainer picks.
 
-**Starting an issue:** create a branch or worktree (existing convention:
-`~/code/lich-wt-issue-<N>` on branch `issue-<N>-<slug>`), then
+**Starting an issue:** create a branch or worktree (convention:
+`.worktrees/issue-<N>-<slug>` on branch `issue-<N>-<slug>`; the
+`.worktrees/` dir is gitignored at the repo root), then
 `$K move <N> "In Progress"`.
+
+```bash
+mkdir -p .worktrees
+git worktree add ".worktrees/issue-<N>-<slug>" -b "issue-<N>-<slug>"
+```
 
 **Opening a PR:** include `Closes #<N>` in the PR body, then `$K move <N> "In Review"`.
 
