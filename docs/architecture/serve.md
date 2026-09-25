@@ -115,6 +115,8 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
 - `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
 - Frames are handled per-connection in arrival order: pipelined requests get
   in-order replies even when earlier requests hit slower filesystem awaits.
+  `prompt.abort` is dispatched immediately so it can cancel an in-flight
+  `prompt.submit` on the same socket instead of waiting behind that run.
 - Pass `agent` or `agent_config` (same shape as CLI / `create_agent_with_plugins`) so
   `prompt.*` is available; without an agent, those methods return an application error.
 - **CLI:** `lich serve [--host 127.0.0.1] [--port 0]` builds the Agent from the same

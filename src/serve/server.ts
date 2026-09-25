@@ -10,6 +10,7 @@ import { LICH_VERSION } from "../version.js";
 import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
+import { safe_json_parse } from "../util/json.js";
 import { create_serve_prompt_service, type ServePromptService } from "./prompts.js";
 import { handle_serve_rpc_message } from "./rpc.js";
 import { create_serve_session_store, type ServeSessionStore } from "./sessions.js";
@@ -234,20 +235,41 @@ function attach_client(
 ): void {
   // Serialize frames per connection: pipelined requests get in-order replies,
   // and the tail catch keeps any rejection from becoming an unhandled one.
+  // prompt.abort is not on that tail. It must run while prompt.submit is still
+  // awaiting the model; waiting would deadlock a hung run with its own cancel.
   let tail: Promise<void> = Promise.resolve();
-  client.on("message", (data) => {
-    const chain = tail
-      .then(() => handle_client_message(client, data, version, sessions, prompts))
-      .catch((error: unknown) => {
-        logger.warn("serve client message handling failed", error);
-      });
-    tail = chain;
-    // Track the exact chain (not the mutable tail) so stop() drains this one.
+  const track = (chain: Promise<void>): void => {
     inflight.add(chain);
-    void chain.then(() => {
+    void chain.finally(() => {
       inflight.delete(chain);
     });
+  };
+  const run_frame = (data: RawData): Promise<void> =>
+    handle_client_message(client, data, version, sessions, prompts).catch((error: unknown) => {
+      logger.warn("serve client message handling failed", error);
+    });
+  client.on("message", (data) => {
+    if (is_prompt_abort_frame(data)) {
+      track(Promise.resolve().then(() => run_frame(data)));
+      return;
+    }
+    const chain = tail.then(() => run_frame(data));
+    tail = chain;
+    track(chain);
   });
+}
+
+/** True when this frame is prompt.abort (cancel must not wait on the run it cancels). */
+function is_prompt_abort_frame(data: RawData): boolean {
+  try {
+    const parsed = safe_json_parse<unknown>(raw_data_to_string(data));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return false;
+    }
+    return (parsed as { method?: unknown }).method === "prompt.abort";
+  } catch {
+    return false;
+  }
 }
 
 async function handle_client_message(
