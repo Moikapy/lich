@@ -636,6 +636,70 @@ describe("serve prompt over websocket", () => {
     }
   });
 
+  it("prompt.abort cancels an in-flight submit on the same websocket", async () => {
+    const work_dir = await make_temp_dir("serve-ws-abort");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_started();
+      const signal = init?.signal;
+      await new Promise<void>((_resolve, reject) => {
+        const fail = (): void => {
+          const error = new Error("fetch aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (signal?.aborted === true) {
+          fail();
+          return;
+        }
+        signal?.addEventListener("abort", fail, { once: true });
+      });
+      throw new Error("unreachable");
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      session_dir,
+      agent,
+      version: "9.9.9",
+    });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session.create",
+        params: { source: "test" },
+      });
+      const session_id = (create_resp.result as { session_id: string }).session_id;
+      const submit_promise = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id, text: "hang" },
+      });
+      await started;
+      const abort_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "prompt.abort",
+        params: { session_id },
+      });
+      expect(abort_resp.result).toEqual({ session_id, aborted: true });
+      const submit = await submit_promise;
+      expect(submit.result).toMatchObject({ session_id, stopped_reason: "aborted" });
+    } finally {
+      ws.close();
+    }
+  });
+
   it("stop() aborts an in-flight prompt instead of draining the model call", async () => {
     const work_dir = await make_temp_dir("serve-stop-abort");
     const session_dir = path.join(work_dir, "sessions");
