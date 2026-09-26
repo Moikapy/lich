@@ -241,8 +241,27 @@ function find_last_assistant(messages: readonly Message[]): AssistantMessage | u
   return [...messages].reverse().find((message) => message.role === "assistant");
 }
 
+const PARTIAL_MESSAGES = Symbol("lich.partial_messages");
+
 function signal_aborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
+}
+
+/** Attach in-memory history so a caller can keep turns that finished before chat threw. */
+export function note_partial_messages(error: unknown, messages: readonly Message[]): unknown {
+  if (typeof error === "object" && error !== null) {
+    Object.defineProperty(error, PARTIAL_MESSAGES, { value: [...messages], enumerable: false });
+  }
+  return error;
+}
+
+/** History captured when chat threw, if the loop annotated this error. */
+export function partial_messages_of(error: unknown): Message[] | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const value = (error as { [PARTIAL_MESSAGES]?: unknown })[PARTIAL_MESSAGES];
+  return Array.isArray(value) ? (value as Message[]) : undefined;
 }
 
 function aborted_outcome(history: Message[], turns_used: number, emitter: AgentEmitter | undefined): LoopOutcome {
@@ -278,7 +297,7 @@ export async function run_conversation(
       if (signal_aborted(params.signal) === true) {
         return aborted_outcome(history, turn - 1, emitter);
       }
-      throw error;
+      throw note_partial_messages(error, history);
     }
     emitter?.emit({ type: "llm_end", turn, result });
     history.push(result.message);
