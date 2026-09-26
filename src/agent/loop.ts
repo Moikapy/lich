@@ -21,6 +21,7 @@ import { ProviderError } from "../providers/types.js";
 import type { ToolContext, ToolResult } from "../tools/types.js";
 import { logger } from "../util/log.js";
 import type { AgentEmitter } from "./events.js";
+import { to_agent_error_payload } from "./events.js";
 
 const DEFAULT_COMPRESS_THRESHOLD = 0.8;
 const KEEP_RECENT_TURNS = 8;
@@ -150,7 +151,7 @@ async function call_chat(
     } else {
       logger.error("agent chat call failed", error);
     }
-    emitter?.emit({ type: "error", error });
+    emitter?.emit({ type: "error", error: to_agent_error_payload(error) });
     throw error;
   }
 }
@@ -245,8 +246,8 @@ function signal_aborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
 
-function aborted_outcome(history: Message[], turns_used: number, emitter: AgentEmitter | undefined): LoopOutcome {
-  emitter?.emit({ type: "error", error: new DOMException("agent loop aborted", "AbortError") });
+function aborted_outcome(history: Message[], turns_used: number): LoopOutcome {
+  // Aborts are reported as run_end by Agent.run, not as type:"error".
   return {
     messages: history,
     final: find_last_assistant(history),
@@ -266,7 +267,7 @@ export async function run_conversation(
   const compress_backoff: CompressBackoff = { skip_until_turn: 0 };
   for (const turn of turn_range(params.max_turns)) {
     if (signal_aborted(params.signal) === true) {
-      return aborted_outcome(history, turn - 1, emitter);
+      return aborted_outcome(history, turn - 1);
     }
     emitter?.emit({ type: "turn_start", turn });
     await compress_if_needed(deps, history, params, emitter, turn, compress_backoff);
@@ -276,7 +277,7 @@ export async function run_conversation(
       result = await call_chat(deps, history, params, emitter);
     } catch (error) {
       if (signal_aborted(params.signal) === true) {
-        return aborted_outcome(history, turn - 1, emitter);
+        return aborted_outcome(history, turn - 1);
       }
       throw error;
     }
@@ -290,7 +291,7 @@ export async function run_conversation(
     }
     const tool_status = await run_tool_calls(deps, history, turn, calls, emitter, params.signal);
     if (tool_status === "aborted") {
-      return aborted_outcome(history, turn, emitter);
+      return aborted_outcome(history, turn);
     }
     if (turn < params.max_turns) {
       emitter?.emit({ type: "turn_end", turn });

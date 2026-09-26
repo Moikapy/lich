@@ -1,9 +1,10 @@
 /**
  * prompt.submit / prompt.abort for lich serve: one Agent, SessionHandle per bag,
- * serialized runs, AbortSignal cancel, AgentEvent → WS notify.
+ * per-session run queue, AbortSignal cancel, enveloped AgentEvent → WS notify.
  */
 import type { Agent, AgentRunResult } from "../agent/agent.js";
 import type { AgentEvent } from "../agent/events.js";
+import { create_session_manager } from "../session/manager.js";
 import type {
   PromptAbortParams,
   PromptAbortResult,
@@ -24,8 +25,8 @@ export interface ServePromptService {
 }
 
 /**
- * Owns in-flight AbortControllers and a single run queue so AgentEvent fan-out
- * stays 1:1 with the submitting session_id (Agent.events is process-wide).
+ * Owns in-flight AbortControllers and a per-session run queue so concurrent
+ * sessions do not serialize on each other. Events are scoped via Agent on_event.
  */
 export function create_serve_prompt_service(
   agent: Agent,
@@ -33,7 +34,7 @@ export function create_serve_prompt_service(
 ): ServePromptService {
   /** session_id → live AbortControllers (one running + any queued). */
   const inflight = new Map<string, Set<AbortController>>();
-  let run_tail: Promise<unknown> = Promise.resolve();
+  const runs = create_session_manager();
 
   /** Add the controller to the session's set, creating the set on first use. */
   function register_controller(session_id: string, controller: AbortController): void {
@@ -58,65 +59,57 @@ export function create_serve_prompt_service(
   }
 
   return {
-    submit: async (params, notify) => {
+    submit: (params, notify) => {
       const bag_before = sessions.get(params.session_id);
       if (bag_before === undefined) {
         throw new Error(`session not found: ${params.session_id}`);
       }
       const epoch_before = bag_before.epoch;
 
-      const previous = run_tail;
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      run_tail = previous.then(() => gate).catch(() => gate);
-
       // Register before the queue wait so prompt.abort can cancel a queued run.
       const controller = new AbortController();
       register_controller(params.session_id, controller);
-      await previous.catch(() => undefined);
 
-      // Aborted while queued: release the gate without starting the run.
-      if (controller.signal.aborted === true) {
-        unregister_controller(params.session_id, controller);
-        release();
-        return {
-          session_id: params.session_id,
-          reply: undefined,
-          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-          session_path: undefined,
-          turns_used: 0,
-          stopped_reason: "aborted",
-        };
-      }
-
-      const stop = agent.events.on((event) => {
-        notify({
-          jsonrpc: "2.0",
-          method: SERVE_NOTIFICATION_EVENT,
-          params: { session_id: params.session_id, event: wire_agent_event(event) },
-        });
-      });
-      try {
-        const result = await agent.run({
-          input: params.text,
-          history: bag_before.history,
-          signal: controller.signal,
-          session: bag_before.handle,
-          label: bag_before.source,
-        });
-        // Write back only if clear() (or eviction) did not reset the bag mid-run.
-        const bag_after = sessions.get(params.session_id);
-        if (bag_after === bag_before && bag_after.epoch === epoch_before) {
-          bag_after.history = [...result.messages];
+      return runs.enqueue(params.session_id, async () => {
+        // Aborted while queued: return without starting the run.
+        if (controller.signal.aborted === true) {
+          unregister_controller(params.session_id, controller);
+          return {
+            session_id: params.session_id,
+            reply: undefined,
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            session_path: undefined,
+            turns_used: 0,
+            stopped_reason: "aborted" as const,
+          };
         }
-        return map_submit_result(params.session_id, result);
-      } finally {
-        stop();
-        unregister_controller(params.session_id, controller);
-        release();
-      }
+
+        try {
+          const result = await agent.run({
+            input: params.text,
+            history: bag_before.history,
+            signal: controller.signal,
+            session: bag_before.handle,
+            label: bag_before.source,
+            session_id: params.session_id,
+            on_event: (event) => {
+              notify({
+                jsonrpc: "2.0",
+                method: SERVE_NOTIFICATION_EVENT,
+                params: { session_id: params.session_id, event: wire_agent_event(event) },
+              });
+            },
+          });
+          // Write back only if clear() (or eviction) did not reset the bag mid-run.
+          const bag_after = sessions.get(params.session_id);
+          if (bag_after === bag_before && bag_after.epoch === epoch_before) {
+            bag_after.history = [...result.messages];
+          }
+          return map_submit_result(params.session_id, result);
+        } finally {
+          unregister_controller(params.session_id, controller);
+        }
+      });
     },
     abort: (params) => {
       const controllers = inflight.get(params.session_id);
@@ -150,17 +143,7 @@ function map_submit_result(session_id: string, result: AgentRunResult): PromptSu
   };
 }
 
-/** JSON-safe AgentEvent — raw Error becomes `{}` under JSON.stringify. */
+/** Identity today: AgentEvent.error is already JSON-safe { kind, message }. */
 function wire_agent_event(event: AgentEvent): AgentEvent {
-  if (event.type !== "error") {
-    return event;
-  }
-  return { type: "error", error: wire_error(event.error) };
-}
-
-function wire_error(error: unknown): unknown {
-  if (error instanceof Error) {
-    return { name: error.name, message: error.message };
-  }
-  return error;
+  return event;
 }

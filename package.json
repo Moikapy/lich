@@ -1,6 +1,6 @@
 {
   "name": "@moikapy/lich",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Lich — a TypeScript AI agent harness (library + CLI) inspired by Hermes",
   "type": "module",
   "license": "MIT",

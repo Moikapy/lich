@@ -4,7 +4,7 @@
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { AgentEvent } from "../src/agent/events.js";
+import type { AgentEventBody } from "../src/agent/events.js";
 import { create_session_recorder } from "../src/session/recorder.js";
 import { open_session, read_session_messages, type SessionRecord } from "../src/session/store.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
@@ -36,7 +36,7 @@ async function read_records(file_path: string): Promise<SessionRecord[]> {
   return records;
 }
 
-function llm_end(content: string): AgentEvent {
+function llm_end(content: string): AgentEventBody {
   return {
     type: "llm_end",
     turn: 1,
@@ -50,7 +50,7 @@ function llm_end(content: string): AgentEvent {
   };
 }
 
-function tool_call_end(ok: boolean): AgentEvent {
+function tool_call_end(ok: boolean): AgentEventBody {
   return {
     type: "tool_call_end",
     turn: 1,
@@ -121,7 +121,7 @@ describe("session recorder", () => {
       system_prompt: "sys",
       owned: true,
     });
-    const events: AgentEvent[] = [
+    const events: AgentEventBody[] = [
       llm_end("one"),
       tool_call_end(false),
       llm_end("two"),

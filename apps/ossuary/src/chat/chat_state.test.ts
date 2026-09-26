@@ -92,6 +92,26 @@ describe("parse_serve_event_params", () => {
     expect(parse_serve_event_params({ session_id: 1 })).toBeUndefined();
     expect(parse_serve_event_params({ session_id: "a", event: { type: "llm_start" } })).toBeUndefined();
   });
+
+  it("preserves envelope fields on decoded events", () => {
+    const parsed = parse_serve_event_params({
+      session_id: "abc",
+      event: {
+        type: "run_start",
+        run_id: "run-1",
+        session_id: "abc",
+        seq: 1,
+        ts: 1_700_000_000_000,
+      },
+    });
+    expect(parsed?.event).toMatchObject({
+      type: "run_start",
+      run_id: "run-1",
+      session_id: "abc",
+      seq: 1,
+      ts: 1_700_000_000_000,
+    });
+  });
 });
 
 describe("transcript helpers", () => {
