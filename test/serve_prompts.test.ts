@@ -128,6 +128,77 @@ describe("serve prompt rpc", () => {
     expect(events.some((event) => event.type === "turn_start")).toBe(true);
   });
 
+  it("keeps completed tool turns when a later model call fails", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-partial");
+    const session_dir = path.join(work_dir, "sessions");
+    const seen: string[] = [];
+    let phase: "tool" | "fail" | "ok" = "tool";
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      seen.push(String(init?.body ?? ""));
+      if (phase === "tool") {
+        phase = "fail";
+        return new Response(
+          JSON.stringify(
+            completion_body(
+              {
+                role: "assistant",
+                content: "",
+                tool_calls: [
+                  {
+                    id: "c1",
+                    type: "function",
+                    function: { name: "list_dir", arguments: JSON.stringify({ path: "." }) },
+                  },
+                ],
+              },
+              "tool_calls",
+            ),
+          ),
+          { status: 200 },
+        );
+      }
+      if (phase === "fail") {
+        return new Response("bad request", { status: 400 });
+      }
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "continued" }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const failed = await rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "look around" },
+      2,
+    );
+    expect(failed.error).toBeDefined();
+    const history = sessions.get(created.session_id)?.history ?? [];
+    expect(history.some((message) => message.role === "user" && message.content === "look around")).toBe(true);
+    expect(history.some((message) => message.role === "tool")).toBe(true);
+    expect(history.at(-1)?.role).toBe("tool");
+
+    phase = "ok";
+    const continued = await rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "continue" },
+      3,
+    );
+    const result = continued.result as { reply: string };
+    expect(result.reply).toBe("continued");
+    const follow_up = seen.at(-1) ?? "";
+    expect(follow_up).toContain("c1");
+    expect(follow_up).toContain("look around");
+  });
+
   it("aborts an in-flight run via prompt.abort", async () => {
     const work_dir = await make_temp_dir("serve-prompt-abort");
     const session_dir = path.join(work_dir, "sessions");

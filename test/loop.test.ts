@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentEmitter, type AgentEvent } from "../src/agent/events.js";
 import type { ChatFn } from "../src/context/compressor.js";
-import { run_conversation, type LoopDeps, type ToolRunner } from "../src/agent/loop.js";
+import { partial_messages_of, run_conversation, type LoopDeps, type ToolRunner } from "../src/agent/loop.js";
 import type { ChatResult, Message, ToolCall } from "../src/providers/types.js";
 
 function result(content: string, calls?: ToolCall[]): ChatResult {
@@ -457,5 +457,30 @@ describe("run_conversation", () => {
       run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 2 }),
     ).rejects.toThrow("provider exploded");
     expect(events.some((event) => event.type === "error")).toBe(true);
+  });
+
+  it("attaches completed tool turns when a later chat throws", async () => {
+    const state = { calls: 0 };
+    const chat: ChatFn = async () => {
+      state.calls += 1;
+      if (state.calls === 1) {
+        return result("", [{ id: "t1", name: "read_file", args: { path: "a.txt" } }]);
+      }
+      throw new Error("provider exploded");
+    };
+    const { runner } = make_tool_runner("file-body");
+    const deps: LoopDeps = { chat, tools: runner, definitions: () => [] };
+
+    let caught: unknown;
+    try {
+      await run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 3 });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("provider exploded");
+    const partial = partial_messages_of(caught);
+    expect(partial?.some((message) => message.role === "assistant")).toBe(true);
+    expect(partial?.some((message) => message.role === "tool" && message.content.includes("file-body"))).toBe(true);
   });
 });
