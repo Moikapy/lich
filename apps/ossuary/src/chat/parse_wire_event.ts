@@ -36,7 +36,10 @@ function with_envelope(
 function parse_run_end(record: Record<string, unknown>): WireAgentEventBody | undefined {
   const reason = record.stopped_reason;
   if (
-    (reason === "final" || reason === "budget" || reason === "aborted") &&
+    (reason === "final" ||
+      reason === "budget" ||
+      reason === "aborted" ||
+      reason === "error") &&
     typeof record.turns_used === "number"
   ) {
     return { type: "run_end", stopped_reason: reason, turns_used: record.turns_used };

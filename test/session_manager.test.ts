@@ -40,4 +40,25 @@ describe("session_manager", () => {
     expect(results.sort()).toEqual(["a", "b", "c"]);
     expect(peak).toBeGreaterThan(1);
   });
+
+  it("drops idle session tails after release", async () => {
+    const manager = create_session_manager();
+    for (const id of ["s1", "s2", "s3"]) {
+      await manager.enqueue(id, async () => "done");
+    }
+    expect(manager.pending_count()).toBe(0);
+
+    let release_hold!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release_hold = resolve;
+    });
+    const pending = manager.enqueue("live", async () => {
+      await hold;
+      return "ok";
+    });
+    expect(manager.pending_count()).toBe(1);
+    release_hold();
+    await pending;
+    expect(manager.pending_count()).toBe(0);
+  });
 });

@@ -5,6 +5,8 @@
 
 export interface SessionManager {
   enqueue<T>(session_id: string, task: () => Promise<T>): Promise<T>;
+  /** Live queue tails (test/observability); drops after idle sessions release. */
+  pending_count(): number;
 }
 
 export function create_session_manager(): SessionManager {
@@ -17,17 +19,19 @@ export function create_session_manager(): SessionManager {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      tails.set(
-        session_id,
-        previous.then(() => gate).catch(() => gate),
-      );
+      const chained = previous.then(() => gate).catch(() => gate);
+      tails.set(session_id, chained);
 
       await previous.catch(() => undefined);
       try {
         return await task();
       } finally {
         release();
+        if (tails.get(session_id) === chained) {
+          tails.delete(session_id);
+        }
       }
     },
+    pending_count: () => tails.size,
   };
 }

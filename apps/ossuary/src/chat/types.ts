@@ -87,7 +87,7 @@ export type WireAgentEventBody =
   | { type: "run_start" }
   | {
       type: "run_end";
-      stopped_reason: "final" | "budget" | "aborted";
+      stopped_reason: "final" | "budget" | "aborted" | "error";
       turns_used: number;
     }
   | { type: "error"; error: unknown };

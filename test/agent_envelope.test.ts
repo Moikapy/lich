@@ -86,4 +86,38 @@ describe("agent event envelope", () => {
       expect(end.stopped_reason).toBe("final");
     }
   });
+
+  it("emits run_end with error when the provider throws after run_start", async () => {
+    const work_dir = await make_temp_dir();
+    const agent = create_agent({
+      providers: [
+        {
+          kind: "openai_compat",
+          name: "mock",
+          model: "mock-model",
+          base_url: "http://mock.local/v1",
+          fetch_fn: async () => {
+            throw new Error("provider down");
+          },
+        },
+      ],
+      work_dir,
+      session_dir: path.join(work_dir, "sessions"),
+      tools_enabled: [],
+      log_level: "error",
+    });
+
+    const events: AgentEvent[] = [];
+    const stop = agent.events.on((event) => events.push(event));
+    await expect(agent.run({ input: "ping" })).rejects.toThrow();
+    stop();
+
+    expect(events[0]?.type).toBe("run_start");
+    expect(events[0]?.session_id.length).toBeGreaterThan(0);
+    const end = events.at(-1);
+    expect(end?.type).toBe("run_end");
+    if (end?.type === "run_end") {
+      expect(end.stopped_reason).toBe("error");
+    }
+  });
 });

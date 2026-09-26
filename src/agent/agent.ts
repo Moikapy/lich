@@ -172,7 +172,8 @@ export class Agent {
   private async run_body(options: AgentRunOptions): Promise<AgentRunResult> {
     const usage_total: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     const run_id = randomUUID();
-    const session_id = options.session_id ?? options.session?.id ?? "";
+    const opened = await this.open_run_session(options);
+    const session_id = options.session_id ?? opened.handle?.id ?? "";
     let seq = 0;
     const emit_enveloped = (body: AgentEventBody): void => {
       seq += 1;
@@ -189,7 +190,7 @@ export class Agent {
     const run_events = new AgentEmitter();
     const stop_forwarding = run_events.on(emit_enveloped);
     const stop_collecting = run_events.on(collect_usage(usage_total));
-    const recorder = await this.open_recorder(options);
+    const recorder = opened.recorder;
     const stop_recording =
       recorder === undefined ? undefined : run_events.on((event) => recorder.on_event(event));
     await this.call_plugin_run_start(options.input);
@@ -227,6 +228,9 @@ export class Agent {
           stopped_reason: outcome.stopped_reason,
           turns_used: outcome.turns_used,
         });
+      } else {
+        // Provider/compress throw: still bookend run_start for wire subscribers.
+        emit_enveloped({ type: "run_end", stopped_reason: "error", turns_used: 0 });
       }
       stop_recording?.();
       stop_collecting();
@@ -298,15 +302,20 @@ export class Agent {
     );
   }
 
-  /** Best-effort recorder: open failures warn and skip persistence for this run. */
-  private async open_recorder(options: AgentRunOptions): Promise<SessionRecorder | undefined> {
+  /**
+   * Best-effort session handle + recorder. Open failures warn and skip
+   * persistence; a supplied `session` handle is still returned for envelope ids.
+   */
+  private async open_run_session(
+    options: AgentRunOptions,
+  ): Promise<{ handle: SessionHandle | undefined; recorder: SessionRecorder | undefined }> {
     try {
       const handle =
         options.session ?? (await open_session(this.config.session_dir, options.label));
-      return create_session_recorder(handle);
+      return { handle, recorder: create_session_recorder(handle) };
     } catch (error) {
       logger.warn("session persistence failed; continuing without transcript", error);
-      return undefined;
+      return { handle: options.session, recorder: undefined };
     }
   }
 }

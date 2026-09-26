@@ -14,6 +14,8 @@ import { logger } from "../util/log.js";
 export type AgentErrorPayload = { kind: string; message: string };
 
 export type RunStoppedReason = "final" | "budget" | "aborted";
+/** `run_end` reason; `"error"` bookends a thrown run after `run_start`. */
+export type RunEndReason = RunStoppedReason | "error";
 
 export interface AgentEventBodies {
   turn_start: { turn: number };
@@ -30,7 +32,7 @@ export interface AgentEventBodies {
   error: { error: AgentErrorPayload };
   /** No payload fields; marker event for the start of Agent.run. */
   run_start: { marker?: undefined };
-  run_end: { stopped_reason: RunStoppedReason; turns_used: number };
+  run_end: { stopped_reason: RunEndReason; turns_used: number };
 }
 
 export type AgentEventBody = {

@@ -23,6 +23,7 @@ export type {
   AgentEvents,
   EventEnvelope,
   RunStoppedReason,
+  RunEndReason,
 } from "./agent/events.js";
 export { run_conversation } from "./agent/loop.js";
 export type { LoopDeps, LoopOutcome, LoopParams, ToolRunner } from "./agent/loop.js";
