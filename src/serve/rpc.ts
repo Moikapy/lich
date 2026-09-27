@@ -23,6 +23,13 @@ export interface ServeRpcContext {
   prompts?: ServePromptService;
   /** Server→client event fan-out for the active WebSocket (or test sink). */
   notify?: ServeEventNotify;
+  /**
+   * Controller armed when this prompt.submit frame was accepted. Present only
+   * for the websocket path, and only until submit() takes ownership.
+   */
+  prepared_submit?: { session_id: string; controller: AbortController };
+  /** Marks prepared_submit as owned by submit() so the frame queue does not release it. */
+  claim_prepared_submit?: () => void;
 }
 
 export async function handle_serve_rpc_message(
@@ -185,8 +192,9 @@ async function dispatch_prompt_submit(
     return error_response(id, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params");
   }
   const notify = context.notify ?? (() => undefined);
+  const prepared = take_prepared_submit(context, parsed.session_id);
   try {
-    const result = await context.prompts.submit(parsed, notify);
+    const result = await context.prompts.submit(parsed, notify, prepared);
     return { jsonrpc: "2.0", id: id as JsonRpcId, result };
   } catch (error) {
     return error_response(id, SERVE_ERROR_CODES.APPLICATION_ERROR, error_message(error));
@@ -211,6 +219,19 @@ function dispatch_prompt_abort(
   } catch (error) {
     return error_response(id, SERVE_ERROR_CODES.APPLICATION_ERROR, error_message(error));
   }
+}
+
+/** Hand a pre-armed controller to submit() when it belongs to this session. */
+function take_prepared_submit(
+  context: ServeRpcContext,
+  session_id: string,
+): AbortController | undefined {
+  const prepared = context.prepared_submit;
+  if (prepared === undefined || prepared.session_id !== session_id) {
+    return undefined;
+  }
+  context.claim_prepared_submit?.();
+  return prepared.controller;
 }
 
 function parse_session_create(
