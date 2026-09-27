@@ -134,6 +134,18 @@ describe("load_plugins", () => {
     expect(plugin_errors_summary(errors)).toContain("no_export.plugin.ts");
     await rm(no_export, { force: true });
   });
+
+  it("refuses non-module entries before import and still loads the rest", async () => {
+    const { plugins, errors } = await load_plugins(
+      ["notes.txt", "good.plugin.ts", "payload.json"],
+      FIXTURES,
+    );
+    expect(plugins.map((loaded) => loaded.plugin.name)).toEqual(["good"]);
+    expect(errors).toEqual([
+      { entry: "notes.txt", error_message: "plugin_entry_not_a_module: notes.txt" },
+      { entry: "payload.json", error_message: "plugin_entry_not_a_module: payload.json" },
+    ]);
+  });
 });
 
 describe("HookedToolRunner", () => {
