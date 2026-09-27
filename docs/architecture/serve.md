@@ -117,6 +117,8 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
   in-order replies even when earlier requests hit slower filesystem awaits.
   `prompt.abort` is dispatched immediately so it can cancel an in-flight
   `prompt.submit` on the same socket instead of waiting behind that run.
+  A submit already accepted on that socket, but still waiting behind another
+  frame, is armed when the frame arrives so the same abort cancels it too.
 - Pass `agent` or `agent_config` (same shape as CLI / `create_agent_with_plugins`) so
   `prompt.*` is available; without an agent, those methods return an application error.
 - **CLI:** `lich serve [--host 127.0.0.1] [--port 0]` builds the Agent from the same

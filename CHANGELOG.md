@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `prompt.abort` cancels a `prompt.submit` already accepted on the same
+  socket but still waiting behind another frame, so a cancel issued during
+  resume, list, or another in-flight call cannot miss that run.
+
 ## 0.9.0
 
 - `lich serve`: headless loopback WebSocket JSON-RPC agent — token-gated
