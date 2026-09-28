@@ -285,6 +285,30 @@ describe("persona orchestrator", () => {
     expect(capped.map((message) => message.content)).toEqual(["u2", "a2"]);
   });
 
+  it("cap_history keeps assistant/tool turns when the window has no user", () => {
+    const messages = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1", tool_calls: [{ id: "t1" }] },
+      { role: "tool", content: "r1" },
+      { role: "assistant", content: "a2", tool_calls: [{ id: "t2" }] },
+      { role: "tool", content: "r2" },
+    ];
+    const capped = cap_history(messages, 4);
+    expect(capped.map((message) => message.content)).toEqual(["a1", "r1", "a2", "r2"]);
+  });
+
+  it("cap_history keeps the assistant when the window is only tool results", () => {
+    const messages = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1", tool_calls: [{ id: "t1" }, { id: "t2" }] },
+      { role: "tool", content: "r1" },
+      { role: "tool", content: "r2" },
+    ];
+    const capped = cap_history(messages, 2);
+    expect(capped.map((message) => message.role)).toEqual(["assistant", "tool", "tool"]);
+    expect(capped.map((message) => message.content)).toEqual(["a1", "r1", "r2"]);
+  });
+
   it("requires a token and rejects wrong content-type / oversized bodies", async () => {
     const work_dir = await make_temp_dir();
     const factory: AgentFactory = async () => ({

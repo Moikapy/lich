@@ -136,16 +136,46 @@ function conversation_key(platform: string, chat_id: string): string {
   return `${platform}:${chat_id}`;
 }
 
+/**
+ * Newest `cap` messages. Drop a leading tool-result fragment so the window
+ * does not start mid-batch. Keep assistant/tool turns even when no user
+ * message remains — skipping every non-user role emptied a tool-heavy turn
+ * and the next message ran with no history.
+ * If the window is only that batch's results, include its assistant. The
+ * slice can then exceed `cap` by the rest of that one batch.
+ */
 function cap_history(messages: Message[], cap: number): Message[] {
   const overflow = messages.length - cap;
   if (overflow <= 0) {
     return messages;
   }
-  let sliced = messages.slice(overflow);
-  while (sliced.length > 0 && sliced[0]?.role !== "user") {
-    sliced = sliced.slice(1);
+  const body = skip_leading_tools(messages, overflow);
+  if (body < messages.length) {
+    return messages.slice(body);
   }
-  return sliced;
+  const parent = assistant_owning_tools(messages, overflow);
+  return parent === undefined ? [] : messages.slice(parent);
+}
+
+function skip_leading_tools(messages: readonly Message[], start: number): number {
+  let index = start;
+  while (index < messages.length && messages[index]?.role === "tool") {
+    index += 1;
+  }
+  return index;
+}
+
+function assistant_owning_tools(messages: readonly Message[], start: number): number | undefined {
+  let index = start;
+  while (index > 0 && messages[index]?.role === "tool") {
+    index -= 1;
+  }
+  const parent = messages[index];
+  if (index >= start || parent?.role !== "assistant") {
+    return undefined;
+  }
+  const calls = parent.tool_calls;
+  return calls !== undefined && calls.length > 0 ? index : undefined;
 }
 
 function final_reply_text(content: string | undefined): string | undefined {

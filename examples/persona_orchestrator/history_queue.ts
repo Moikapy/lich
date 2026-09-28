@@ -7,19 +7,50 @@ export const DEFAULT_HISTORY_CAP = 40;
 export const DEFAULT_MAX_CONVERSATIONS = 200;
 
 /**
- * Newest `cap` messages. After slicing, drop leading non-user turns so a
- * truncated assistant tool_calls is never left without its tool results.
+ * Newest `cap` messages. Drop a leading tool-result fragment so the window
+ * does not start mid-batch. Keep assistant/tool turns even when no user
+ * message remains — skipping every non-user role emptied a tool-heavy turn.
+ * If the window is only that batch's results, include its assistant. The
+ * slice can then exceed `cap` by the rest of that one batch.
  */
 export function cap_history<T>(messages: readonly T[], cap: number): T[] {
   const overflow = messages.length - cap;
   if (overflow <= 0) {
     return [...messages];
   }
-  let start = overflow;
-  while (start < messages.length && role_of(messages[start]) !== "user") {
-    start += 1;
+  const body = skip_leading_tools(messages, overflow);
+  if (body < messages.length) {
+    return messages.slice(body);
   }
-  return messages.slice(start);
+  const parent = assistant_owning_tools(messages, overflow);
+  return parent === undefined ? [] : messages.slice(parent);
+}
+
+function skip_leading_tools<T>(messages: readonly T[], start: number): number {
+  let index = start;
+  while (index < messages.length && role_of(messages[index]) === "tool") {
+    index += 1;
+  }
+  return index;
+}
+
+function assistant_owning_tools<T>(messages: readonly T[], start: number): number | undefined {
+  let index = start;
+  while (index > 0 && role_of(messages[index]) === "tool") {
+    index -= 1;
+  }
+  if (index >= start || has_tool_calls(messages[index]) === false) {
+    return undefined;
+  }
+  return index;
+}
+
+function has_tool_calls(message: unknown): boolean {
+  if (role_of(message) !== "assistant") {
+    return false;
+  }
+  const calls = (message as { tool_calls?: unknown }).tool_calls;
+  return Array.isArray(calls) && calls.length > 0;
 }
 
 function role_of(message: unknown): string | undefined {
