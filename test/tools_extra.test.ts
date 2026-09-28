@@ -7,7 +7,7 @@ import { register_builtin_tools } from "../src/tools/builtin/index.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 import { ToolExecutor } from "../src/tools/executor.js";
 import { ToolRegistry } from "../src/tools/registry.js";
-import { is_blocked_ip, reset_url_guard_fetch, set_url_guard_fetch } from "../src/tools/url_guard.js";
+import { is_blocked_ip, reset_url_guard_fetch, safe_fetch, set_url_guard_fetch } from "../src/tools/url_guard.js";
 
 let tmp_root: string;
 let executor: ToolExecutor;
@@ -199,6 +199,59 @@ describe("fetch_url", () => {
     const result = await executor.execute("fetch_url", { url: "https://example.com/start" });
     expect(result.ok).toBe(false);
     expect(result.error?.startsWith("blocked_url")).toBe(true);
+    expect(fetch_mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops after five redirects and does not replay a POST body", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    set_url_guard_fetch(async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: String(init?.method ?? "GET"),
+        body: init?.body,
+      });
+      const hop = calls.length;
+      if (hop < 3) {
+        return fake_response("", {
+          status: 307,
+          headers: { location: hop === 1 ? "/next" : "http://8.8.8.8/last" },
+        });
+      }
+      return fake_response("landed", { headers: { "content-type": "text/plain" } });
+    });
+    const followed = await safe_fetch("http://1.1.1.1/start", { method: "POST", body: "secret-body" });
+    expect(await followed.text()).toBe("landed");
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://1.1.1.1/start",
+      "http://1.1.1.1/next",
+      "http://8.8.8.8/last",
+    ]);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toBe("secret-body");
+    expect(calls[1]?.method).toBe("GET");
+    expect(calls[1]?.body).toBeUndefined();
+    expect(calls[2]?.body).toBeUndefined();
+
+    calls.length = 0;
+    set_url_guard_fetch(async (input) => {
+      calls.push({ url: String(input), method: "GET", body: undefined });
+      return fake_response("", {
+        status: 302,
+        headers: { location: `http://1.1.1.1/hop-${calls.length}` },
+      });
+    });
+    await expect(safe_fetch("http://1.1.1.1/loop")).rejects.toThrow(/too_many_redirects/);
+    expect(calls).toHaveLength(5);
+  });
+
+  it("returns a non-redirect status without following Location", async () => {
+    const fetch_mock = vi.fn(async () =>
+      fake_response("stay", { status: 200, headers: { location: "http://8.8.8.8/elsewhere" } }),
+    );
+    set_url_guard_fetch(fetch_mock);
+    const response = await safe_fetch("http://1.1.1.1/cached");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("stay");
     expect(fetch_mock).toHaveBeenCalledTimes(1);
   });
 
