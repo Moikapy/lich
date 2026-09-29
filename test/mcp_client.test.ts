@@ -161,6 +161,29 @@ describe("mcp refusal", () => {
     })).toThrow(/loopback/);
   });
 
+  it("refuses windows shells, package runners, interpreter eval, and env chains", () => {
+    expect(plan_stdio("lab", "powershell", ["-Command", "Get-ChildItem"], undefined)).toMatch(/shell 'powershell'/);
+    expect(plan_stdio("lab", "pwsh", ["-c", "id"], undefined)).toMatch(/shell 'pwsh'/);
+    expect(plan_stdio("lab", "cmd.exe", ["/c", "dir"], undefined)).toMatch(/shell 'cmd.exe'/);
+    expect(plan_stdio("lab", "fish", ["-c", "ls"], undefined)).toMatch(/shell 'fish'/);
+    expect(plan_stdio("lab", "wget", ["https://example.invalid/x"], undefined)).toMatch(/download command 'wget'/);
+    expect(plan_stdio("lab", "deno", ["run", "x"], undefined)).toMatch(/download command 'deno'/);
+    expect(plan_stdio("lab", "bunx", ["pkg"], undefined)).toMatch(/download command 'bunx'/);
+    expect(plan_stdio("lab", "pnpm", ["dlx", "some-mcp"], undefined)).toMatch(/download command 'pnpm'/);
+    expect(plan_stdio("lab", "python3", ["-c", "import os"], undefined)).toMatch(/eval flag '-c'/);
+    expect(plan_stdio("lab", "ruby", ["--eval", "puts 1"], undefined)).toMatch(/eval flag '--eval'/);
+    expect(plan_stdio("lab", "bun", ["-e", "1"], undefined)).toMatch(/eval flag '-e'/);
+    expect(plan_stdio("lab", "bun", ["exec", "pkg"], undefined)).toMatch(/bun exec/);
+    expect(plan_stdio("lab", "env", ["--split-string=wget -q -O- x"], undefined)).toMatch(/split-string/);
+    expect(plan_stdio("lab", "env", ["FOO=bar", "bash", "-c", "id"], undefined)).toMatch(/env → 'bash'/);
+    expect(plan_stdio("lab", " tool", [], undefined)).toMatch(/refused mcp command/);
+    expect(plan_stdio("lab", "tool", ["ok;rm"], undefined)).toMatch(/shell metacharacters in mcp args/);
+    const prefixed = plan_stdio("lab", "env", ["PATH=/usr/bin", "lich-mcp-not-a-binary"], undefined);
+    if (typeof prefixed === "string") {
+      expect(prefixed).not.toMatch(/refused/);
+    }
+  });
+
   it("names the official install when redot is missing and never spawns", async () => {
     const work_dir = await temp_dir("mcp-missing");
     const missing = path.join(work_dir, "missing", "redot");
