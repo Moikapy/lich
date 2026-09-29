@@ -173,6 +173,43 @@ describe("gateway bus", () => {
     }
   });
 
+  it("starts the capped history at a user when the window opens on an assistant reply", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      let runs = 0;
+      const plain: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "u2" },
+        { role: "assistant", content: "a2" },
+      ];
+      const probe_factory = (): Agent =>
+        ({
+          run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+            runs += 1;
+            if (runs === 1) {
+              return {
+                outcome: { messages: plain, final: undefined, result: undefined, turns_used: 1, stopped_reason: "final" },
+                messages: plain,
+                usage_total: usage_zero,
+                session_path: undefined,
+              };
+            }
+            records.push({ input: options.input, history: options.history ?? [] });
+            return reply_result("ok", options.history ?? [], options.input);
+          },
+        }) as unknown as Agent;
+      const bus = new GatewayBus({ config: config_for(work_dir), agent_factory: probe_factory }, { history_cap: 3 });
+      await bus.handle("webhook", "plain", "u1", "go");
+      await bus.handle("webhook", "plain", "u1", "again");
+      const seen = records[0]?.history ?? [];
+      expect(seen.map((message) => message.content)).toEqual(["u2", "a2"]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a tool-heavy turn when the cap window contains no user message", async () => {
     const work_dir = temp_work_dir();
     try {

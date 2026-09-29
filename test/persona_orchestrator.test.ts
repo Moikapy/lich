@@ -285,6 +285,17 @@ describe("persona orchestrator", () => {
     expect(capped.map((message) => message.content)).toEqual(["u2", "a2"]);
   });
 
+  it("cap_history starts at a user when the window opens on an assistant reply", () => {
+    const messages = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "u2" },
+      { role: "assistant", content: "a2" },
+    ];
+    const capped = cap_history(messages, 3);
+    expect(capped.map((message) => message.content)).toEqual(["u2", "a2"]);
+  });
+
   it("cap_history keeps assistant/tool turns when the window has no user", () => {
     const messages = [
       { role: "user", content: "u1" },

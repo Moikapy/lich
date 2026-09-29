@@ -137,10 +137,11 @@ function conversation_key(platform: string, chat_id: string): string {
 }
 
 /**
- * Newest `cap` messages. Drop a leading tool-result fragment so the window
- * does not start mid-batch. Keep assistant/tool turns even when no user
- * message remains — skipping every non-user role emptied a tool-heavy turn
- * and the next message ran with no history.
+ * Newest `cap` messages, starting at the first user message in the window.
+ * When the window has no user message, drop a leading tool-result fragment so
+ * it does not start mid-batch and keep the assistant/tool turns — skipping
+ * every non-user role emptied a tool-heavy turn and the next message ran with
+ * no history.
  * If the window is only that batch's results, include its assistant. The
  * slice can then exceed `cap` by the rest of that one batch.
  */
@@ -148,6 +149,10 @@ function cap_history(messages: Message[], cap: number): Message[] {
   const overflow = messages.length - cap;
   if (overflow <= 0) {
     return messages;
+  }
+  const user = messages.findIndex((message, index) => index >= overflow && message.role === "user");
+  if (user !== -1) {
+    return messages.slice(user);
   }
   const body = skip_leading_tools(messages, overflow);
   if (body < messages.length) {
