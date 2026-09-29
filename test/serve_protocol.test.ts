@@ -42,7 +42,14 @@ describe("serve protocol types", () => {
       method: "health",
       params: {},
     };
-    const event: AgentEvent = { type: "turn_start", turn: 1 };
+    const event: AgentEvent = {
+      type: "turn_start",
+      turn: 1,
+      run_id: "run-1",
+      session_id: "abc",
+      seq: 1,
+      ts: 1,
+    };
     const notification: ServeEventNotification = {
       jsonrpc: "2.0",
       method: SERVE_NOTIFICATION_EVENT,

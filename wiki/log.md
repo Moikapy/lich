@@ -23,3 +23,4 @@ Append-only. One line per action: `- YYYY-MM-DD <op> | <summary> | <pages>`. Ops
 - 2026-09-25 update | Worktree convention is now gitignored `.worktrees/issue-<N>-<slug>` (was `~/code/lich-wt-issue-*`) | queries/project-vs-user-skill.md
 - 2026-09-25 decide | #113 Addendum 4: content creation is a fourth goal; #114 item 11 parks media toolchains | decisions/0007-content-as-fourth-goal.md, entities/roadmap-issues.md, SCHEMA.md, index.md
 - 2026-09-25 decide | #113 Addendum 5: idea-agnostic harness wins on user control; 0007 superseded by 0008; verticals are dogfood | decisions/0008-idea-agnostic-extensible-harness.md, decisions/0007-content-as-fourth-goal.md, entities/roadmap-issues.md, SCHEMA.md, index.md
+- 2026-09-25 update | #134 P1: event envelope + SessionManager landed in 0.10.0; serve per-session queues; Ossuary parse accepts envelope | concepts/event-envelope.md, entities/lich-serve.md, index.md
