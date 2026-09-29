@@ -175,6 +175,7 @@ export class Agent {
     const opened = await this.open_run_session(options);
     const session_id = options.session_id ?? opened.handle?.id ?? "";
     let seq = 0;
+    let turns_completed = 0;
     const emit_enveloped = (body: AgentEventBody): void => {
       seq += 1;
       const event: AgentEvent = {
@@ -185,11 +186,20 @@ export class Agent {
         ts: Date.now(),
       };
       this.events.emit(event);
-      options.on_event?.(event);
+      try {
+        options.on_event?.(event);
+      } catch (handler_error) {
+        logger.error("on_event handler threw", handler_error);
+      }
     };
     const run_events = new AgentEmitter();
     const stop_forwarding = run_events.on(emit_enveloped);
     const stop_collecting = run_events.on(collect_usage(usage_total));
+    const stop_counting = run_events.on((event) => {
+      if (event.type === "turn_end") {
+        turns_completed = event.turn;
+      }
+    });
     const recorder = opened.recorder;
     const stop_recording =
       recorder === undefined ? undefined : run_events.on((event) => recorder.on_event(event));
@@ -230,10 +240,11 @@ export class Agent {
         });
       } else {
         // Provider/compress throw: still bookend run_start for wire subscribers.
-        emit_enveloped({ type: "run_end", stopped_reason: "error", turns_used: 0 });
+        emit_enveloped({ type: "run_end", stopped_reason: "error", turns_used: turns_completed });
       }
       stop_recording?.();
       stop_collecting();
+      stop_counting();
       stop_forwarding();
       if (recorder !== undefined) {
         await recorder.flush();

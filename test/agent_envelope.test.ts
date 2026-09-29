@@ -120,4 +120,87 @@ describe("agent event envelope", () => {
       expect(end.stopped_reason).toBe("error");
     }
   });
+
+  it("keeps the run intact when on_event throws", async () => {
+    const work_dir = await make_temp_dir();
+    const agent = create_agent({
+      providers: [
+        {
+          kind: "openai_compat",
+          name: "mock",
+          model: "mock-model",
+          base_url: "http://mock.local/v1",
+          fetch_fn: scripted_fetch([
+            completion_body({ role: "assistant", content: "hi" }, "stop"),
+          ]),
+        },
+      ],
+      work_dir,
+      session_dir: path.join(work_dir, "sessions"),
+      tools_enabled: [],
+      log_level: "error",
+    });
+
+    const bus: AgentEvent[] = [];
+    const stop = agent.events.on((event) => bus.push(event));
+    const result = await agent.run({
+      input: "ping",
+      on_event: () => {
+        throw new Error("subscriber broke");
+      },
+    });
+    stop();
+
+    expect(result.outcome.stopped_reason).toBe("final");
+    expect(bus[0]?.type).toBe("run_start");
+    expect(bus.at(-1)?.type).toBe("run_end");
+  });
+
+  it("reports completed turns in run_end when a later turn throws", async () => {
+    const work_dir = await make_temp_dir();
+    let calls = 0;
+    const agent = create_agent({
+      providers: [
+        {
+          kind: "openai_compat",
+          name: "mock",
+          model: "mock-model",
+          base_url: "http://mock.local/v1",
+          fetch_fn: async () => {
+            calls += 1;
+            if (calls > 1) {
+              throw new Error("provider down");
+            }
+            const body = completion_body(
+              {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  { id: "call_1", type: "function", function: { name: "missing_tool", arguments: "{}" } },
+                ],
+              },
+              "tool_calls",
+            );
+            return new Response(JSON.stringify(body), { status: 200 });
+          },
+        },
+      ],
+      work_dir,
+      session_dir: path.join(work_dir, "sessions"),
+      tools_enabled: [],
+      log_level: "error",
+    });
+
+    const events: AgentEvent[] = [];
+    const stop = agent.events.on((event) => events.push(event));
+    await expect(agent.run({ input: "ping" })).rejects.toThrow();
+    stop();
+
+    const end = events.at(-1);
+    expect(end?.type).toBe("run_end");
+    if (end?.type === "run_end") {
+      expect(end.stopped_reason).toBe("error");
+      expect(end.turns_used).toBe(1);
+    }
+  });
 });
