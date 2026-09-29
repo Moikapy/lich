@@ -143,7 +143,9 @@ function conversation_key(platform: string, chat_id: string): string {
  * every non-user role emptied a tool-heavy turn and the next message ran with
  * no history.
  * If the window is only that batch's results, include its assistant. The
- * slice can then exceed `cap` by the rest of that one batch.
+ * slice can then exceed `cap` by the rest of that one batch. A window with no
+ * user opens with a stub user turn, since providers reject assistant-first
+ * history.
  */
 function cap_history(messages: Message[], cap: number): Message[] {
   const overflow = messages.length - cap;
@@ -156,10 +158,16 @@ function cap_history(messages: Message[], cap: number): Message[] {
   }
   const body = skip_leading_tools(messages, overflow);
   if (body < messages.length) {
-    return messages.slice(body);
+    return with_user_head(messages.slice(body));
   }
   const parent = assistant_owning_tools(messages, overflow);
-  return parent === undefined ? [] : messages.slice(parent);
+  return parent === undefined ? [] : with_user_head(messages.slice(parent));
+}
+
+const TRIMMED_HISTORY_NOTE = "(earlier conversation trimmed)";
+
+function with_user_head(window: Message[]): Message[] {
+  return [{ role: "user", content: TRIMMED_HISTORY_NOTE }, ...window];
 }
 
 function skip_leading_tools(messages: readonly Message[], start: number): number {

@@ -305,7 +305,7 @@ describe("persona orchestrator", () => {
       { role: "tool", content: "r2" },
     ];
     const capped = cap_history(messages, 4);
-    expect(capped.map((message) => message.content)).toEqual(["a1", "r1", "a2", "r2"]);
+    expect(capped.map((message) => message.content)).toEqual(["(earlier conversation trimmed)", "a1", "r1", "a2", "r2"]);
   });
 
   it("cap_history keeps the assistant when the window is only tool results", () => {
@@ -316,8 +316,8 @@ describe("persona orchestrator", () => {
       { role: "tool", content: "r2" },
     ];
     const capped = cap_history(messages, 2);
-    expect(capped.map((message) => message.role)).toEqual(["assistant", "tool", "tool"]);
-    expect(capped.map((message) => message.content)).toEqual(["a1", "r1", "r2"]);
+    expect(capped.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool"]);
+    expect(capped.map((message) => message.content)).toEqual(["(earlier conversation trimmed)", "a1", "r1", "r2"]);
   });
 
   it("requires a token and rejects wrong content-type / oversized bodies", async () => {

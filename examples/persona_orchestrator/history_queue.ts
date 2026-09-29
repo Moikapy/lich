@@ -12,7 +12,9 @@ export const DEFAULT_MAX_CONVERSATIONS = 200;
  * it does not start mid-batch and keep the assistant/tool turns — skipping
  * every non-user role emptied a tool-heavy turn.
  * If the window is only that batch's results, include its assistant. The
- * slice can then exceed `cap` by the rest of that one batch.
+ * slice can then exceed `cap` by the rest of that one batch. A window with no
+ * user opens with a stub user turn, since providers reject assistant-first
+ * history.
  */
 export function cap_history<T>(messages: readonly T[], cap: number): T[] {
   const overflow = messages.length - cap;
@@ -25,10 +27,16 @@ export function cap_history<T>(messages: readonly T[], cap: number): T[] {
   }
   const body = skip_leading_tools(messages, overflow);
   if (body < messages.length) {
-    return messages.slice(body);
+    return with_user_head(messages.slice(body));
   }
   const parent = assistant_owning_tools(messages, overflow);
-  return parent === undefined ? [] : messages.slice(parent);
+  return parent === undefined ? [] : with_user_head(messages.slice(parent));
+}
+
+const TRIMMED_HISTORY_NOTE = "(earlier conversation trimmed)";
+
+function with_user_head<T>(window: T[]): T[] {
+  return [{ role: "user", content: TRIMMED_HISTORY_NOTE } as T, ...window];
 }
 
 function skip_leading_tools<T>(messages: readonly T[], start: number): number {

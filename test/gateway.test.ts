@@ -250,9 +250,10 @@ describe("gateway bus", () => {
       await bus.handle("webhook", "heavy", "u1", "what did you find?");
       const seen = records[0]?.history ?? [];
       expect(seen.length).toBeGreaterThan(0);
-      expect(seen[0]?.role).toBe("assistant");
+      expect(seen[0]).toEqual({ role: "user", content: "(earlier conversation trimmed)" });
+      expect(seen[1]?.role).toBe("assistant");
       expect(seen.some((message) => message.role === "tool" && message.content === "hit-5")).toBe(true);
-      expect(seen.some((message) => message.role === "user")).toBe(false);
+      expect(seen.filter((message) => message.role === "user")).toHaveLength(1);
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
@@ -296,9 +297,9 @@ describe("gateway bus", () => {
       await bus.handle("webhook", "batch", "u1", "go");
       await bus.handle("webhook", "batch", "u1", "again");
       const seen = records[0]?.history ?? [];
-      expect(seen.map((message) => message.role)).toEqual(["assistant", "tool", "tool"]);
-      expect(seen[1]?.content).toBe("one");
-      expect(seen[2]?.content).toBe("two");
+      expect(seen.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool"]);
+      expect(seen[2]?.content).toBe("one");
+      expect(seen[3]?.content).toBe("two");
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
