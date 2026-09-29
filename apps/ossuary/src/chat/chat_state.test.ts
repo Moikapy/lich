@@ -128,6 +128,7 @@ describe("apply_submit_result", () => {
       session_id: "s1",
       reply: "hi",
       usage: usage(1),
+      session_path: undefined,
       turns_used: 1,
       stopped_reason: "final",
     });
