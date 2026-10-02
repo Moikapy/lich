@@ -1,12 +1,12 @@
 ---
 title: Wiki index
 type: index
-updated: 2026-09-25
+updated: 2026-10-02
 ---
 
 # Lich Wiki: Index
 
-Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md) for recent activity. There are 39 pages.
+Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md) for recent activity. There are 40 pages.
 
 **New to the codebase?** Read [[tao-loop]], then [[lich-agent-loop]], [[lich-vs-hermes]], [[0008-idea-agnostic-extensible-harness]] and [[roadmap-issues]].
 **Working on the game features?** Read [[game-transports]], then [[action-terminal-mode]], [[client-executed-tools]] and [[embedded-safety-profile]].
@@ -44,6 +44,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[npc-memory-namespaces]]: private `npc:<id>` memory and shared `world` memory, with identity carried in `ToolContext`.
 - [[streaming-deltas]]: `text_delta` events for dialogue, TTS and the chat pane. Lich has no streaming today.
 - [[embedded-safety-profile]]: the game-safe preset: no builtins, hooks that fail closed, untrusted player text, and budgets.
+- [[decision-models]]: typed, calibrated decisions (Jev / Clef / Ollama `/v1/systemone`) as an optional fast lane beside the TAO loop; prototype in #148.
 - [[llm-wiki-pattern]]: Karpathy's compiled-knowledge wiki, which this wiki uses. It also doubles as a design for Lich's memory.
 
 ## Comparisons
