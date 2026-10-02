@@ -1,7 +1,7 @@
 /**
  * Should-fix tools leftovers from issue #39: S-6..S-9.
  */
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { register_builtin_tools } from "../src/tools/builtin/index.js";
@@ -30,6 +30,19 @@ afterEach(() => {
   reset_url_guard_fetch();
   globalThis.fetch = real_fetch;
 });
+
+async function wait_until_dead(pid: number): Promise<void> {
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`grandchild ${pid} still alive after process-group kill`);
+}
 
 async function make_temp_dir(): Promise<string> {
   await mkdir(TMP_BASE, { recursive: true });
@@ -69,6 +82,34 @@ describe("S-6 terminal process-group kill", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("timeout");
+  });
+
+  it("kills a background grandchild when the shell times out", async () => {
+    const work = await make_temp_dir();
+    const pid_file = path.join(work, "grand.pid");
+    const executor = make_executor(work);
+    let grand_pid = 0;
+    try {
+      const started = Date.now();
+      const result = await executor.execute("terminal", {
+        command: `sleep 20 >/dev/null 2>&1 & echo $! > '${pid_file}'; wait`,
+        timeout_ms: 1000,
+      });
+      expect(Date.now() - started).toBeLessThan(4000);
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("timeout");
+      grand_pid = Number((await readFile(pid_file, "utf8")).trim());
+      expect(grand_pid).toBeGreaterThan(1);
+      await wait_until_dead(grand_pid);
+    } finally {
+      if (grand_pid > 1) {
+        try {
+          process.kill(grand_pid, "SIGKILL");
+        } catch {
+          // already reaped
+        }
+      }
+    }
   });
 });
 
