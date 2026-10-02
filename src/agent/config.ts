@@ -98,7 +98,7 @@ const providers_schema = z
 
 const role_schema = z.array(z.string().min(1)).min(1).optional();
 
-/** Per-role provider chains by name. Omitted roles use `providers` order. */
+/** Per-role provider chains by name. Omitted `chat` uses `providers` order; omitted `compress` uses the chat chain. */
 const models_schema = z
   .object({
     /** Main loop failover order. */

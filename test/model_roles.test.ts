@@ -149,6 +149,28 @@ describe("Agent model roles", () => {
     expect(hits).toEqual(["b"]);
   });
 
+  it("sends compression to models.compress and turns to models.chat", async () => {
+    const work_dir = await make_temp_dir();
+    const hits: string[] = [];
+    const pad = "x".repeat(400);
+    const agent = create_agent({
+      providers: [config_with("main", hits), config_with("cheap", hits)],
+      models: { chat: ["main"], compress: ["cheap"] },
+      context_budget_tokens: 100,
+      max_turns: 1,
+      work_dir,
+      session_dir: path.join(work_dir, "sessions"),
+      log_level: "error",
+    });
+    const history: Message[] = Array.from({ length: 11 }, (_unused, index) => ({
+      role: "user" as const,
+      content: `note ${index} ${pad}`,
+    }));
+    const run = await agent.run({ input: "go", history });
+    expect(hits).toEqual(["cheap", "main"]);
+    expect(run.messages.some((message) => message.content?.includes("from cheap") === true)).toBe(true);
+  });
+
   it("keeps providers order without a models block", async () => {
     const work_dir = await make_temp_dir();
     const hits: string[] = [];
