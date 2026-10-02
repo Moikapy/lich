@@ -9,17 +9,17 @@ lich         # front door: TUI, plus a first-run setup wizard when no config exi
 lich tui     # same TUI, no wizard. From a clone: bun src/cli.ts tui
 ```
 
-The TUI needs a TTY and a resolvable provider (same resolution as every mode). On startup it prints a dim header from the active theme welcome string, e.g. `⚱ lich v0.8.0 — the agent that will not stay dead · llama3.2 (ollama)`. `{version}` is `LICH_VERSION` from `package.json`. That banner is the only tagline placement. Quit with `/exit`, `/quit`, `/q`, or Ctrl+C.
+The TUI needs a TTY and a resolvable provider (same resolution as every mode). On startup it prints a dim header from the active theme welcome string, e.g. `⚱ lich v0.8.0 — the agent that will not stay dead · qwen3:8b (ollama)`. `{version}` is `LICH_VERSION` from `package.json`. That banner is the only tagline placement. Quit with `/exit`, `/quit`, `/q`, or Ctrl+C.
 
 ## Anatomy
 
 ```
-⚱ lich v0.8.0 — the agent that will not stay dead · llama3.2 (ollama)
+⚱ lich v0.8.0 — the agent that will not stay dead · qwen3:8b (ollama)
 mortal › list the files here           <- your input, echoed into the transcript
 ⏺ list_dir({})                        <- live tool-call row (name + args preview)
   ⏷ list_dir: ok (d src/ d test/ ...)  <- result row (ok/error + output preview)
 lich › Here is what I found ...        <- the agent's reply (`response_label`)
-model llama3.2 · turns 2 · tokens 1,204 · [dormant] · /path/.lich/sessions/...jsonl
+model qwen3:8b · turns 2 · tokens 1,204 · [dormant] · /path/.lich/sessions/...jsonl
 › ▌                                    <- input row (cursor block)
 ```
 
