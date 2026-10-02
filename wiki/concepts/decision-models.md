@@ -4,7 +4,7 @@ created: 2026-10-02
 updated: 2026-10-02
 type: concept
 tags: [providers, performance, research, games, security]
-sources: [raw/audits/2026-10-02-decision-models-ollama-research.md, "#148"]
+sources: [raw/audits/2026-10-02-decision-models-ollama-research.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#148", "#149"]
 confidence: medium
 ---
 
@@ -28,15 +28,20 @@ confidence: medium
 4. **Tool-list narrowing** before an LLM turn, which cuts prompt tokens.
 5. **A second-opinion guard** in a `before_tool_call` hook ([[lich-plugins-and-hooks]]).
 
+## How Hermes does it
+
+[[hermes-agent]] core has no decision-model support. Fourteen community plugins add it on generic host features: per-plugin settings, host-owned model access, and hooks before tool and LLM calls. They route skills (`pre_llm_call`), gate tools (`pre_tool_call`, shadow by default), review approvals (failures escalate), pick per-turn model and effort (request middleware), and skip idle cron runs. ^[raw/audits/2026-10-02-hermes-models-memory-decisions.md]
+
 ## Rules of use
 
 - **Optional plugin, never core.** This follows [[0008-idea-agnostic-extensible-harness]]: the loop stays model-agnostic and the decision client is an extension.
+- **Shadow mode first,** with one log line per decision (question, answer, confidence, latency, fallback reason), as the Hermes plugins do.
 - **Always a fallback.** Low confidence, a timeout, or a compound or vague question goes to the LLM or a scripted action.
 - **Add vetoes, never remove them.** Published work shows prompt injection shifts the probabilities and can move the answer. A decision-model verdict may block an action, but deterministic checks (URL guard, gatekeeper, MCP refusals) always still run. See [[embedded-safety-profile]].
 
 ## Getting the models
 
-- **Ollama (local or ollama.com):** 0.35 adds `/v1/systemone` with `nimble` (9B) and `tev1` (4B, 0.8B). Lich's [[lich-providers]] Ollama client only speaks `/api/chat` (`src/providers/ollama.ts:155-158@e9bdd82`), so a separate small client is needed.
+- **Ollama (local or ollama.com):** 0.35 adds `/v1/systemone` with `nimble` (9B) and `tev1` (4B, 0.8B). Lich's [[lich-providers]] Ollama client only speaks `/api/chat` (`src/providers/ollama.ts:155-158@e9bdd82`), so the decision client lives in the plugin, not core, as in Hermes. The plugin gets its endpoint from per-plugin settings (#149).
 - **Cloudflare Workers AI:** `clef` (27B) and `clef-flash` (9B). Clef is not in the Ollama library; Ollaya runs it locally.
 
 Numbers above come from search summaries, not the primary pages (blocked during research); re-verify before relying on them.

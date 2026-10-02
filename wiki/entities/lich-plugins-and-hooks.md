@@ -1,10 +1,10 @@
 ---
 title: Lich plugins, hooks and the gatekeeper
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-02
 type: entity
 tags: [plugins, security, runtime]
-sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md]
+sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#149"]
 confidence: high
 ---
 
@@ -17,7 +17,7 @@ A plugin is `{name, tools?, hooks?}`, loaded from paths listed in `config.plugin
 - **`before_tool_call`** can veto. A veto becomes a tool error whose text starts with `blocked_by_plugin:`.
 - **`after_tool_call`**, **`on_run_start`** and **`on_run_end`**.
 
-There is **no hook that sees the prompt or the messages**. A plugin therefore cannot inject memory, skills or world state before an LLM call. Adding `before_llm_call` and `build_system_prompt` hooks is item 7 of #113 §2c. Hermes gets the same effect with prompt tiers; see [[prompt-cache-tiers]].
+There is **no hook that sees the prompt or the messages**. A plugin therefore cannot inject memory, skills or world state before an LLM call. Adding `before_llm_call` and `build_system_prompt` hooks is item 7 of #113 §2c. Hermes gets the same effect with prompt tiers; see [[prompt-cache-tiers]]. #149 plans a `before_llm_call` hook, per-plugin `settings`, and model calls limited to granted roles, matching what [[hermes-agent]]'s decision and memory plugins rely on.
 
 Hook state was a module-global WeakMap in v0.8.0. It is **per run via AsyncLocalStorage on v0.9.0**, which fixes the case where concurrent runs clobbered each other's state.
 

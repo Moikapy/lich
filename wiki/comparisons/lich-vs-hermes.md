@@ -1,10 +1,10 @@
 ---
 title: Lich vs Hermes
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-02
 type: comparison
 tags: [hermes, ecosystem, research]
-sources: [raw/audits/2026-09-23-hermes-vs-lich.md, raw/audits/2026-09-23-core-engine-audit.md, "#113"]
+sources: [raw/audits/2026-09-23-hermes-vs-lich.md, raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#113", "#149"]
 confidence: high
 ---
 
@@ -38,6 +38,10 @@ This compares Lich with [[hermes-agent]], each feature checked against the Lich 
 | Cron | full scheduler + agent tool | none | **skip for now**: sim world ticks later |
 | File checkpoints | shadow git | none | **port later**: cheap, useful for coding games |
 | UIs | CLI, Ink TUI, Electron, web, ACP | CLI, Ink TUI, library | in progress ([[ossuary]]) |
+| Model roles (2026-10-02) | `fallback_model` chain + per-task `auxiliary.<task>` provider/model | one failover chain for everything, compression included | **adapt**: `models.chat` / `models.compress` naming providers (#149) |
+| Plugin settings + model access (2026-10-02) | `plugins.entries.<id>.settings`, host-owned `ctx.llm` | module paths only, no model access | **port**: `{ path, settings, models }` + granted roles (#149) |
+| LLM-call hooks (2026-10-02) | `pre_llm_call`, `post_llm_call`, `llm_request` middleware, aux-call hooks | tool and run hooks only | **port**: `before_llm_call` first (#149) |
+| Decision models (2026-10-02) | none in core; 14 community Jev plugins | none | **adapt**: plugin-owned client, shadow first ([[decision-models]], #148) |
 
 ## What Lich does better
 

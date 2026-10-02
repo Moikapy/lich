@@ -17,7 +17,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[lich-agent-loop]]: `run_conversation` + `Agent`. A dependency-injected TAO loop. Its P0 gaps are that events aren't scoped to a run, there is no streaming, it has global state, and each agent is heavyweight.
 - [[lich-providers]]: openai_compat, anthropic and ollama clients without SDKs, plus failover. They have no streaming, `tool_choice` or cache_control, and ~150 lines of their helpers are duplicated.
 - [[lich-tools-and-guardrails]]: builtins, an executor that never throws, and the wards. Known holes: `tools_enabled` doesn't restrict plugin tools, and `terminal` isn't sandboxed.
-- [[lich-plugins-and-hooks]]: tool-call hooks with veto, and the gatekeeper's single gated `git_commit`. There are no prompt-level hooks, and hooks fail open.
+- [[lich-plugins-and-hooks]]: tool-call hooks with veto, and the gatekeeper's single gated `git_commit`. There are no prompt-level hooks or plugin settings yet (#149), and hooks fail open.
 - [[lich-sessions]]: JSONL phylacteries used as combat logs. There is no search, and gateway files are supersets of each other.
 - [[lich-mcp]]: an MCP client and catalog. Redot is a real entry and Godot has none. The code is spread over 21 micro-files.
 - [[lich-gateway]]: familiars routed into one shared Agent. The per-chat bus and read-only defaults make it a good hub.
@@ -26,7 +26,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 
 ## Entities: the ecosystem and games
 
-- [[hermes-agent]]: the Python agent that inspired Lich, with local paths and the mechanisms worth studying. Its RL environments were removed in `5af672c753`.
+- [[hermes-agent]]: the Python agent that inspired Lich, with local paths and the mechanisms worth studying, including per-task model roles, memory-plugin embedders and its Jev plugin ecosystem. Its RL environments were removed in `5af672c753`.
 - [[godot-and-redot]]: the game→Lich direction (webhook plus file bus) and the Lich→editor direction (Redot MCP). `WebSocketPeer` is the path to a GDScript SDK.
 - [[game-bridge-example]]: the file-bus enemy commander. It's racy, needs 2 LLM calls per decision, and will retire once client tools exist.
 - [[persona-orchestrator-example]]: one Agent per NPC persona, which collapses to ~20 lines once Profiles and Sessions exist.
