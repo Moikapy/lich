@@ -25,3 +25,6 @@ Append-only. One line per action: `- YYYY-MM-DD <op> | <summary> | <pages>`. Ops
 - 2026-09-25 decide | #113 Addendum 5: idea-agnostic harness wins on user control; 0007 superseded by 0008; verticals are dogfood | decisions/0008-idea-agnostic-extensible-harness.md, decisions/0007-content-as-fourth-goal.md, entities/roadmap-issues.md, SCHEMA.md, index.md
 - 2026-09-25 update | #134 P1: event envelope + SessionManager landed in 0.10.0; serve per-session queues; Ossuary parse accepts envelope | concepts/event-envelope.md, entities/lich-serve.md, index.md
 - 2026-10-02 update | Merged #143 #141 #139 #137 #127 #115 (test coverage) and #142 (gateway history cap keeps tool-heavy windows, stub user turn when none); no wiki page covers the cap yet | log.md
+- 2026-10-02 ingest | Decision models (Jev, Clef) and Ollama model research from web-search summaries; primary pages blocked | raw/audits/2026-10-02-decision-models-ollama-research.md
+- 2026-10-02 create | Decision models concept: typed calibrated decisions as an optional plugin fast lane with LLM fallback; filed #148 | concepts/decision-models.md, index.md
+- 2026-10-02 update | Providers: Ollama Bearer auth already supports ollama.com cloud; README key note and llama3.2 default are stale (#148); action-terminal-mode links the decision-model fast lane | entities/lich-providers.md, concepts/action-terminal-mode.md
