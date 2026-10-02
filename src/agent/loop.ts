@@ -10,6 +10,7 @@ import { compress_messages, should_compress, split_keep_recent, type ChatFn } fr
 import { estimate_messages_tokens } from "../context/tokens.js";
 import type {
   AssistantMessage,
+  ChatOptions,
   ChatResult,
   Message,
   ToolCall,
@@ -34,6 +35,8 @@ export interface ToolRunner {
 
 export interface LoopDeps {
   chat: ChatFn;
+  /** Context-compression chat; falls back to `chat` when unset or failing. */
+  compress_chat?: ChatFn;
   tools: ToolRunner;
   definitions: () => ToolDefinition[];
   emitter?: AgentEmitter;
@@ -180,6 +183,28 @@ function schedule_compress_backoff(backoff: CompressBackoff, turn: number): void
   backoff.skip_until_turn = turn + COMPRESS_BACKOFF_TURNS + 1;
 }
 
+/** Compression role first; on a non-abort failure, retry on the main chat chain. */
+async function compress_chat(
+  deps: LoopDeps,
+  messages: readonly Message[],
+  tools: readonly ToolDefinition[],
+  options?: ChatOptions,
+): Promise<ChatResult> {
+  if (deps.compress_chat === undefined) {
+    return await deps.chat(messages, tools, options);
+  }
+  try {
+    return await deps.compress_chat(messages, tools, options);
+  } catch (error) {
+    if (options?.signal?.aborted === true) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`compress chain failed (${message}); falling back to chat chain`);
+    return await deps.chat(messages, tools, options);
+  }
+}
+
 async function compress_if_needed(
   deps: LoopDeps,
   history: Message[],
@@ -207,7 +232,7 @@ async function compress_if_needed(
   emitter?.emit({ type: "compress_start", estimated_tokens: estimate_messages_tokens(history) });
   let summarizer_usage: Usage | undefined;
   const counting_chat: ChatFn = async (messages, tools, options) => {
-    const result = await deps.chat(messages, tools, options);
+    const result = await compress_chat(deps, messages, tools, options);
     summarizer_usage = result.usage;
     return result;
   };
