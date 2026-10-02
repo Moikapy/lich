@@ -4,7 +4,7 @@ created: 2026-09-23
 updated: 2026-10-02
 type: entity
 tags: [providers, runtime, performance]
-sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-10-02-decision-models-ollama-research.md, "#148"]
+sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-10-02-decision-models-ollama-research.md, "#148", "#152"]
 confidence: high
 ---
 
@@ -23,7 +23,7 @@ confidence: high
 ## Ollama: local and ollama.com cloud
 
 - The Ollama client defaults to `http://localhost:11434` and needs no key. When `api_key` or `api_key_env` resolves, it sends `Authorization: Bearer` (`src/providers/ollama.ts:137-165@e9bdd82`). That is enough for Ollama's hosted models: `LICH_BASE_URL=https://ollama.com` plus `LICH_API_KEY_ENV=OLLAMA_API_KEY`. Not yet smoke-tested; tracked in #148.
-- The README still calls the key "unused by ollama", and the documented default model is `llama3.2` (3B), which is weak at tool calling. #148 proposes `qwen3:8b`.
+- The documented local default is `qwen3:8b` (the setup wizard writes it too; `src/setup_wizard.ts:16@d28dd0b`), replacing `llama3.2` (3B), which is weak at tool calling. The README documents Ollama cloud via `LICH_BASE_URL` plus `LICH_API_KEY_ENV` (`README.md:160-181@d28dd0b`). Merged in #152.
 - Ollama 0.35's decision endpoint (`/v1/systemone`) is a different API from `/api/chat`; see [[decision-models]].
 
 ## Gaps (open on v0.9.0)

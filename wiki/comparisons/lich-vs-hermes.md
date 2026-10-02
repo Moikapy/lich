@@ -41,7 +41,7 @@ This compares Lich with [[hermes-agent]], each feature checked against the Lich 
 | Model roles (2026-10-02) | `fallback_model` chain + per-task `auxiliary.<task>` provider/model | one failover chain for everything, compression included | **adapt**: `models.chat` / `models.compress` naming providers (#149) |
 | Plugin settings + model access (2026-10-02) | `plugins.entries.<id>.settings`, host-owned `ctx.llm` | module paths only, no model access | **port**: `{ path, settings, models }` + granted roles (#149) |
 | LLM-call hooks (2026-10-02) | `pre_llm_call`, `post_llm_call`, `llm_request` middleware, aux-call hooks | tool and run hooks only | **port**: `before_llm_call` first (#149) |
-| Decision models (2026-10-02) | none in core; 14 community Jev plugins | none | **adapt**: plugin-owned client, shadow first ([[decision-models]], #148) |
+| Decision models (2026-10-02) | none in core; 15 community Jev plugins (+4 with Jev backends) | none | **adapt**: plugin-owned client, shadow first ([[decision-models]], #148) |
 
 ## What Lich does better
 
