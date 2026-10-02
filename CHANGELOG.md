@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Gateway history cap no longer drops tool-heavy history when the capped window
+  has no user turn. It keeps the window from the owning assistant turn and
+  prepends a stub user turn so providers that require user-first history (Anthropic)
+  still accept it. The persona orchestrator example mirrors the fix.
+
 ## 0.10.0
 
 - **Breaking:** `AgentEvent` is always enveloped with `{ run_id, session_id, seq, ts }`
