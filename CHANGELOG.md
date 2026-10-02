@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Optional `models` config block assigns provider chains per role: `chat` for
+  the main loop and `compress` for context compression (falls back to `chat`
+  on failure). Without it, behavior is unchanged (#149).
 - Docs, examples and the setup wizard now default local Ollama to `qwen3:8b`
   (`llama3.2` stays as the low-memory option), and document Ollama cloud:
   `LICH_BASE_URL=https://ollama.com` with `LICH_API_KEY_ENV=OLLAMA_API_KEY`.

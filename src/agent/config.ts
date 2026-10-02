@@ -96,6 +96,19 @@ const providers_schema = z
     }
   });
 
+const role_schema = z.array(z.string().min(1)).min(1).optional();
+
+/** Per-role provider chains by name. Omitted roles use `providers` order. */
+const models_schema = z
+  .object({
+    /** Main loop failover order. */
+    chat: role_schema,
+    /** Context-compression chain; falls back to `chat` when it fails. */
+    compress: role_schema,
+  })
+  .strict()
+  .optional();
+
 const agent_config_schema = z
   .object({
     /** Wizard label. The TUI banner uses the active theme welcome string. */
@@ -103,6 +116,7 @@ const agent_config_schema = z
     system_prompt: z.string().optional(),
     max_turns: z.number().int().min(1).default(25),
     providers: providers_schema,
+    models: models_schema,
     work_dir: z.string().optional(),
     tools_enabled: z.union([z.literal("all"), z.array(z.string())]).default("all"),
     temperature: z.number().min(0).max(2).optional(),
@@ -118,6 +132,28 @@ const agent_config_schema = z
     theme: z.string().min(1).default("lich"),
     /** Named MCP servers. Each entry is stdio or loopback http. Default off. */
     mcp_servers: mcp_servers_schema,
+  })
+  .superRefine((config, ctx) => {
+    const known = new Set(config.providers.map((provider) => provider.name));
+    for (const [role, names] of Object.entries(config.models ?? {})) {
+      const seen = new Set<string>();
+      for (const [index, name] of (names ?? []).entries()) {
+        if (known.has(name) === false) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["models", role, index],
+            message: `unknown provider "${name}"`,
+          });
+        } else if (seen.has(name) === true) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["models", role, index],
+            message: `provider "${name}" listed twice`,
+          });
+        }
+        seen.add(name);
+      }
+    }
   })
   .transform((config) => {
     const work_dir = config.work_dir ?? process.cwd();
@@ -136,6 +172,11 @@ function freeze_config(config: AgentConfig): AgentConfig {
   Object.freeze(config.providers);
   for (const provider of config.providers) {
     Object.freeze(provider);
+  }
+  if (config.models !== undefined) {
+    Object.freeze(config.models.chat);
+    Object.freeze(config.models.compress);
+    Object.freeze(config.models);
   }
   Object.freeze(config.plugins);
   for (const plugin of config.plugins) {

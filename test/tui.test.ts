@@ -438,6 +438,17 @@ describe("notice blocks", () => {
     expect(unknown_command_block("wat").role).toBe("error");
   });
 
+  it("labels the first models.chat provider when roles are set", () => {
+    const config = {
+      providers: [
+        { name: "a", model: "first", kind: "openai_compat" },
+        { name: "b", model: "chosen", kind: "ollama" },
+      ],
+      models: { chat: ["b"] },
+    };
+    expect(model_label_block(config).lines[0]).toContain("model: chosen");
+  });
+
   it("formats tool result blocks with ok and error styling flags", () => {
     const ok = tool_result_block({ id: "1", name: "shell", args: { cmd: "ls" } }, true, "file.txt");
     expect(ok.role).toBe("tool");
