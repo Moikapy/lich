@@ -212,6 +212,72 @@ describe("serve websocket transport", () => {
     ).rejects.toThrow(/HTTP 403/);
   });
 
+  it("rejects a token prefix and an empty query token with 401", async () => {
+    const token = "secret-token-value";
+    const server = create_serve_server({ port: 0, boot_stdout: null, token });
+    servers.push(server);
+    const boot = await server.start();
+    const host = `127.0.0.1:${boot.port}`;
+    const prefix = await read_upgrade_status(
+      boot.port,
+      upgrade_request(token.slice(0, -1), host),
+    );
+    expect(prefix).toBe(401);
+    const empty = await read_upgrade_status(boot.port, upgrade_request("", host));
+    expect(empty).toBe(401);
+  });
+
+  it("rejects a missing Host and hosts that are not exact loopback names", async () => {
+    const token = "host-allow-token";
+    const server = create_serve_server({ port: 0, boot_stdout: null, token });
+    servers.push(server);
+    const boot = await server.start();
+    const missing = await read_upgrade_status(boot.port, upgrade_request(token, undefined));
+    expect(missing).toBe(403);
+    const lookalike = await read_upgrade_status(
+      boot.port,
+      upgrade_request(token, `127.0.0.1.example:${boot.port}`),
+    );
+    expect(lookalike).toBe(403);
+    const wildcard = await read_upgrade_status(
+      boot.port,
+      upgrade_request(token, `0.0.0.0:${boot.port}`),
+    );
+    expect(wildcard).toBe(403);
+    const mapped = await read_upgrade_status(
+      boot.port,
+      upgrade_request(token, `[::ffff:127.0.0.1]:${boot.port}`),
+    );
+    expect(mapped).toBe(403);
+  });
+
+  it("accepts a loopback Host alias and prefers the header token over the query", async () => {
+    const token = "header-wins-token";
+    const server = create_serve_server({ port: 0, boot_stdout: null, token });
+    servers.push(server);
+    const boot = await server.start();
+    const health = { jsonrpc: "2.0", id: 4, method: "health", params: {} };
+    const via_localhost = await rpc_over_ws(boot.port, token, health, {
+      Host: `LOCALHOST:${boot.port}`,
+    });
+    expect(via_localhost).toMatchObject({ id: 4, result: { status: "ok" } });
+    const via_ipv6 = await rpc_over_ws(boot.port, token, health, {
+      Host: `[::1]:${boot.port}`,
+    });
+    expect(via_ipv6).toMatchObject({ id: 4, result: { status: "ok" } });
+
+    await expect(
+      open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(token)}`, {
+        "x-lich-token": "wrong-header-token",
+      }),
+    ).rejects.toThrow(/HTTP 401/);
+
+    const header_wins = await rpc_over_ws(boot.port, "wrong-query-token", health, {
+      "x-lich-token": token,
+    });
+    expect(header_wins).toMatchObject({ id: 4, result: { status: "ok" } });
+  });
+
   it("retries start with EADDRINUSE after a listen failure, not already started", async () => {
     const holder = createServer();
     await new Promise<void>((resolve, reject) => {
@@ -423,6 +489,63 @@ async function rpc_over_ws(
   } finally {
     ws.close();
   }
+}
+
+const WS_KEY = "dGhlIHNhbXBsZSBub25jZQ==";
+
+function upgrade_request(token: string, host: string | undefined): string {
+  const host_line = host === undefined ? "" : `Host: ${host}\r\n`;
+  return (
+    `GET /?token=${encodeURIComponent(token)} HTTP/1.1\r\n` +
+    host_line +
+    "Upgrade: websocket\r\n" +
+    "Connection: Upgrade\r\n" +
+    "Sec-WebSocket-Version: 13\r\n" +
+    `Sec-WebSocket-Key: ${WS_KEY}\r\n` +
+    "\r\n"
+  );
+}
+
+function read_upgrade_status(port: number, head: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const socket = net_connect({ host: "127.0.0.1", port }, () => {
+      socket.write(head);
+    });
+    let buf = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      reject(new Error("upgrade status timeout"));
+    }, 5000);
+    const finish = (status: number): void => {
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(status);
+    };
+    socket.on("data", (chunk: Buffer) => {
+      buf += chunk.toString("utf8");
+      const status = /^HTTP\/1\.1 (\d+)/.exec(buf)?.[1];
+      if (status !== undefined) {
+        finish(Number(status));
+      }
+    });
+    socket.on("error", (error: Error) => {
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
 function open_ws(url: string, headers?: Record<string, string>): Promise<WebSocket> {

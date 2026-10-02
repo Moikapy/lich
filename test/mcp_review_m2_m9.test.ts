@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { create_line_queue } from "../src/mcp/mcp_lines.js";
 import type { LineChild } from "../src/mcp/mcp_child.js";
 import { stdio_pipe } from "../src/mcp/mcp_pipe.js";
-import { MCP_NAME_MAX, parse_tools } from "../src/mcp/mcp_result.js";
+import { MCP_NAME_MAX, MCP_SCHEMA_JSON_MAX, parse_tools } from "../src/mcp/mcp_result.js";
 import { content_text } from "../src/mcp/mcp_content.js";
 
 function scripted_child(replies: Map<number, unknown>): LineChild {
@@ -100,6 +100,63 @@ describe("mcp metadata bounds (M-9)", () => {
     expect(tools).toHaveLength(1);
     expect(tools[0]?.name).toBe("ok");
     expect(tools[0]?.description.length).toBe(2000);
+  });
+
+  it("drops an oversized inputSchema and non-string required entries", () => {
+    const huge = {
+      type: "object",
+      properties: { blob: { type: "string", description: "x".repeat(MCP_SCHEMA_JSON_MAX) } },
+    };
+    const tools = parse_tools({
+      tools: [
+        { name: "big", description: "oversized", inputSchema: huge },
+        {
+          name: "shaped",
+          inputSchema: {
+            type: "object",
+            properties: { path: { type: "string" } },
+            required: ["path", 1, null],
+            additionalProperties: false,
+          },
+        },
+        null,
+        { name: "", description: "blank" },
+      ],
+    });
+    expect(tools.map((tool) => tool.name)).toEqual(["big", "shaped"]);
+    expect(tools[0]?.parameters).toEqual({ type: "object" });
+    expect(tools[1]?.parameters).toEqual({
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+      additionalProperties: false,
+    });
+  });
+
+  it("rejects a tools/list body that is not an object with a tools array", () => {
+    expect(() => parse_tools(null)).toThrow(/mcp tools\/list rejected/);
+    expect(() => parse_tools({ tools: {} })).toThrow(/mcp tools\/list rejected/);
+  });
+
+  it("omits images and names an empty tool error", () => {
+    expect(
+      content_text({
+        content: [{ type: "image", data: "abc" }, { type: "text", text: "ok" }, "skip", { type: "resource" }],
+      }),
+    ).toBe("[image omitted]\nok");
+    expect(() => content_text({ isError: true, content: [] })).toThrow("mcp tool failed");
+    expect(content_text("nope")).toBe("");
+  });
+
+  it("delivers a queued line to a waiting reader and ends readers on close", async () => {
+    const queue = create_line_queue();
+    const pending = queue.read();
+    queue.push("line-1");
+    await expect(pending).resolves.toBe("line-1");
+    const waiting = queue.read();
+    queue.close();
+    await expect(waiting).resolves.toBeUndefined();
+    await expect(queue.read()).resolves.toBeUndefined();
   });
 
   it("clamps tool error text from content_text", () => {

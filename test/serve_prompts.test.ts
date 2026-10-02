@@ -126,6 +126,13 @@ describe("serve prompt rpc", () => {
     expect(result.session_path).toContain(created.session_id);
     expect(events.some((event) => event.type === "final")).toBe(true);
     expect(events.some((event) => event.type === "turn_start")).toBe(true);
+    expect(events.some((event) => event.type === "run_start")).toBe(true);
+    expect(events.some((event) => event.type === "run_end")).toBe(true);
+    const start = events.find((event) => event.type === "run_start");
+    expect(start?.run_id).toEqual(expect.any(String));
+    expect(start?.session_id).toBe(created.session_id);
+    expect(start?.seq).toBe(1);
+    expect(typeof start?.ts).toBe("number");
   });
 
   it("aborts an in-flight run via prompt.abort", async () => {
@@ -561,11 +568,110 @@ describe("serve prompt rpc", () => {
     if (error_event?.type !== "error") {
       return;
     }
-    const payload = error_event.error as { name?: unknown; message?: unknown };
-    expect(typeof payload.name).toBe("string");
+    const payload = error_event.error;
+    expect(typeof payload.kind).toBe("string");
     expect(typeof payload.message).toBe("string");
-    expect(String(payload.message).length).toBeGreaterThan(0);
-    expect(Object.keys(payload).sort()).toEqual(["message", "name"]);
+    expect(payload.message.length).toBeGreaterThan(0);
+    expect(Object.keys(payload).sort()).toEqual(["kind", "message"]);
+  });
+
+  it("isolates concurrent sessions: events stay tagged and runs overlap", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-concurrent");
+    const session_dir = path.join(work_dir, "sessions");
+    const started: string[] = [];
+    const release_gates = new Map<string, () => void>();
+    const agent = mock_agent(work_dir, async (_input, init) => {
+      const signal = init?.signal;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 80);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            const error = new Error("fetch aborted");
+            error.name = "AbortError";
+            reject(error);
+          },
+          { once: true },
+        );
+      });
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "ok" }, "stop")),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    // Patch run to record session start ordering via on_event session_id.
+    const original_run = agent.run.bind(agent);
+    agent.run = async (options) => {
+      started.push(options.session_id ?? "");
+      const release = release_gates.get(options.session_id ?? "");
+      if (release !== undefined) {
+        release();
+      }
+      return original_run(options);
+    };
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const events: AgentEvent[] = [];
+    const context: ServeRpcContext = {
+      version: "9.9.9",
+      sessions,
+      prompts,
+      notify: (notification) => {
+        events.push(notification.params.event);
+      },
+    };
+
+    const a = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const b = (await rpc(context, "session.create", { source: "test" }, 2)).result as {
+      session_id: string;
+    };
+
+    const both_started = Promise.all([
+      new Promise<void>((resolve) => {
+        release_gates.set(a.session_id, resolve);
+      }),
+      new Promise<void>((resolve) => {
+        release_gates.set(b.session_id, resolve);
+      }),
+    ]);
+
+    const submit_a = rpc(
+      context,
+      "prompt.submit",
+      { session_id: a.session_id, text: "a" },
+      3,
+    );
+    const submit_b = rpc(
+      context,
+      "prompt.submit",
+      { session_id: b.session_id, text: "b" },
+      4,
+    );
+
+    await both_started;
+    expect(new Set(started)).toEqual(new Set([a.session_id, b.session_id]));
+
+    const [result_a, result_b] = await Promise.all([submit_a, submit_b]);
+    expect((result_a.result as { stopped_reason: string }).stopped_reason).toBe("final");
+    expect((result_b.result as { stopped_reason: string }).stopped_reason).toBe("final");
+
+    for (const event of events) {
+      expect(event.session_id === a.session_id || event.session_id === b.session_id).toBe(true);
+      expect(typeof event.run_id).toBe("string");
+      expect(typeof event.seq).toBe("number");
+    }
+    const run_ids_a = new Set(
+      events.filter((event) => event.session_id === a.session_id).map((event) => event.run_id),
+    );
+    const run_ids_b = new Set(
+      events.filter((event) => event.session_id === b.session_id).map((event) => event.run_id),
+    );
+    expect(run_ids_a.size).toBe(1);
+    expect(run_ids_b.size).toBe(1);
+    expect([...run_ids_a][0]).not.toBe([...run_ids_b][0]);
   });
 });
 
@@ -700,6 +806,98 @@ describe("serve prompt over websocket", () => {
     }
   });
 
+  it("binary prompt.abort bypasses the queue; a health frame that mentions abort does not", async () => {
+    const work_dir = await make_temp_dir("serve-ws-abort-binary");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_started();
+      const signal = init?.signal;
+      await new Promise<void>((_resolve, reject) => {
+        const fail = (): void => {
+          const error = new Error("fetch aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (signal?.aborted === true) {
+          fail();
+          return;
+        }
+        signal?.addEventListener("abort", fail, { once: true });
+      });
+      throw new Error("unreachable");
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      session_dir,
+      agent,
+      version: "9.9.9",
+    });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session.create",
+        params: { source: "test" },
+      });
+      const session_id = (create_resp.result as { session_id: string }).session_id;
+      const order: number[] = [];
+      const submit_promise = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id, text: "hang" },
+      }).then((body) => {
+        order.push(2);
+        return body;
+      });
+      await started;
+      const health_promise = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "health",
+        params: { note: "prompt.abort" },
+      }).then((body) => {
+        order.push(4);
+        return body;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(order).toEqual([]);
+      const abort_promise = send_raw_rpc(
+        ws,
+        3,
+        Buffer.from(JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "prompt.abort",
+          params: { session_id },
+        })),
+      ).then((body) => {
+        order.push(3);
+        return body;
+      });
+      const [abort_resp, submit, health] = await Promise.all([
+        abort_promise,
+        submit_promise,
+        health_promise,
+      ]);
+      expect(abort_resp.result).toEqual({ session_id, aborted: true });
+      expect(submit.result).toMatchObject({ session_id, stopped_reason: "aborted" });
+      expect(health.error).toMatchObject({ code: -32602 });
+      expect(order).toEqual([3, 2, 4]);
+    } finally {
+      ws.close();
+    }
+  });
+
   it("stop() aborts an in-flight prompt instead of draining the model call", async () => {
     const work_dir = await make_temp_dir("serve-stop-abort");
     const session_dir = path.join(work_dir, "sessions");
@@ -787,6 +985,27 @@ describe("run_serve signal cleanup", () => {
     }
   });
 });
+
+function send_raw_rpc(
+  ws: WebSocket,
+  id: number,
+  raw: Buffer,
+): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("rpc timeout")), 5000);
+    const on_message = (data: WebSocket.RawData): void => {
+      const body = JSON.parse(String(data)) as Record<string, unknown>;
+      if (body.id !== id) {
+        return;
+      }
+      clearTimeout(timer);
+      ws.off("message", on_message);
+      resolve(body);
+    };
+    ws.on("message", on_message);
+    ws.send(raw);
+  });
+}
 
 async function request_rpc(
   ws: WebSocket,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentEmitter, type AgentEvent } from "../src/agent/events.js";
+import { AgentEmitter, type AgentEventBody } from "../src/agent/events.js";
 import type { ChatFn } from "../src/context/compressor.js";
 import { run_conversation, type LoopDeps, type ToolRunner } from "../src/agent/loop.js";
 import type { ChatResult, Message, ToolCall } from "../src/providers/types.js";
@@ -40,7 +40,7 @@ function make_tool_runner(output: string): { runner: ToolRunner; calls: ToolCall
   return { runner, calls };
 }
 
-function event_types(events: AgentEvent[]): string[] {
+function event_types(events: AgentEventBody[]): string[] {
   return events.map((event) => event.type);
 }
 
@@ -49,7 +49,7 @@ const tool_call_t1: ToolCall = { id: "t1", name: "read_file", args: { path: "a.t
 describe("run_conversation", () => {
   it("scenario A: tool turn then final answer, events in order", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat = make_chat_queue([result("", [tool_call_t1]), result("all done")]);
     const { runner, calls } = make_tool_runner("file contents here");
@@ -101,7 +101,7 @@ describe("run_conversation", () => {
 
   it("scenario B: endless tool calls stop at max_turns with budget_exhausted", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat: ChatFn = async () => result("", [{ id: "loop", name: "noop", args: {} }]);
     const { runner } = make_tool_runner("noop output");
@@ -121,7 +121,7 @@ describe("run_conversation", () => {
   it("scenario C: abort signal stops the loop before the next LLM call", async () => {
     const controller = new AbortController();
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     let chat_calls = 0;
     const chat: ChatFn = async () => {
@@ -147,8 +147,7 @@ describe("run_conversation", () => {
       expect(cancelled.content).toContain("cancelled");
       expect(cancelled.is_error).toBe(true);
     }
-    expect(events.some((event) => event.type === "error")).toBe(true);
-    expect(event_types(events).at(-1)).toBe("error");
+    expect(events.some((event) => event.type === "error")).toBe(false);
     expect(event_types(events).filter((type) => type === "tool_call_end")).toHaveLength(1);
     expect(events.some((event) => event.type === "tool_call_end" && event.cancelled === true)).toBe(true);
   });
@@ -156,7 +155,7 @@ describe("run_conversation", () => {
   it("returns aborted when chat throws after the signal aborts mid-call", async () => {
     const controller = new AbortController();
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat: ChatFn = async () => {
       controller.abort();
@@ -175,7 +174,7 @@ describe("run_conversation", () => {
     expect(outcome.stopped_reason).toBe("aborted");
     expect(outcome.turns_used).toBe(0);
     expect(outcome.messages).toHaveLength(1);
-    expect(events.some((event) => event.type === "error")).toBe(true);
+    expect(events.some((event) => event.type === "error")).toBe(false);
   });
 
   it("skips remaining tool calls when the signal aborts between them", async () => {
@@ -220,7 +219,7 @@ describe("run_conversation", () => {
   it("emits cancelled tool_call_end for skipped tool calls so persistence stays paired", async () => {
     const controller = new AbortController();
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const runner: ToolRunner = {
       execute: async () => {
@@ -256,7 +255,7 @@ describe("run_conversation", () => {
 
   it("scenario D: compresses history when the context budget is exceeded", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const pad = "x".repeat(400);
     const seed: Message[] = [
@@ -427,7 +426,7 @@ describe("run_conversation", () => {
 
   it("does not consume extra turns for tool execution", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat = make_chat_queue([
       result("", [{ id: "t1", name: "read_file", args: { path: "a.txt" } }]),
@@ -446,7 +445,7 @@ describe("run_conversation", () => {
 
   it("rethrows provider errors from chat", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat: ChatFn = async () => {
       throw new Error("provider exploded");

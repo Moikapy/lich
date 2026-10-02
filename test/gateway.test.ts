@@ -365,6 +365,37 @@ describe("gateway bus", () => {
       rmSync(work_dir, { recursive: true, force: true });
     }
   });
+
+  it("requires both user and chat when both public allowlists are set", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const bus = new GatewayBus({
+        config: config_for(work_dir, {
+          allowed_users: {
+            discord: ["user-1"],
+            twitch: ["user-1"],
+            telegram: ["user-1"],
+          },
+          allowed_chats: {
+            discord: ["chat-1"],
+            twitch: ["chat-1"],
+            telegram: ["chat-1"],
+          },
+        }),
+        agent_factory: () => recording_agent(records),
+      });
+      expect(await bus.handle("discord", "chat-1", "user-1", "hi")).toBe("reply-1");
+      expect(await bus.handle("discord", "chat-1", "user-2", "nope")).toBeUndefined();
+      expect(await bus.handle("discord", "chat-2", "user-1", "nope")).toBeUndefined();
+      expect(await bus.handle("twitch", "chat-9", "user-1", "nope")).toBeUndefined();
+      expect(await bus.handle("telegram", "chat-1", "stranger", "nope")).toBeUndefined();
+      expect(await bus.handle("webhook", "anywhere", "anyone", "hi")).toBe("reply-2");
+      expect(records.map((record) => record.input)).toEqual(["hi", "hi"]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("gateway access", () => {

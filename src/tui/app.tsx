@@ -68,7 +68,7 @@ function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBloc
     return [compress_notice_block(event.summary_chars, theme)];
   }
   if (event.type === "error") {
-    return [error_notice_block(event.error instanceof Error ? event.error.message : String(event.error))];
+    return [error_notice_block(event.error.message)];
   }
   return [];
 }
