@@ -86,7 +86,7 @@ function usage_text(): string {
     "  --model <m>            model name (default from LICH_MODEL)",
     "  --provider-kind <k>    openai_compat | anthropic | ollama (default LICH_PROVIDER_KIND)",
     "  --base-url <u>         provider base url (default LICH_BASE_URL)",
-    "  --api-key-env <NAME>   env var holding the api key (default LICH_API_KEY_ENV; unused by ollama)",
+    "  --api-key-env <NAME>   env var holding the api key (default LICH_API_KEY_ENV; optional for ollama)",
     "  --system-prompt <s>    system prompt override",
     "  --session-dir <path>   session transcript directory",
     "  --resume <id|latest>   TUI only: load an existing session transcript",

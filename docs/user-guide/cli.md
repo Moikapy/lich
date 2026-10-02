@@ -79,7 +79,7 @@ Per-kind defaults:
 | --- | --- | --- | --- |
 | `openai_compat` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | Works with any OpenAI-shaped `/chat/completions` API. |
 | `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | |
-| `ollama` | `http://localhost:11434` | none | No key needed; `api_key`/`api_key_env` are sent as a Bearer header for cloud proxies when set. |
+| `ollama` | `http://localhost:11434` | none | No key needed locally; `api_key`/`api_key_env` are sent as a Bearer header when set, which Ollama cloud (`https://ollama.com`, `OLLAMA_API_KEY`) requires. |
 
 ## Config file reference
 
@@ -98,7 +98,7 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
     {
       "kind": "ollama",
       "name": "local",
-      "model": "llama3.2:latest",
+      "model": "qwen3:8b",
       "base_url": "http://localhost:11434",
       "keep_alive": "10m"
     }
@@ -150,7 +150,11 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 Minimal per-provider examples:
 
 ```json
-{ "providers": [{ "kind": "ollama", "name": "local", "model": "llama3.2" }] }
+{ "providers": [{ "kind": "ollama", "name": "local", "model": "qwen3:8b" }] }
+```
+
+```json
+{ "providers": [{ "kind": "ollama", "name": "cloud", "model": "<cloud-model>", "base_url": "https://ollama.com", "api_key_env": "OLLAMA_API_KEY" }] }
 ```
 
 ```json
@@ -229,6 +233,6 @@ Batch one-shots from a script, checking each exit code:
 set -u
 for task in "summarize README.md" "list the largest files with disk_usage" "grep for TODO comments"; do
   echo "== $task"
-  LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich --max-turns 10 "$task" || echo "FAILED ($?)"
+  LICH_PROVIDER_KIND=ollama LICH_MODEL=qwen3:8b lich --max-turns 10 "$task" || echo "FAILED ($?)"
 done
 ```

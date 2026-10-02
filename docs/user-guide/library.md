@@ -26,7 +26,7 @@ The package ships ESM (`dist/index.js`, types at `dist/index.d.ts`, binary at `d
 import { create_agent } from "@moikapy/lich";
 
 const agent = create_agent({
-  providers: [{ kind: "ollama", name: "local", model: "llama3.2:latest" }],
+  providers: [{ kind: "ollama", name: "local", model: "qwen3:8b" }],
 });
 
 const result = await agent.run({ input: "Use list_dir to list the files, then summarize." });
@@ -40,7 +40,7 @@ console.log(`tokens: ${result.usage_total.total_tokens}`);
 import { run_agent } from "@moikapy/lich";
 
 const result = await run_agent(
-  { providers: [{ kind: "ollama", name: "local", model: "llama3.2:latest" }] },
+  { providers: [{ kind: "ollama", name: "local", model: "qwen3:8b" }] },
   "Reply with ok",
 );
 ```
@@ -132,7 +132,7 @@ const config = {
   providers: [
     { kind: "openai_compat", name: "openrouter", model: "meta-llama/llama-3.1-8b-instruct",
       base_url: "https://openrouter.ai/api/v1", api_key_env: "OPENROUTER_API_KEY" },
-    { kind: "ollama", name: "local", model: "llama3.2" },  // failover target
+    { kind: "ollama", name: "local", model: "qwen3:8b" },  // failover target
   ],
   max_turns: 25,
   tools_enabled: ["read_file", "list_dir", "terminal", "web_search", "fetch_url"],
@@ -152,7 +152,7 @@ Listed providers form a failover chain tried in order: `rate_limit`/`network` er
 
 ```ts
 const agent = create_agent({
-  providers: [{ kind: "ollama", name: "local", model: "llama3.2" }],
+  providers: [{ kind: "ollama", name: "local", model: "qwen3:8b" }],
   tools_enabled: ["read_file", "grep_files", "list_dir"],
 });
 ```

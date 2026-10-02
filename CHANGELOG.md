@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Docs, examples and the setup wizard now default local Ollama to `qwen3:8b`
+  (`llama3.2` stays as the low-memory option), and document Ollama cloud:
+  `LICH_BASE_URL=https://ollama.com` with `LICH_API_KEY_ENV=OLLAMA_API_KEY`.
+  The Ollama api key is optional, not unused (#148).
 - Gateway history cap no longer drops tool-heavy history when the capped window
   has no user turn. It keeps the window from the owning assistant turn and
   prepends a stub user turn so providers that require user-first history (Anthropic)
