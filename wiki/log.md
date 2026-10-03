@@ -34,3 +34,4 @@ Append-only. One line per action: `- YYYY-MM-DD <op> | <summary> | <pages>`. Ops
 - 2026-10-03 ingest | Ollama System One and Cloudflare Clef from the ollama/ollama repo at 42e911bc: Clef in 0.35.1, local only, 2-26 criteria, clef-flash bug #18769 | raw/audits/2026-10-03-ollama-systemone-clef.md
 - 2026-10-03 update | Decision models: correct Clef availability, local-only endpoint, option cap; plugin path now uses #157 host features | concepts/decision-models.md
 - 2026-10-03 update | Model roles (#154) and plugin entries, settings, model access, before_llm_call (#157) pinned at 1567638; Hermes comparison rows marked done | entities/lich-providers.md, entities/lich-plugins-and-hooks.md, comparisons/lich-vs-hermes.md
+- 2026-10-03 update | Index one-liners for providers and plugins match #154 and #157 | index.md
