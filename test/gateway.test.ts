@@ -17,6 +17,7 @@ import { assert_bind_allowed, create_webhook_adapter, MAX_WEBHOOK_BODY_BYTES } f
 import { format_agent_reply, split_text } from "../src/gateway/format.js";
 import { create_telegram_adapter } from "../src/gateway/telegram.js";
 import { parse_irc_line, sanitize_twitch_outbound, TWITCH_MESSAGE_CAP } from "../src/gateway/twitch.js";
+import { note_partial_messages } from "../src/agent/loop.js";
 import { GatewayBus } from "../src/gateway/bus.js";
 import type { Agent, AgentRunResult } from "../src/agent/agent.js";
 import type { Message, Usage } from "../src/providers/types.js";
@@ -338,6 +339,41 @@ describe("gateway bus", () => {
       expect(reply?.includes("boom")).toBe(true);
       expect(reply?.includes("\n")).toBe(false);
       expect(reply?.length).toBeLessThanOrEqual("agent error: ".length + 300);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps completed tool turns when a later model call throws", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const partial: Message[] = [
+        { role: "user", content: "go" },
+        { role: "assistant", content: "", tool_calls: [{ id: "t1", name: "read_file", args: { path: "a.txt" } }] },
+        { role: "tool", tool_call_id: "t1", name: "read_file", content: "file-body" },
+      ];
+      let thrown = false;
+      const bus = new GatewayBus({
+        config: config_for(work_dir),
+        agent_factory: () =>
+          ({
+            run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+              records.push({ input: options.input, history: options.history ?? [] });
+              if (thrown === false) {
+                thrown = true;
+                throw note_partial_messages(new Error("provider down"), partial);
+              }
+              return reply_result("ok", options.history ?? [], options.input);
+            },
+          }) as unknown as Agent,
+      });
+      const reply = await bus.handle("webhook", "err", "u1", "go");
+      expect(reply?.includes("provider down")).toBe(true);
+      expect(await bus.handle("webhook", "err", "u1", "again")).toBe("ok");
+      expect(records[1]?.history.some((message) => message.role === "tool" && message.content === "file-body")).toBe(
+        true,
+      );
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
