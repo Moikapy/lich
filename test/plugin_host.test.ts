@@ -1,0 +1,226 @@
+/**
+ * #149 PR B: plugin entries with settings and granted model roles, host model
+ * access on HookContext/ToolContext, and the before_llm_call hook.
+ */
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, describe, expect, it } from "vitest";
+import { Agent } from "../src/agent/agent.js";
+import { parse_agent_config } from "../src/agent/config.js";
+import { NOTE_MAX_CHARS } from "../src/plugins/hooks.js";
+import { load_plugins, type LoadedPlugin } from "../src/plugins/loader.js";
+import type { HookContext, Plugin } from "../src/plugins/types.js";
+import type { ToolContext } from "../src/tools/types.js";
+import { TMP_BASE } from "./helpers/tmp_base.js";
+
+const FIXTURES = fileURLToPath(new URL("./fixtures/plugins/", import.meta.url));
+const temp_dirs: string[] = [];
+
+afterAll(async () => {
+  for (const dir of temp_dirs) {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+async function make_temp_dir(): Promise<string> {
+  await mkdir(TMP_BASE, { recursive: true });
+  const dir = await mkdtemp(path.join(TMP_BASE, "plugin-host-"));
+  temp_dirs.push(dir);
+  return dir;
+}
+
+interface SentMessage {
+  role: string;
+  content: string;
+}
+
+/** Provider fetch that records each request's messages and replies from a script. */
+function recording_fetch(reply: (call: number) => Record<string, unknown>): {
+  fetch_fn: typeof fetch;
+  requests: SentMessage[][];
+} {
+  const requests: SentMessage[][] = [];
+  const fetch_fn: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: SentMessage[] };
+    requests.push(body.messages);
+    const message = reply(requests.length);
+    const payload = {
+      model: "m",
+      choices: [{ message, finish_reason: message["tool_calls"] === undefined ? "stop" : "tool_calls" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    };
+    return new Response(JSON.stringify(payload), { status: 200 });
+  };
+  return { fetch_fn, requests };
+}
+
+function text(content: string): Record<string, unknown> {
+  return { role: "assistant", content };
+}
+
+function tool_call(name: string): Record<string, unknown> {
+  return {
+    role: "assistant",
+    content: "",
+    tool_calls: [{ id: "t1", type: "function", function: { name, arguments: "{}" } }],
+  };
+}
+
+async function make_agent(
+  fetch_fn: typeof fetch,
+  loaded: LoadedPlugin[],
+  extra: Record<string, unknown> = {},
+): Promise<Agent> {
+  const work_dir = await make_temp_dir();
+  const config = parse_agent_config({
+    providers: [{ kind: "openai_compat", name: "mock", model: "m", api_key: "k", base_url: "http://mock.local/v1", fetch_fn }],
+    work_dir,
+    session_dir: path.join(work_dir, "sessions"),
+    log_level: "error",
+    ...extra,
+  });
+  return new Agent(config, loaded);
+}
+
+describe("plugin entries in config", () => {
+  it("accepts bare paths and objects, deep-freezing settings", () => {
+    const config = parse_agent_config({
+      providers: [{ kind: "openai_compat", name: "a", model: "m" }],
+      plugins: ["./bare.mjs", { path: "./lane.mjs", settings: { mode: "shadow", nested: { k: 1 } }, models: ["compress"] }],
+    });
+    const entry = config.plugins[1];
+    expect(typeof entry).toBe("object");
+    if (typeof entry === "object") {
+      expect(Object.isFrozen(entry.settings)).toBe(true);
+      expect(Object.isFrozen(entry.settings?.["nested"])).toBe(true);
+      expect(entry.models).toEqual(["compress"]);
+    }
+  });
+
+  it("rejects unknown roles and unknown keys", () => {
+    const providers = [{ kind: "openai_compat", name: "a", model: "m" }];
+    expect(() => parse_agent_config({ providers, plugins: [{ path: "./p.mjs", models: ["embed"] }] })).toThrow();
+    expect(() => parse_agent_config({ providers, plugins: [{ path: "./p.mjs", optoins: {} }] })).toThrow();
+  });
+
+  it("loader carries settings and roles for object entries only", async () => {
+    const { plugins, errors } = await load_plugins(
+      ["good.plugin.ts", { path: "named.plugin.ts", settings: { threshold: 0.75 }, models: ["chat"] }],
+      FIXTURES,
+    );
+    expect(errors).toEqual([]);
+    expect(plugins[0]?.settings).toBeUndefined();
+    expect(plugins[0]?.models).toBeUndefined();
+    expect(plugins[1]?.entry).toBe("named.plugin.ts");
+    expect(plugins[1]?.settings).toEqual({ threshold: 0.75 });
+    expect(Object.isFrozen(plugins[1]?.settings)).toBe(true);
+    expect(plugins[1]?.models).toEqual(["chat"]);
+  });
+});
+
+describe("plugin settings and model access", () => {
+  it("hands hooks frozen settings and refuses ungranted roles", async () => {
+    const seen: HookContext[] = [];
+    const errors: string[] = [];
+    const plugin: Plugin = {
+      name: "lane",
+      hooks: {
+        on_run_start: async (_info, ctx) => {
+          seen.push(ctx);
+          await ctx.models?.chat("chat", [{ role: "user", content: "x" }]).catch((error: Error) => {
+            errors.push(error.message);
+          });
+        },
+      },
+    };
+    const { fetch_fn } = recording_fetch(() => text("done"));
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane", settings: Object.freeze({ mode: "shadow" }) }]);
+    await agent.run({ input: "go" });
+    expect(seen[0]?.settings).toEqual({ mode: "shadow" });
+    expect(Object.isFrozen(seen[0]?.settings)).toBe(true);
+    expect(errors).toEqual(['plugin "lane" was not granted model role "chat"']);
+  });
+
+  it("lets a granted role call the host chain, compress falling back to chat", async () => {
+    const answers: string[] = [];
+    const plugin: Plugin = {
+      name: "lane",
+      hooks: {
+        on_run_start: async (_info, ctx) => {
+          const result = await ctx.models?.chat("compress", [{ role: "user", content: "classify" }]);
+          answers.push(result?.message.content ?? "");
+        },
+      },
+    };
+    const { fetch_fn, requests } = recording_fetch((call) => text(call === 1 ? "side answer" : "done"));
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane", models: ["compress"] }]);
+    await agent.run({ input: "go" });
+    expect(answers).toEqual(["side answer"]);
+    expect(requests[0]?.at(-1)?.content).toBe("classify");
+  });
+
+  it("gives plugin tools their own settings and model access", async () => {
+    const contexts: ToolContext[] = [];
+    const plugin: Plugin = {
+      name: "lane",
+      tools: [
+        {
+          name: "lane_probe",
+          description: "probe",
+          parameters: { type: "object", properties: {} },
+          execute: async (_args, context) => {
+            contexts.push(context);
+            return { ok: true, output: "probed" };
+          },
+        },
+      ],
+    };
+    const { fetch_fn } = recording_fetch((call) => (call === 1 ? tool_call("lane_probe") : text("done")));
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane", settings: Object.freeze({ k: "v" }) }]);
+    await agent.run({ input: "go" });
+    expect(contexts[0]?.settings).toEqual({ k: "v" });
+    expect(typeof contexts[0]?.models?.chat).toBe("function");
+    expect(contexts[0]?.work_dir.length).toBeGreaterThan(0);
+  });
+});
+
+describe("before_llm_call", () => {
+  it("adds a capped note to that one call and never to the history", async () => {
+    let calls = 0;
+    const plugin: Plugin = {
+      name: "lane",
+      hooks: {
+        before_llm_call: (info) => {
+          calls += 1;
+          expect(info.messages.some((message) => message.role === "user")).toBe(true);
+          return calls === 1 ? { note: "y".repeat(NOTE_MAX_CHARS + 50) } : undefined;
+        },
+      },
+    };
+    const { fetch_fn, requests } = recording_fetch((call) => (call === 1 ? tool_call("read_file") : text("done")));
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane" }]);
+    const run = await agent.run({ input: "go" });
+    const first_note = requests[0]?.at(-1);
+    expect(first_note?.role).toBe("system");
+    expect(first_note?.content).toBe(`[plugin lane] ${"y".repeat(NOTE_MAX_CHARS)}`);
+    expect(requests[1]?.some((message) => message.content.startsWith("[plugin lane]"))).toBe(false);
+    expect(run.messages.some((message) => message.content?.startsWith("[plugin lane]") === true)).toBe(false);
+  });
+
+  it("fails open when the hook throws", async () => {
+    const plugin: Plugin = {
+      name: "lane",
+      hooks: {
+        before_llm_call: () => {
+          throw new Error("decision model down");
+        },
+      },
+    };
+    const { fetch_fn, requests } = recording_fetch(() => text("done"));
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane" }]);
+    const run = await agent.run({ input: "go" });
+    expect(run.outcome.final?.content).toBe("done");
+    expect(requests[0]?.at(-1)?.role).toBe("user");
+  });
+});

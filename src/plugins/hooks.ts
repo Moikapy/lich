@@ -14,14 +14,19 @@ import type { ToolContext, ToolResult } from "../tools/types.js";
 import { logger } from "../util/log.js";
 import type {
   AfterToolCallInfo,
+  BeforeLlmCallInfo,
+  BeforeLlmCallResult,
   BeforeToolCallInfo,
   BeforeToolCallResult,
   HookContext,
   Plugin,
+  PluginAccess,
   RunEndInfo,
 } from "./types.js";
 
 const SUMMARY_MAX_CHARS = 300;
+/** Per-note cap for before_llm_call notes. */
+export const NOTE_MAX_CHARS = 2000;
 
 /** Structural ToolRunner shape accepted from the wrapped executor. */
 export interface WrappedToolRunner {
@@ -70,9 +75,9 @@ function reset_plugin_bag(plugin: Plugin): Map<string, unknown> {
   return fresh;
 }
 
-/** Per-invocation ctx: base plus ONLY this plugin's own sub-map (A8). */
-function with_hook_state(base: HookContext, plugin: Plugin): HookContext {
-  return { ...base, state: hook_state_for(plugin) };
+/** Per-invocation ctx: base plus ONLY this plugin's own sub-map, settings and model access (A8). */
+function with_hook_state(base: HookContext, plugin: Plugin, access: PluginAccess | undefined): HookContext {
+  return { ...base, ...access, state: hook_state_for(plugin) };
 }
 
 function clamp_summary(text: string): string {
@@ -87,10 +92,20 @@ function clamp_summary(text: string): string {
 export class HookedToolRunner {
   private readonly wrapped: WrappedToolRunner;
   private readonly hooked_plugins: Plugin[];
+  private readonly access: ReadonlyMap<Plugin, PluginAccess>;
 
-  constructor(wrapped: WrappedToolRunner, plugins: readonly Plugin[]) {
+  constructor(
+    wrapped: WrappedToolRunner,
+    plugins: readonly Plugin[],
+    access: ReadonlyMap<Plugin, PluginAccess> = new Map(),
+  ) {
     this.wrapped = wrapped;
     this.hooked_plugins = plugins.filter((plugin) => plugin.hooks !== undefined);
+    this.access = access;
+  }
+
+  private ctx_for(base: HookContext, plugin: Plugin): HookContext {
+    return with_hook_state(base, plugin, this.access.get(plugin));
   }
 
   /**
@@ -116,7 +131,7 @@ export class HookedToolRunner {
         continue;
       }
       try {
-        const verdict = (await hook(info, with_hook_state(base, plugin))) as BeforeToolCallResult | undefined;
+        const verdict = (await hook(info, this.ctx_for(base, plugin))) as BeforeToolCallResult | undefined;
         if (verdict?.block === true) {
           return verdict;
         }
@@ -135,7 +150,7 @@ export class HookedToolRunner {
         continue;
       }
       try {
-        await hook(info, with_hook_state(base, plugin));
+        await hook(info, this.ctx_for(base, plugin));
       } catch (hook_error) {
         logger.warn(`plugin after_tool_call hook threw for ${info.tool_name}; continuing`, hook_error);
       }
@@ -173,11 +188,35 @@ export class HookedToolRunner {
         continue;
       }
       try {
-        await hook(info, with_hook_state(base, plugin));
+        await hook(info, this.ctx_for(base, plugin));
       } catch (hook_error) {
         logger.warn("plugin on_run_start hook threw; continuing", hook_error);
       }
     }
+  }
+
+  /**
+   * before_llm_call fan-out in plugin order; never throws. Returns each
+   * plugin's note, capped at NOTE_MAX_CHARS, for this one model call.
+   */
+  async call_before_llm(info: BeforeLlmCallInfo, base: HookContext): Promise<string[]> {
+    const notes: string[] = [];
+    for (const plugin of this.hooked_plugins) {
+      const hook = plugin.hooks?.before_llm_call;
+      if (hook === undefined) {
+        continue;
+      }
+      try {
+        const result = (await hook(info, this.ctx_for(base, plugin))) as BeforeLlmCallResult | undefined;
+        const note = result?.note;
+        if (typeof note === "string" && note.length > 0) {
+          notes.push(`[plugin ${plugin.name}] ${note.slice(0, NOTE_MAX_CHARS)}`);
+        }
+      } catch (hook_error) {
+        logger.warn("plugin before_llm_call hook threw; continuing", hook_error);
+      }
+    }
+    return notes;
   }
 
   /** Best-effort on_run_end fan-out used by Agent.run; never throws. */
@@ -188,7 +227,7 @@ export class HookedToolRunner {
         continue;
       }
       try {
-        await hook(info, with_hook_state(base, plugin));
+        await hook(info, this.ctx_for(base, plugin));
       } catch (hook_error) {
         logger.warn("plugin on_run_end hook threw; continuing", hook_error);
       }

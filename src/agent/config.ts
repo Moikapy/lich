@@ -6,6 +6,7 @@ import { z } from "zod";
 import { DEFAULT_GATEWAY_TOOLS_ENABLED } from "../gateway/access.js";
 import { ENV_VAR_NAME } from "../gateway/token_env.js";
 import { refuse_mcp_entry } from "../mcp/mcp_pin.js";
+import { MODEL_ROLES } from "../plugins/types.js";
 import type { ProviderConfig } from "../providers/types.js";
 import { set_log_level } from "../util/log.js";
 
@@ -109,6 +110,19 @@ const models_schema = z
   .strict()
   .optional();
 
+/** Bare module path, or `{ path, settings?, models? }` with free-form settings and granted roles. */
+const plugin_entry_schema = z.union([
+  z.string(),
+  z
+    .object({
+      path: z.string().min(1),
+      settings: z.record(z.unknown()).optional(),
+      /** Model roles this plugin may call; default none (fail closed). */
+      models: z.array(z.enum(MODEL_ROLES)).optional(),
+    })
+    .strict(),
+]);
+
 const agent_config_schema = z
   .object({
     /** Wizard label. The TUI banner uses the active theme welcome string. */
@@ -125,8 +139,8 @@ const agent_config_schema = z
     compress_threshold: z.number().min(0.1).max(0.95).default(0.8),
     session_dir: z.string().optional(),
     terminal_timeout_ms: z.number().int().positive().default(60000),
-    /** Plugin entry module specifiers, relative to work_dir or absolute. */
-    plugins: z.array(z.string()).default([]),
+    /** Plugin entries: module paths relative to work_dir or absolute, optionally with settings and roles. */
+    plugins: z.array(plugin_entry_schema).default([]),
     gateway: gateway_schema,
     log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
     theme: z.string().min(1).default("lich"),
@@ -167,6 +181,16 @@ const agent_config_schema = z
 
 export type AgentConfig = z.infer<typeof agent_config_schema>;
 
+function deep_freeze(value: unknown): void {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value) === true) {
+    return;
+  }
+  Object.freeze(value);
+  for (const child of Object.values(value)) {
+    deep_freeze(child);
+  }
+}
+
 function freeze_config(config: AgentConfig): AgentConfig {
   Object.freeze(config);
   Object.freeze(config.providers);
@@ -180,7 +204,7 @@ function freeze_config(config: AgentConfig): AgentConfig {
   }
   Object.freeze(config.plugins);
   for (const plugin of config.plugins) {
-    Object.freeze(plugin);
+    deep_freeze(plugin);
   }
   if (Array.isArray(config.tools_enabled) === true) {
     Object.freeze(config.tools_enabled);

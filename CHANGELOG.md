@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Plugin entries may be `{ path, settings?, models? }`. Hooks and plugin tools
+  get the frozen `settings` and `models.chat(role, …)`, which refuses roles not
+  granted. New `before_llm_call` hook can add a capped note to one model call;
+  it fails open (#149).
 - Optional `models` config block assigns provider chains per role: `chat` for
   the main loop and `compress` for context compression (falls back to `chat`
   on failure). Without it, behavior is unchanged (#149).
