@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- New `examples/decision_lane/`: a prototype plugin that asks a local Ollama
+  decision model (`/v1/systemone`) to pick each game_bridge enemy's action
+  before the LLM turn. Shadow mode (default) only logs; act mode queues orders
+  through game_bridge's own checks when every answer clears the threshold.
+  Includes a replay benchmark (#148).
 - Plugin entries may be `{ path, settings?, models? }`. Hooks and plugin tools
   get the frozen `settings` and `models.chat(role, …)`, which refuses roles not
   granted. New `before_llm_call` hook can add a capped note to one model call;
