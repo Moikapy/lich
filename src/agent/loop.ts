@@ -142,7 +142,8 @@ async function messages_for_call(deps: LoopDeps, history: readonly Message[], tu
     return history;
   }
   const ctx: HookContext = { work_dir: deps.tool_context?.work_dir ?? process.cwd() };
-  const notes = await deps.before_llm_call({ turn, messages: Object.freeze([...history]) }, ctx);
+  // Deep copy: hooks must not reach live history objects or the session transcript.
+  const notes = await deps.before_llm_call({ turn, messages: structuredClone(history) }, ctx);
   if (notes.length === 0) {
     return history;
   }

@@ -117,6 +117,14 @@ describe("plugin entries in config", () => {
     expect(Object.isFrozen(plugins[1]?.settings)).toBe(true);
     expect(plugins[1]?.models).toEqual(["chat"]);
   });
+
+  it("loader deep-freezes a copy of object-entry settings", async () => {
+    const nested = { level: 1 };
+    const { plugins } = await load_plugins([{ path: "named.plugin.ts", settings: { nested } }], FIXTURES);
+    const settings = plugins[0]?.settings as { nested: { level: number } };
+    expect(Object.isFrozen(settings.nested)).toBe(true);
+    expect(Object.isFrozen(nested)).toBe(false);
+  });
 });
 
 describe("plugin settings and model access", () => {
@@ -206,6 +214,49 @@ describe("before_llm_call", () => {
     expect(first_note?.content).toBe(`[plugin lane] ${"y".repeat(NOTE_MAX_CHARS)}`);
     expect(requests[1]?.some((message) => message.content.startsWith("[plugin lane]"))).toBe(false);
     expect(run.messages.some((message) => message.content?.startsWith("[plugin lane]") === true)).toBe(false);
+  });
+
+  it("hands hooks a deep copy, so mutations never reach history", async () => {
+    const plugin: Plugin = {
+      name: "lane",
+      hooks: {
+        before_llm_call: (info) => {
+          const first = info.messages.find((message) => message.role === "user") as { content: string };
+          first.content = "tampered";
+        },
+      },
+    };
+    const { fetch_fn, requests } = recording_fetch(() => text("done"));
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane" }]);
+    const run = await agent.run({ input: "go" });
+    expect(run.messages.some((message) => message.content === "tampered")).toBe(false);
+    expect(requests[0]?.some((message) => message.content === "tampered")).toBe(false);
+  });
+
+  it("aborts plugin model calls with the run signal", async () => {
+    const controller = new AbortController();
+    const seen: boolean[] = [];
+    let rejected = 0;
+    const plugin: Plugin = {
+      name: "lane",
+      hooks: {
+        before_llm_call: async (_info, ctx) => {
+          controller.abort();
+          await ctx.models?.chat("chat", [{ role: "user", content: "x" }]).catch(() => {
+            rejected += 1;
+          });
+        },
+      },
+    };
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      seen.push(init?.signal?.aborted === true);
+      throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    };
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane", models: ["chat"] }]);
+    await agent.run({ input: "go", signal: controller.signal });
+    expect(rejected).toBe(1);
+    // The router refuses an already-aborted signal before any request goes out.
+    expect(seen).toEqual([]);
   });
 
   it("fails open when the hook throws", async () => {

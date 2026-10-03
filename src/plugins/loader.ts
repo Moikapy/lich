@@ -5,6 +5,7 @@
  */
 import { pathToFileURL } from "node:url";
 import path from "node:path";
+import { deep_freeze } from "../util/freeze.js";
 import type { ModelRole, Plugin, PluginEntry } from "./types.js";
 
 /** A successfully loaded plugin plus the entry path it came from. */
@@ -103,7 +104,9 @@ export async function load_plugins(
     try {
       const loaded = await load_one_entry(entry, base_dir);
       if (typeof raw !== "string") {
-        loaded.settings = Object.freeze({ ...raw.settings });
+        const settings = structuredClone({ ...raw.settings });
+        deep_freeze(settings);
+        loaded.settings = settings;
         loaded.models = Object.freeze([...(raw.models ?? [])]);
       }
       if (is_builtin_collision(loaded.plugin.name) === true) {

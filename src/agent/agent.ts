@@ -19,6 +19,7 @@ import { open_session, type SessionHandle } from "../session/store.js";
 import type { Tool, ToolContext } from "../tools/types.js";
 import type { AgentConfig } from "./config.js";
 import { parse_agent_config } from "./config.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, AgentEventBody } from "./events.js";
 import { AgentEmitter, EnvelopedAgentEmitter } from "./events.js";
@@ -131,6 +132,16 @@ function tool_env(config: AgentConfig): Record<string, string> {
   };
 }
 
+/** The current run's abort signal, so plugin model calls stop when the run is aborted. */
+const run_signal = new AsyncLocalStorage<AbortSignal | undefined>();
+
+function combine_signals(a: AbortSignal | undefined, b: AbortSignal | undefined): AbortSignal | undefined {
+  if (a === undefined) {
+    return b;
+  }
+  return b === undefined ? a : AbortSignal.any([a, b]);
+}
+
 export class Agent {
   readonly events: EnvelopedAgentEmitter;
   readonly config: AgentConfig;
@@ -185,7 +196,7 @@ export class Agent {
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
     await this.attach_mcp_once();
-    const body = (): Promise<AgentRunResult> => this.run_body(options);
+    const body = (): Promise<AgentRunResult> => run_signal.run(options.signal, () => this.run_body(options));
     // Per-run ALS scope so concurrent Agent.run calls do not share gatekeeper state (M-6).
     if (this.hook_runner !== undefined) {
       return this.hook_runner.run_scope(body);
@@ -313,7 +324,8 @@ export class Agent {
           throw new Error(`plugin "${plugin_name}" was not granted model role "${role}"`);
         }
         const router = role === "compress" ? (this.compress_router ?? this.router) : this.router;
-        return await router.chat_with_failover(messages, [], options);
+        const signal = combine_signals(run_signal.getStore(), options?.signal);
+        return await router.chat_with_failover(messages, [], { ...options, signal });
       },
     });
   }

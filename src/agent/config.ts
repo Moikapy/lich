@@ -8,6 +8,7 @@ import { ENV_VAR_NAME } from "../gateway/token_env.js";
 import { refuse_mcp_entry } from "../mcp/mcp_pin.js";
 import { MODEL_ROLES } from "../plugins/types.js";
 import type { ProviderConfig } from "../providers/types.js";
+import { deep_freeze } from "../util/freeze.js";
 import { set_log_level } from "../util/log.js";
 
 const gateway_allowlist = z.record(z.string(), z.array(z.string())).default({});
@@ -180,16 +181,6 @@ const agent_config_schema = z
   });
 
 export type AgentConfig = z.infer<typeof agent_config_schema>;
-
-function deep_freeze(value: unknown): void {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value) === true) {
-    return;
-  }
-  Object.freeze(value);
-  for (const child of Object.values(value)) {
-    deep_freeze(child);
-  }
-}
 
 function freeze_config(config: AgentConfig): AgentConfig {
   Object.freeze(config);
