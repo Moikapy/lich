@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Box, Text } from "ink";
 import type { Agent, AgentRunResult } from "../agent/agent.js";
+import { history_after_run_error } from "../agent/loop.js";
 import type { AgentEvent } from "../agent/events.js";
 import type { AgentConfig } from "../agent/config.js";
 import type { Message } from "../providers/types.js";
@@ -149,6 +150,10 @@ function use_agent_run(
       };
       void run_agent_turn(agent, history_ref.current, text, on_event, finish_run, controller.signal, session)
         .catch((error: unknown) => {
+          const kept = history_after_run_error(error);
+          if (kept !== undefined) {
+            history_ref.current = kept;
+          }
           add_blocks([error_notice_block(run_error_text(error))]);
           set_state((current) => ({ ...current, phase: "idle" }));
         })

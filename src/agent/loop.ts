@@ -242,8 +242,54 @@ function find_last_assistant(messages: readonly Message[]): AssistantMessage | u
   return [...messages].reverse().find((message) => message.role === "assistant");
 }
 
+const PARTIAL_MESSAGES = Symbol("lich.partial_messages");
+/** Copied examples read this non-enumerable field; they do not import the symbol. */
+const PARTIAL_MESSAGES_KEY = "lich_partial_messages";
+
 function signal_aborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
+}
+
+/** Attach in-memory history so a caller can keep turns that finished before chat threw. */
+export function note_partial_messages(error: unknown, messages: readonly Message[]): unknown {
+  if (typeof error === "object" && error !== null) {
+    const copy = [...messages];
+    Object.defineProperty(error, PARTIAL_MESSAGES, { value: copy, enumerable: false });
+    Object.defineProperty(error, PARTIAL_MESSAGES_KEY, { value: copy, enumerable: false });
+  }
+  return error;
+}
+
+/** History captured when chat threw, if the loop annotated this error. */
+export function partial_messages_of(error: unknown): Message[] | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const record = error as { [PARTIAL_MESSAGES]?: unknown; lich_partial_messages?: unknown };
+  const value = record[PARTIAL_MESSAGES] ?? record.lich_partial_messages;
+  return Array.isArray(value) ? (value as Message[]) : undefined;
+}
+
+/**
+ * Messages to keep when a run throws after earlier turns finished.
+ * Undefined when the error has no completed assistant or tool turn.
+ */
+export function history_after_run_error(error: unknown): Message[] | undefined {
+  const partial = partial_messages_of(error);
+  if (partial === undefined) {
+    return undefined;
+  }
+  const kept = drop_trailing_users(partial);
+  const progressed = kept.some((message) => message.role === "assistant" || message.role === "tool");
+  return progressed ? kept : undefined;
+}
+
+function drop_trailing_users(messages: readonly Message[]): Message[] {
+  const kept = [...messages];
+  while (kept.at(-1)?.role === "user") {
+    kept.pop();
+  }
+  return kept;
 }
 
 function aborted_outcome(history: Message[], turns_used: number): LoopOutcome {
@@ -279,7 +325,7 @@ export async function run_conversation(
       if (signal_aborted(params.signal) === true) {
         return aborted_outcome(history, turn - 1);
       }
-      throw error;
+      throw note_partial_messages(error, history);
     }
     emitter?.emit({ type: "llm_end", turn, result });
     history.push(result.message);

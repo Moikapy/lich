@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Gateway, CLI chat, the TUI, and the persona orchestrator keep completed tool
+  turns when a later model call throws, so the next message still sees that work.
 - Docs, examples and the setup wizard now default local Ollama to `qwen3:8b`
   (`llama3.2` stays as the low-memory option), and document Ollama cloud:
   `LICH_BASE_URL=https://ollama.com` with `LICH_API_KEY_ENV=OLLAMA_API_KEY`.
