@@ -1,7 +1,7 @@
 ---
 title: Wiki index
 type: index
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 # Lich Wiki: Index
