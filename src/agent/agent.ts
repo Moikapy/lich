@@ -122,6 +122,7 @@ export class Agent {
   readonly events: EnvelopedAgentEmitter;
   readonly config: AgentConfig;
   private readonly router: ProviderRouter;
+  private readonly compress_router: ProviderRouter | undefined;
   private readonly registry: ToolRegistry;
   private readonly executor: ToolExecutor | HookedToolRunner;
   private readonly hook_runner: HookedToolRunner | undefined;
@@ -133,7 +134,10 @@ export class Agent {
     this.config = config;
     this.mcp_runtime = runtime?.mcp;
     this.events = new EnvelopedAgentEmitter();
-    this.router = new ProviderRouter(config.providers);
+    const all_providers = new ProviderRouter(config.providers);
+    const roles = config.models;
+    this.router = roles?.chat !== undefined ? all_providers.for_role(roles.chat) : all_providers;
+    this.compress_router = roles?.compress !== undefined ? all_providers.for_role(roles.compress) : undefined;
     const base_registry = new ToolRegistry();
     register_builtin_tools(base_registry);
     this.registry = filter_registry(base_registry, config.tools_enabled);
@@ -285,6 +289,7 @@ export class Agent {
   private loop_deps(tool_context: ToolContext, emitter: AgentEmitter): LoopDeps {
     return {
       chat: (messages, tools, chat_options) => this.router.chat_with_failover(messages, tools, chat_options),
+      compress_chat: this.compress_router?.chat_with_failover.bind(this.compress_router),
       tools: this.executor,
       definitions: () => this.registry.definitions(),
       emitter,

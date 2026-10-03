@@ -140,7 +140,7 @@ const config = {
 };
 ```
 
-Listed providers form a failover chain tried in order: `rate_limit`/`network` errors retry with backoff (3 attempts) on the current provider before failing over; `auth`, `overflow`, and `bad_request` fail over immediately. The last error is rethrown when all providers fail.
+Listed providers form a failover chain tried in order: `rate_limit`/`network` errors retry with backoff (3 attempts) on the current provider before failing over; `auth`, `overflow`, and `bad_request` fail over immediately. The last error is rethrown when all providers fail. An optional `models` block splits the chain by role: `models.chat` sets the main loop's order and `models.compress` the context-compression chain (see the [config reference](cli.md#config-file-reference)).
 
 `LICH_ALLOW_SELF_COMMIT` and `LICH_TEST_COMMAND` are process-env knobs, not config fields. See the [CLI environment](cli.md#self-improvement-environment).
 

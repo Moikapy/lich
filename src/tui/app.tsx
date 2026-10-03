@@ -22,6 +22,7 @@ import {
   help_block,
   HISTORY_CAP,
   INITIAL_UI_STATE,
+  chat_provider,
   model_label_block,
   parse_command,
   tui_banner_text,
@@ -321,7 +322,7 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
     [handle_slash, start_message_run],
   );
 
-  const provider = agent.config.providers[0];
+  const provider = chat_provider(agent.config);
   const banner = tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown");
   return (
     <Box flexDirection="column" minHeight={8}>
