@@ -1,10 +1,10 @@
 ---
 title: Lich providers and failover
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-03
 type: entity
 tags: [providers, runtime, performance]
-sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-10-02-decision-models-ollama-research.md, "#148", "#152"]
+sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-10-02-decision-models-ollama-research.md, "#148", "#152", "#154"]
 confidence: high
 ---
 
@@ -13,6 +13,10 @@ confidence: high
 `src/providers/*` has three hand-written HTTP clients: `openai_compat`, `anthropic` and `ollama`. None of them uses a vendor SDK, and each takes an injectable `fetch`. `router.ts` and `failover.ts` try providers in config order:
 - `rate_limit` and `network` errors get 3 attempts with deterministic backoff.
 - `auth`, `overflow` and `bad_request` errors move to the next provider immediately.
+
+## Model roles
+
+Since #154, an optional `models` block names provider chains per role (`src/agent/config.ts:104@1567638`). `models.chat` sets the main loop's failover order; `models.compress` routes context compression and falls back to the chat chain when it fails (`src/agent/loop.ts:206@1567638`). `ProviderRouter.for_role` builds each chain over the shared client cache (`src/providers/router.ts:32@1567638`). Without `models`, behavior is unchanged. Plugins reach these roles only when granted ([[lich-plugins-and-hooks]]).
 
 ## Strengths
 
