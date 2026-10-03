@@ -11,14 +11,15 @@ import { ToolRegistry } from "../tools/registry.js";
 import { HookedToolRunner } from "../plugins/hooks.js";
 import { gatekeeper_plugin } from "../plugins/builtin/gatekeeper.plugin.js";
 import { load_plugins, plugin_errors_summary, type LoadedPlugin } from "../plugins/loader.js";
-import type { HookContext, Plugin } from "../plugins/types.js";
-import type { Message, Usage } from "../providers/types.js";
+import type { HookContext, ModelRole, Plugin, PluginAccess, PluginModels } from "../plugins/types.js";
+import type { ChatOptions, Message, Usage } from "../providers/types.js";
 import { ProviderRouter } from "../providers/router.js";
 import { create_session_recorder, type SessionRecorder } from "../session/recorder.js";
 import { open_session, type SessionHandle } from "../session/store.js";
-import type { ToolContext } from "../tools/types.js";
+import type { Tool, ToolContext } from "../tools/types.js";
 import type { AgentConfig } from "./config.js";
 import { parse_agent_config } from "./config.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, AgentEventBody } from "./events.js";
 import { AgentEmitter, EnvelopedAgentEmitter } from "./events.js";
@@ -86,14 +87,27 @@ function collect_usage(total: Usage): (event: AgentEventBody) => void {
 }
 
 /** Register plugin tools onto the final registry; duplicates warn and skip. */
-function register_plugin_tools(registry: ToolRegistry, plugins: readonly LoadedPlugin[]): void {
+/** Plugin tool whose context also carries the owning plugin's settings and model access. */
+function with_plugin_access(tool: Tool, access: PluginAccess): Tool {
+  return {
+    ...tool,
+    execute: (args, context) => tool.execute(args, { ...context, ...access }),
+  };
+}
+
+function register_plugin_tools(
+  registry: ToolRegistry,
+  plugins: readonly LoadedPlugin[],
+  access: ReadonlyMap<Plugin, PluginAccess>,
+): void {
   for (const loaded of plugins) {
+    const plugin_access = access.get(loaded.plugin);
     for (const tool of loaded.plugin.tools ?? []) {
       if (registry.has(tool.name) === true) {
         logger.warn(`plugin ${loaded.plugin.name} tool ${tool.name} already registered; skipping`);
         continue;
       }
-      registry.register(tool);
+      registry.register(plugin_access === undefined ? tool : with_plugin_access(tool, plugin_access));
       logger.info(`plugin ${loaded.plugin.name} registered tool ${tool.name}`);
     }
   }
@@ -116,6 +130,16 @@ function tool_env(config: AgentConfig): Record<string, string> {
     LICH_TERMINAL_TIMEOUT_MS: String(config.terminal_timeout_ms),
     LICH_TEST_COMMAND: process.env["LICH_TEST_COMMAND"] ?? "",
   };
+}
+
+/** The current run's abort signal, so plugin model calls stop when the run is aborted. */
+const run_signal = new AsyncLocalStorage<AbortSignal | undefined>();
+
+function combine_signals(a: AbortSignal | undefined, b: AbortSignal | undefined): AbortSignal | undefined {
+  if (a === undefined) {
+    return b;
+  }
+  return b === undefined ? a : AbortSignal.any([a, b]);
 }
 
 export class Agent {
@@ -147,7 +171,14 @@ export class Agent {
     const allow_self_commit = process.env["LICH_ALLOW_SELF_COMMIT"] === "1";
     const gatekeeper = gatekeeper_plugin(allow_self_commit);
     const gatekeeper_loaded: LoadedPlugin = { plugin: gatekeeper, entry: "builtin:gatekeeper" };
-    register_plugin_tools(this.registry, [gatekeeper_loaded, ...plugins]);
+    const access = new Map<Plugin, PluginAccess>();
+    for (const loaded of plugins) {
+      access.set(loaded.plugin, {
+        settings: loaded.settings ?? Object.freeze({}),
+        models: this.plugin_models(loaded.plugin.name, loaded.models ?? []),
+      });
+    }
+    register_plugin_tools(this.registry, [gatekeeper_loaded, ...plugins], access);
     const base_executor = new ToolExecutor(this.registry, {
       work_dir: config.work_dir,
       env: tool_env(config),
@@ -155,7 +186,7 @@ export class Agent {
     // Tools and hooks share one synthetic LoadedPlugin so the gate is live.
     const hooked = hooked_plugins_of([gatekeeper_loaded, ...plugins]);
     if (hooked.length > 0) {
-      this.hook_runner = new HookedToolRunner(base_executor, hooked);
+      this.hook_runner = new HookedToolRunner(base_executor, hooked, access);
       this.executor = this.hook_runner;
     } else {
       this.hook_runner = undefined;
@@ -165,7 +196,7 @@ export class Agent {
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
     await this.attach_mcp_once();
-    const body = (): Promise<AgentRunResult> => this.run_body(options);
+    const body = (): Promise<AgentRunResult> => run_signal.run(options.signal, () => this.run_body(options));
     // Per-run ALS scope so concurrent Agent.run calls do not share gatekeeper state (M-6).
     if (this.hook_runner !== undefined) {
       return this.hook_runner.run_scope(body);
@@ -285,11 +316,26 @@ export class Agent {
     this.mcp_sessions = await attach_enabled_mcp_tools(this.registry, this.config, this.mcp_runtime);
   }
 
+  /** Model access for one plugin: granted roles only; `compress` uses the chat chain when unset. */
+  private plugin_models(plugin_name: string, granted: readonly ModelRole[]): PluginModels {
+    return Object.freeze({
+      chat: async (role: ModelRole, messages: readonly Message[], options?: ChatOptions) => {
+        if (granted.includes(role) === false) {
+          throw new Error(`plugin "${plugin_name}" was not granted model role "${role}"`);
+        }
+        const router = role === "compress" ? (this.compress_router ?? this.router) : this.router;
+        const signal = combine_signals(run_signal.getStore(), options?.signal);
+        return await router.chat_with_failover(messages, [], { ...options, signal });
+      },
+    });
+  }
+
   /** Per-run deps: the built-once ToolContext threads through every tool execution. */
   private loop_deps(tool_context: ToolContext, emitter: AgentEmitter): LoopDeps {
     return {
       chat: (messages, tools, chat_options) => this.router.chat_with_failover(messages, tools, chat_options),
       compress_chat: this.compress_router?.chat_with_failover.bind(this.compress_router),
+      before_llm_call: this.hook_runner?.call_before_llm.bind(this.hook_runner),
       tools: this.executor,
       definitions: () => this.registry.definitions(),
       emitter,
