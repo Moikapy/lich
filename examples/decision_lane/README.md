@@ -34,7 +34,7 @@ ollama pull nimble        # or clef:27b (Ollama 0.35.1+)
 | `shadow` (default) | Only logs. Use it to compare the model's picks with the LLM's `enemy_actions` calls before trusting it. |
 | `act` | When every answer's confidence is at least `threshold`, queues the round through game_bridge's own `enemy_actions` tool and adds a one-call note telling the LLM the round is handled. Otherwise the LLM turn runs as usual. |
 
-In `act` mode the orders still go through game_bridge's validation and its meteor veto. A decision-model verdict can only add an order that those checks accept; it never bypasses them. A timeout, HTTP error, bad response, low confidence, veto or rejected order is logged as a fallback and the LLM decides the round. The hook never throws.
+In `act` mode the orders still go through game_bridge's validation and its meteor veto. A decision-model verdict can only add an order that those checks accept; it never bypasses them. An answer that is not one of the offered options counts as confidence 0. A timeout, HTTP error, bad response, low confidence, non-numeric `threshold`, veto or rejected order is logged as a fallback and the LLM decides the round. The hook never throws.
 
 The LLM call itself still happens in `act` mode (hooks cannot skip it); the note keeps that turn short. Skipping the call outright would need a new hook result, which is out of scope for this prototype.
 
@@ -47,7 +47,7 @@ The LLM call itself still happens in `act` mode (hooks cannot skip it); the note
 | `model` | `"nimble"` | Decision model. Avoid `clef-flash` on Ollama 0.35.1 (ollama/ollama#18769); `clef:27b` works. |
 | `threshold` | `0.75` | Minimum confidence for every answer before `act` queues orders. |
 | `timeout_ms` | `2000` | Request timeout. |
-| `log_file` | `"decisions.jsonl"` | File under `.lich/game/`. |
+| `log_file` | `"decisions.jsonl"` | File name under `.lich/game/`; anything with a directory part falls back to the default. |
 | `api_key_env` | none | Env var holding a Bearer key, for a hosted endpoint that needs one. |
 
 ## What leaves the machine

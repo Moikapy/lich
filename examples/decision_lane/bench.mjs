@@ -53,14 +53,15 @@ async function run_model(model, cases, base_url) {
   const rows = [];
   for (const item of cases) {
     try {
+      const questions = build_questions(item.battle);
       const { answers, latency_ms } = await systemone({
         base_url,
         model,
         state: { battle: item.battle, request: item.request ?? "" },
-        questions: build_questions(item.battle),
+        questions,
         timeout_ms: 10000,
       });
-      const picked = pick_actions(item.battle, answers);
+      const picked = pick_actions(item.battle, questions, answers);
       rows.push({ latency_ms, min_confidence: picked.min_confidence, agree: agreement(picked.actions, item.llm_actions) });
     } catch (error) {
       rows.push({ error: error?.reason ?? String(error) });

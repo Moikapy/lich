@@ -59,15 +59,18 @@ export function build_questions(battle) {
   return questions;
 }
 
-/** Orders plus the lowest confidence across every answer; a missing answer counts as 0. */
-export function pick_actions(battle, answers) {
+/**
+ * Orders plus the lowest confidence across every answer. A missing answer, or a
+ * choice that was not one of the question's criteria, counts as confidence 0.
+ */
+export function pick_actions(battle, questions, answers) {
   let min_confidence = 1;
   const log = {};
   const actions = battle.enemies.map((enemy, index) => {
-    const action = read_choice(answers[`e${index}_action`]);
+    const action = read_choice(answers[`e${index}_action`], questions[`e${index}_action`]);
     const target =
       battle.heroes.length > 1
-        ? read_choice(answers[`e${index}_target`])
+        ? read_choice(answers[`e${index}_target`], questions[`e${index}_target`])
         : { choice: `hero:${battle.heroes[0]}`, confidence: 1 };
     min_confidence = Math.min(min_confidence, action.confidence, target.confidence);
     log[enemy.id] = { action, target };
@@ -90,10 +93,11 @@ function action_criteria(kit) {
   return criteria;
 }
 
-function read_choice(answer) {
+function read_choice(answer, question) {
   const choice = typeof answer?.choice === "string" ? answer.choice : "";
+  const offered = Object.hasOwn(question?.criteria ?? {}, choice);
   const confidence = typeof answer?.confidence === "number" ? answer.confidence : 0;
-  return { choice, confidence: choice.length > 0 ? confidence : 0 };
+  return { choice, confidence: offered === true ? confidence : 0 };
 }
 
 function ids_of(list) {

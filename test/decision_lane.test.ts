@@ -212,6 +212,32 @@ describe("decision_lane plugin", () => {
     expect(log[0]).toMatchObject({ outcome: "fallback", fallback_reason: "low_confidence" });
   });
 
+  it("treats a choice outside the offered options as confidence 0", async () => {
+    reply = (body) => ({
+      status: 200,
+      json: {
+        answers: Object.fromEntries(
+          Object.keys(body.questions).map((name) => [name, { type: "choice", choice: "enemy:boss", confidence: 0.99 }]),
+        ),
+      },
+    });
+    const dir = await game_dir(battle);
+    expect(await run_hook(dir, { mode: "act" })).toBeUndefined();
+    expect(await read_lines(path.join(dir, ".lich/game/orders.jsonl"))).toEqual([]);
+    const log = await read_lines(path.join(dir, ".lich/game/decisions.jsonl"));
+    expect(log[0]).toMatchObject({ outcome: "fallback", fallback_reason: "low_confidence", min_confidence: 0 });
+  });
+
+  it("falls back on a non-numeric threshold and keeps the log under .lich/game", async () => {
+    reply = confident(0.99);
+    const dir = await game_dir(battle);
+    expect(await run_hook(dir, { mode: "act", threshold: "high", log_file: "../escape.jsonl" })).toBeUndefined();
+    expect(await read_lines(path.join(dir, ".lich/game/orders.jsonl"))).toEqual([]);
+    expect(await read_lines(path.join(dir, ".lich/escape.jsonl"))).toEqual([]);
+    const log = await read_lines(path.join(dir, ".lich/game/decisions.jsonl"));
+    expect(log[0]).toMatchObject({ outcome: "fallback", fallback_reason: "invalid_threshold" });
+  });
+
   it("never bypasses the meteor veto", async () => {
     reply = confident(0.99);
     const dir = await game_dir({ round: 1, heroes: [{ id: "hero1" }], enemies: [{ id: "mage", kit: ["meteor"] }] });

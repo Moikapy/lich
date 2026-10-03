@@ -37,15 +37,16 @@ async function decide_round(info, ctx) {
   ctx.state?.set("decided_round", battle.round);
   const record = { ts: new Date().toISOString(), mode: settings.mode, model: settings.model, round: battle.round };
   try {
+    const questions = build_questions(battle);
     const { answers, latency_ms } = await systemone({
       base_url: settings.base_url,
       model: settings.model,
       state: { battle, request: last_user_text(info.messages) },
-      questions: build_questions(battle),
+      questions,
       timeout_ms: settings.timeout_ms,
       api_key: settings.api_key_env === undefined ? undefined : process.env[settings.api_key_env],
     });
-    const picked = pick_actions(battle, answers);
+    const picked = pick_actions(battle, questions, answers);
     Object.assign(record, { latency_ms, min_confidence: picked.min_confidence, answers: picked.log });
     return await act_on(picked, battle, settings, ctx, record);
   } catch (error) {
@@ -61,6 +62,9 @@ async function act_on(picked, battle, settings, ctx, record) {
   if (settings.mode !== "act") {
     record.outcome = "shadow";
     return undefined;
+  }
+  if (Number.isFinite(settings.threshold) === false) {
+    return fallback(record, "invalid_threshold");
   }
   if (picked.min_confidence < settings.threshold) {
     return fallback(record, "low_confidence");
@@ -98,8 +102,10 @@ function last_user_text(messages) {
 
 /** One JSONL line per decision; a log failure never breaks the run. */
 async function write_log(work_dir, log_file, record) {
+  // A bare file name only, so the log always stays under .lich/game.
+  const name = typeof log_file === "string" && log_file === path.basename(log_file) ? log_file : DEFAULT_SETTINGS.log_file;
   try {
-    const file = game_file(work_dir, log_file);
+    const file = game_file(work_dir, name);
     await mkdir(path.dirname(file), { recursive: true });
     await appendFile(file, `${JSON.stringify(record)}\n`, "utf8");
   } catch {
