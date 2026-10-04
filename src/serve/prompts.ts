@@ -19,7 +19,20 @@ import type { ServeSessionBag, ServeSessionStore } from "./sessions.js";
 export type ServeEventNotify = (notification: ServeEventNotification) => void;
 
 export interface ServePromptService {
-  submit(params: PromptSubmitParams, notify: ServeEventNotify): Promise<PromptSubmitResult>;
+  submit(
+    params: PromptSubmitParams,
+    notify: ServeEventNotify,
+    prepared?: AbortController,
+  ): Promise<PromptSubmitResult>;
+  /**
+   * Register an AbortController when a submit frame is accepted, before the
+   * per-connection queue reaches it. prompt.abort can then cancel that run
+   * while it is still waiting behind another frame. Optional so other
+   * implementations of this exported interface keep compiling.
+   */
+  prepare_submit?(session_id: string): AbortController;
+  /** Drop a controller from prepare_submit that never reached submit(). */
+  release_submit?(session_id: string, controller: AbortController): void;
   abort(params: PromptAbortParams): PromptAbortResult;
   /** Abort every in-flight run and forget the controllers (server stop). */
   abort_all(): void;
@@ -60,16 +73,22 @@ export function create_serve_prompt_service(
   }
 
   return {
-    submit: (params, notify) => {
+    submit: (params, notify, prepared) => {
       const bag_before = sessions.get(params.session_id);
       if (bag_before === undefined) {
+        if (prepared !== undefined) {
+          unregister_controller(params.session_id, prepared);
+        }
         throw new Error(`session not found: ${params.session_id}`);
       }
       const epoch_before = bag_before.epoch;
 
-      // Register before the queue wait so prompt.abort can cancel a queued run.
-      const controller = new AbortController();
-      register_controller(params.session_id, controller);
+      // A frame-queue prepare already registered this controller. Otherwise
+      // register before the run-queue wait so prompt.abort can cancel a queued run.
+      const controller = prepared ?? new AbortController();
+      if (prepared === undefined) {
+        register_controller(params.session_id, controller);
+      }
 
       return runs.enqueue(params.session_id, async () => {
         // Aborted while queued: return without starting the run.
@@ -124,6 +143,14 @@ export function create_serve_prompt_service(
         controller.abort();
       }
       return { session_id: params.session_id, aborted: true };
+    },
+    prepare_submit: (session_id) => {
+      const controller = new AbortController();
+      register_controller(session_id, controller);
+      return controller;
+    },
+    release_submit: (session_id, controller) => {
+      unregister_controller(session_id, controller);
     },
     abort_all: () => {
       for (const controllers of inflight.values()) {

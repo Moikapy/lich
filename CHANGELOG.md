@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `prompt.abort` cancels a `prompt.submit` already accepted on the same
+  socket but still waiting behind another frame, so a cancel issued during
+  resume, list, or another in-flight call cannot miss that run.
 - `lich serve` `prompt.submit` keeps completed tool turns in the session when a
   later model call throws, unless `session.clear` reset it mid-run.
 - Resuming a session killed mid tool call no longer fails at the provider:

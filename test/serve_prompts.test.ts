@@ -969,6 +969,87 @@ describe("serve prompt over websocket", () => {
     }
   });
 
+  it("prompt.abort cancels a submit still queued behind another frame", async () => {
+    const work_dir = await make_temp_dir("serve-ws-abort-queued");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_calls += 1;
+      if (fetch_calls > 1) {
+        return new Response(
+          JSON.stringify(completion_body({ role: "assistant", content: "should-not-run" }, "stop")),
+          { status: 200 },
+        );
+      }
+      fetch_started();
+      const signal = init?.signal;
+      await new Promise<void>((_resolve, reject) => {
+        const fail = (): void => {
+          const error = new Error("fetch aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (signal?.aborted === true) {
+          fail();
+          return;
+        }
+        signal?.addEventListener("abort", fail, { once: true });
+      });
+      throw new Error("unreachable");
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      session_dir,
+      agent,
+      version: "9.9.9",
+    });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session.create",
+        params: { source: "test" },
+      });
+      const session_id = (create_resp.result as { session_id: string }).session_id;
+      const first_submit = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id, text: "hang" },
+      });
+      await started;
+      const second_submit = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "prompt.submit",
+        params: { session_id, text: "queued" },
+      });
+      const abort_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "prompt.abort",
+        params: { session_id },
+      });
+      expect(abort_resp.result).toEqual({ session_id, aborted: true });
+      const first = await first_submit;
+      const second = await second_submit;
+      expect(first.result).toMatchObject({ session_id, stopped_reason: "aborted" });
+      expect(second.result).toMatchObject({ session_id, stopped_reason: "aborted" });
+      expect(fetch_calls).toBe(1);
+    } finally {
+      ws.close();
+    }
+  });
+
   it("binary prompt.abort bypasses the queue; a health frame that mentions abort does not", async () => {
     const work_dir = await make_temp_dir("serve-ws-abort-binary");
     const session_dir = path.join(work_dir, "sessions");

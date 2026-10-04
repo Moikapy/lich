@@ -244,8 +244,8 @@ function attach_client(
       inflight.delete(chain);
     });
   };
-  const run_frame = (data: RawData): Promise<void> =>
-    handle_client_message(client, data, version, sessions, prompts).catch((error: unknown) => {
+  const run_frame = (data: RawData, prepared?: PreparedSubmit): Promise<void> =>
+    handle_client_message(client, data, version, sessions, prompts, prepared).catch((error: unknown) => {
       logger.warn("serve client message handling failed", error);
     });
   client.on("message", (data) => {
@@ -253,23 +253,65 @@ function attach_client(
       track(Promise.resolve().then(() => run_frame(data)));
       return;
     }
-    const chain = tail.then(() => run_frame(data));
+    // Arm the controller before this frame waits on `tail`, so prompt.abort
+    // (which skips the tail) can cancel a submit that has not started yet.
+    const prepared = arm_queued_submit(data, prompts);
+    const chain = tail.then(() => run_frame(data, prepared));
     tail = chain;
     track(chain);
   });
 }
 
+interface PreparedSubmit {
+  session_id: string;
+  controller: AbortController;
+}
+
+/** Register a submit's AbortController as soon as its frame is accepted. */
+function arm_queued_submit(
+  data: RawData,
+  prompts: ServePromptService | undefined,
+): PreparedSubmit | undefined {
+  if (prompts === undefined) {
+    return undefined;
+  }
+  const session_id = prompt_submit_session_id(data);
+  if (session_id === undefined) {
+    return undefined;
+  }
+  const controller = prompts.prepare_submit?.(session_id);
+  return controller === undefined ? undefined : { session_id, controller };
+}
+
+/** session_id of a prompt.submit request, or undefined when this frame is not one. */
+function prompt_submit_session_id(data: RawData): string | undefined {
+  const body = parse_frame_object(data);
+  if (body === undefined || body.method !== "prompt.submit" || body.id === undefined) {
+    return undefined;
+  }
+  const params = body.params;
+  if (typeof params !== "object" || params === null || Array.isArray(params)) {
+    return undefined;
+  }
+  const session_id = (params as { session_id?: unknown }).session_id;
+  const text = (params as { text?: unknown }).text;
+  if (typeof session_id !== "string" || session_id.length === 0 || typeof text !== "string") {
+    return undefined;
+  }
+  return session_id;
+}
+
+function parse_frame_object(data: RawData): { method?: unknown; id?: unknown; params?: unknown } | undefined {
+  const parsed = safe_json_parse<unknown>(raw_data_to_string(data));
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return undefined;
+  }
+  return parsed as { method?: unknown; id?: unknown; params?: unknown };
+}
+
 /** True when this frame is prompt.abort (cancel must not wait on the run it cancels). */
 function is_prompt_abort_frame(data: RawData): boolean {
-  try {
-    const parsed = safe_json_parse<unknown>(raw_data_to_string(data));
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return false;
-    }
-    return (parsed as { method?: unknown }).method === "prompt.abort";
-  } catch {
-    return false;
-  }
+  return parse_frame_object(data)?.method === "prompt.abort";
 }
 
 async function handle_client_message(
@@ -278,20 +320,32 @@ async function handle_client_message(
   version: string,
   sessions: ServeSessionStore,
   prompts: ServePromptService | undefined,
+  prepared?: PreparedSubmit,
 ): Promise<void> {
+  let claimed = false;
   const notify = (notification: ServeEventNotification): void => {
     if (client.readyState === client.OPEN) {
       client.send(JSON.stringify(notification));
     }
   };
-  const reply = await handle_serve_rpc_message(raw_data_to_string(data), {
-    version,
-    sessions,
-    prompts,
-    notify,
-  });
-  if (reply !== undefined && client.readyState === client.OPEN) {
-    client.send(reply);
+  try {
+    const reply = await handle_serve_rpc_message(raw_data_to_string(data), {
+      version,
+      sessions,
+      prompts,
+      notify,
+      prepared_submit: prepared,
+      claim_prepared_submit: prepared === undefined ? undefined : () => {
+        claimed = true;
+      },
+    });
+    if (reply !== undefined && client.readyState === client.OPEN) {
+      client.send(reply);
+    }
+  } finally {
+    if (prepared !== undefined && claimed === false) {
+      prompts?.release_submit?.(prepared.session_id, prepared.controller);
+    }
   }
 }
 
