@@ -7,6 +7,7 @@
  */
 import type { Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
+import { history_after_run_error } from "../agent/loop.js";
 import type { Message } from "../providers/types.js";
 import { logger } from "../util/log.js";
 import { check_gateway_sender } from "./access.js";
@@ -97,6 +98,10 @@ export class GatewayBus {
       return final_reply_text(result.outcome.final?.content);
     } catch (error) {
       logger.error(`gateway bus run failed for ${key} (user ${user_id})`, error);
+      const kept = history_after_run_error(error);
+      if (kept !== undefined) {
+        this.histories.set(key, cap_history(kept, this.history_cap));
+      }
       return sanitize_agent_error(error);
     }
   }

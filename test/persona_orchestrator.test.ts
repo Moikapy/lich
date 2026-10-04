@@ -12,7 +12,7 @@ import { persona_by_id, PERSONA_TABLE } from "../examples/persona_orchestrator/p
 import { reply_text, round_fate } from "../examples/persona_orchestrator/reply.js";
 import { DEFAULT_MAX_BODY_BYTES, host_is_loopback, start_persona_server } from "../examples/persona_orchestrator/server.js";
 import type { AgentFactory, AgentLikeResult, PersonaEntry, SharedAgentDefaults } from "../examples/persona_orchestrator/types.js";
-import { cap_history, enqueue } from "../examples/persona_orchestrator/history_queue.js";
+import { cap_history, enqueue, history_after_run_error } from "../examples/persona_orchestrator/history_queue.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
@@ -318,6 +318,41 @@ describe("persona orchestrator", () => {
     const capped = cap_history(messages, 2);
     expect(capped.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool"]);
     expect(capped.map((message) => message.content)).toEqual(["(earlier conversation trimmed)", "a1", "r1", "r2"]);
+  });
+
+  it("keeps completed tool turns when the agent throws", async () => {
+    const seen: Array<readonly unknown[]> = [];
+    let calls = 0;
+    const factory: AgentFactory = async () => ({
+      run: async (options) => {
+        calls += 1;
+        const history = options.history ?? [];
+        seen.push(history);
+        if (calls === 1) {
+          const error = new Error("provider down");
+          Object.defineProperty(error, "lich_partial_messages", {
+            value: [
+              { role: "user", content: "go" },
+              { role: "assistant", content: "", tool_calls: [{ id: "t1" }] },
+              { role: "tool", content: "file-body" },
+            ],
+            enumerable: false,
+          });
+          throw error;
+        }
+        return echo_result(options.input, history);
+      },
+    });
+    const orchestrator = create_orchestrator({
+      factory,
+      shared: shared_for(await make_temp_dir()),
+      personas: PERSONA_TABLE,
+    });
+    const first = await orchestrator.handle("webhook", "npc:commander:run-1", "go");
+    expect(first.reply.includes("provider down")).toBe(true);
+    await orchestrator.handle("webhook", "npc:commander:run-1", "again");
+    expect(seen[1]?.some((message) => (message as { content?: string }).content === "file-body")).toBe(true);
+    expect(history_after_run_error(new Error("plain"))).toBeUndefined();
   });
 
   it("cap_history drops a leading tool fragment and keeps the next assistant", () => {
