@@ -47,7 +47,7 @@ const result = await run_agent(
 
 ## Agent class
 
-`new Agent(config)` (or `create_agent(raw)`) builds the provider router, registers the builtin tools (filtered by `tools_enabled`) plus the gatekeeper's `git_commit`, and exposes:
+`new Agent(config)` (or `create_agent(raw)`) builds the provider router, registers the builtin tools and the gatekeeper's `git_commit` (all filtered by `tools_enabled`), and exposes:
 
 | Member | Type | Purpose |
 | --- | --- | --- |
@@ -146,7 +146,7 @@ Listed providers form a failover chain tried in order: `rate_limit`/`network` er
 
 ## Custom tool filtering
 
-`tools_enabled` accepts `"all"` (default) or an array of tool names to register; everything else stays unregistered and invisible to the model. MCP tools, when a named server is `enabled`, use the same allowlist and stay off when the list is `[]` (that empty list does not connect). The filter does not apply to plugin tools: they register afterward, including the gatekeeper's `git_commit` (fail-closed unless `LICH_ALLOW_SELF_COMMIT=1`). `[]` strips every builtin and every MCP tool and does not throw.
+`tools_enabled` accepts `"all"` (default) or an array of tool names to register; everything else stays unregistered and invisible to the model. MCP tools, when a named server is `enabled`, use the same allowlist and stay off when the list is `[]` (that empty list does not connect). The same list applies to plugin tools, including the gatekeeper's `git_commit` (fail-closed unless `LICH_ALLOW_SELF_COMMIT=1`), so list each plugin tool you want exposed. `[]` exposes no tools and does not throw.
 
 `mcp_servers` and `catalog_client_entry` ship in this package (since 0.7.0). See the [Redot guide](redot.md).
 

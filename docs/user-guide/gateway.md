@@ -152,7 +152,7 @@ The gateway agent ignores top-level `tools_enabled` and uses `gateway.tools_enab
 
 `read_file`, `list_dir`, `grep_files`, `fetch_url`, `web_search`, `docs_read`, `docs_search`
 
-Set `"gateway": { "tools_enabled": "all" }` (or an explicit name list) only when you intentionally want writes / `terminal` on chat platforms.
+Set `"gateway": { "tools_enabled": "all" }` (or an explicit name list) only when you intentionally want writes / `terminal` on chat platforms. The list applies to plugin tools too: add each plugin tool name (for example `enemy_actions`) that chat users may trigger.
 
 ## Running multiple platforms at once
 

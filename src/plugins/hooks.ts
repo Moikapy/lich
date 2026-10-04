@@ -2,8 +2,9 @@
  * HookedToolRunner: wraps the ToolExecutor with plugin hooks.
  *
  * before_tool_call hooks run in registration order and may veto a call (first
- * blocker wins; the wrapped executor is never called). Hook errors are warned
- * and skipped, never fatal. after_tool_call hooks observe the result summary
+ * blocker wins; the wrapped executor is never called). A before_tool_call hook
+ * that throws blocks the call (fail closed); other hook errors are warned and
+ * skipped, never fatal. after_tool_call hooks observe the result summary
  * plus the executor's structured ok/error fields. Every hook invocation
  * receives a ctx exposing only its own plugin's state sub-map: bags are keyed
  * per AsyncLocalStorage run scope (M-6) with a WeakMap fallback for tests that
@@ -136,7 +137,9 @@ export class HookedToolRunner {
           return verdict;
         }
       } catch (hook_error) {
-        logger.warn(`plugin before_tool_call hook threw for ${info.tool_name}; continuing`, hook_error);
+        // Fail closed: a broken guard must not silently allow the call.
+        logger.warn(`plugin ${plugin.name} before_tool_call hook threw for ${info.tool_name}; blocking`, hook_error);
+        return { block: true, reason: "hook_error" };
       }
     }
     return {};

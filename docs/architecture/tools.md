@@ -219,8 +219,8 @@ instructions. See the [plugins guide](../user-guide/plugins.md#skills-and-memory
   `filter_registry` (src/agent/agent.ts) iterates `base.list()` and registers
   only allowed names onto a new `ToolRegistry` when `tools_enabled` is a list
   (`"all"` returns the base registry untouched). Plugin tools, including the
-  gatekeeper's `git_commit`, register after that filter, so `tools_enabled: []`
-  still leaves `git_commit`. MCP tools register later, on first `run()`, and
+  gatekeeper's `git_commit`, register after that filter and are skipped when a
+  list does not name them. MCP tools register later, on first `run()`, and
   only when the allowlist is `"all"` or names an `mcp_` tool.
 
 For building your own tool, see [extending](./extending.md#add-a-builtin-tool).

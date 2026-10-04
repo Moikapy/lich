@@ -174,7 +174,8 @@ describe("cli plugin load", () => {
         ? completion_body(tool_call_body("t1", "plugin_echo", { text: calls === 1 ? "hello" : "bus" }), "tool_calls")
         : completion_body({ role: "assistant", content: "done" }, "stop");
     });
-    const { agent, bus } = await create_gateway_bus(parse_agent_config(mock_config(work_dir, fetch_fn)));
+    const config = mock_config(work_dir, fetch_fn, { gateway: { tools_enabled: ["plugin_echo"] } });
+    const { agent, bus } = await create_gateway_bus(parse_agent_config(config));
     expect(tool_content(await agent.run({ input: "echo" }))).toBe("plugin_echo: hello");
     const ended: string[] = [];
     agent.events.on((event) => {

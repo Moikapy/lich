@@ -18,7 +18,7 @@ export const PERSONA_TABLE: readonly PersonaEntry[] = [
   {
     persona_id: "commander",
     system_prompt: COMMANDER_PROMPT,
-    tools_enabled: [],
+    tools_enabled: ["enemy_actions", "dungeon_memory_read", "dungeon_memory_write"],
     max_turns: 8,
     max_tokens: 800,
     context_budget_tokens: 12000,

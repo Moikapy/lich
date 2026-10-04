@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Breaking:** a `tools_enabled` list (top-level or `gateway.tools_enabled`)
+  now filters plugin tools too, including the gatekeeper's `git_commit`. List
+  each plugin tool you want exposed; `"all"` is unchanged. Previously plugin
+  tools always registered, so gateway chat users could reach every plugin tool.
+- A `before_tool_call` hook that throws now blocks that call
+  (`blocked_by_plugin: hook_error`) instead of silently allowing it.
+- Tools the model requests on the `max_turns` turn no longer run, since the
+  model never sees their results; they are closed with a
+  `turn_budget_exhausted` tool result so the history stays valid (#133).
 - `prompt.abort` cancels a `prompt.submit` already accepted on the same
   socket but still waiting behind another frame, so a cancel issued during
   resume, list, or another in-flight call cannot miss that run.

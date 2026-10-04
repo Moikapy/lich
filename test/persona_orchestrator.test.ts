@@ -126,9 +126,7 @@ describe("persona orchestrator", () => {
     expect(system_prompt_of(seen[1])).toBe(persona_by_id(PERSONA_TABLE, "chronicler")?.system_prompt);
     const commander_tools = tool_names(seen[0]);
     expect(commander_tools.filter((name) => BUILTIN_NAMES.includes(name))).toEqual([]);
-    expect(commander_tools).toEqual(
-      expect.arrayContaining(["enemy_actions", "dungeon_memory_read", "dungeon_memory_write", "git_commit"]),
-    );
+    expect([...commander_tools].sort()).toEqual(["dungeon_memory_read", "dungeon_memory_write", "enemy_actions"]);
     const chronicler_tools = tool_names(seen[1]);
     expect(chronicler_tools).toContain("read_file");
     expect(chronicler_tools).not.toContain("terminal");

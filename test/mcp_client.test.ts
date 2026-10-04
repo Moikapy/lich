@@ -425,7 +425,7 @@ describe("mcp tool disablement", () => {
       throw new Error("missing commander");
     }
     const raw = persona_config({ providers, work_dir }, commander);
-    expect(raw.tools_enabled).toEqual([]);
+    expect(raw.tools_enabled).toEqual(["enemy_actions", "dungeon_memory_read", "dungeon_memory_write"]);
     expect(raw).not.toHaveProperty("mcp_servers");
     expect(raw.plugins).toEqual(["./examples/game_bridge/game_bridge.plugin.mjs"]);
     const seen = await visible_tools({ ...raw, work_dir }, boom_spawn());
