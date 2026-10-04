@@ -19,7 +19,7 @@ confidence: medium
 - **Modes.** `shadow` (default) only logs. `act` queues orders when every answer clears `threshold`, and returns a one-call note ([[lich-plugins-and-hooks]]). It decides each round once per run (`examples/decision_lane/decision_lane.plugin.mjs:31-61@cbdf58e`).
 - **Guard rule.** Act-mode orders go through game_bridge's own `meteor_veto` and `enemy_actions` validation (`decision_lane.plugin.mjs:77,81@cbdf58e`). The verdict can add an order those checks accept; it cannot bypass them. Low confidence, a non-numeric threshold, a veto, a rejected order or any request failure falls back to the LLM, and the hook never throws.
 - **Log.** One JSONL line per decision in `.lich/game/decisions.jsonl`: picks, confidences, latency, outcome, fallback reason. The file name must be bare, so it stays under `.lich/game` (`decision_lane.plugin.mjs:104@cbdf58e`).
-- **Egress.** With the default local Ollama nothing leaves the machine; Ollama serves decision models locally only ^[raw/audits/2026-10-03-ollama-systemone-clef.md]. Another `base_url` receives the snapshot and the last user message (capped at 2000 chars).
+- **Egress.** With the default local Ollama nothing leaves the machine; Ollama serves decision models locally only ^[raw/audits/2026-10-03-ollama-systemone-clef.md]. Another `base_url` receives the snapshot and the last user message (capped at 2000 chars), plus `Authorization: Bearer <key>` when `api_key_env` is set (`decision_lane.plugin.mjs:47@cbdf58e`).
 
 ## Limits
 
