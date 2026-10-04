@@ -272,8 +272,9 @@ describe("load_layered_config", () => {
     expect(current?.notes).toEqual([]);
   });
 
-  it("does not merge ~/.lich/config.json over itself when the work_dir is the home directory", () => {
+  it("does not merge ~/.lich/config.json over itself, or the legacy file under it, when the work_dir is home", () => {
     write_json(global_config_path(), { agent_name: "home" });
+    write_json(path.join(home, ".config", "lich", "config.json"), { theme: "legacy" });
     const layered = load_layered_config(home);
     expect(layered?.config).toEqual({ agent_name: "home" });
     expect(layered?.sources).toEqual([global_config_path()]);

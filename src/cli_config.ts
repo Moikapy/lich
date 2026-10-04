@@ -88,17 +88,16 @@ export interface LayeredConfig {
  */
 export function load_layered_config(work_dir: string): LayeredConfig | undefined {
   const project_path = project_config_path(work_dir);
+  const global_path = global_config_path();
+  const legacy = path.resolve(homedir(), LEGACY_USER_CONFIG);
   const notes: string[] = [];
   let base_path: string | undefined;
-  for (const candidate of config_search_paths(work_dir).slice(1)) {
-    if (candidate !== project_path && existsSync(candidate) === true) {
-      base_path = candidate;
-      break;
-    }
-  }
-  const legacy = path.resolve(homedir(), LEGACY_USER_CONFIG);
-  if (base_path === legacy) {
-    notes.push(`lich: reading ${legacy}; move it to ${global_config_path()} (the old location is read-only)`);
+  if (existsSync(global_path) === true) {
+    // When work_dir is home, the global file is the project file: no base layer.
+    base_path = global_path === project_path ? undefined : global_path;
+  } else if (existsSync(legacy) === true) {
+    base_path = legacy;
+    notes.push(`lich: reading ${legacy}; move it to ${global_path} (the old location is read-only)`);
   }
   const project = existsSync(project_path) === true ? read_config_object(project_path) : undefined;
   const base = base_path === undefined ? undefined : global_layer(read_config_object(base_path), path.dirname(base_path));
