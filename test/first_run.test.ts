@@ -9,28 +9,17 @@ import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const writes = vi.hoisted(() => ({ calls: [] as Array<{ work_dir: string; config: Record<string, unknown> }> }));
 const wizard = vi.hoisted(() => ({ cancel: false, lines: [] as string[] }));
-const tui_run = vi.hoisted(() => ({ configs: [] as Array<{ providers?: Array<{ model?: string }> }> }));
+const tui_run = vi.hoisted(() => ({ configs: [] as Array<{ agent_name?: string; max_turns?: number; providers?: Array<{ model?: string }> }> }));
 const gateway_run = vi.hoisted(() => ({
   fn: vi.fn(async (_config: unknown, _platforms: readonly string[]) => 0),
 }));
 vi.mock("../src/cli_config.js", async (import_original) => {
-  const path_mod = await import("node:path");
-  const fs_mod = await import("node:fs");
   const actual = await import_original<typeof import("../src/cli_config.js")>();
   return {
     ...actual,
     write_lich_config: (work_dir: string, config: Record<string, unknown>) => {
       writes.calls.push({ work_dir, config });
       return actual.write_lich_config(work_dir, config);
-    },
-    existing_config_path: (work_dir: string) => {
-      const [project] = actual.config_search_paths(work_dir);
-      const found = actual.existing_config_path(work_dir);
-      if (found !== undefined && found === project) {
-        return found;
-      }
-      const absent_home = path_mod.resolve(work_dir, "missing-home-config.json");
-      return fs_mod.existsSync(absent_home) === true ? absent_home : undefined;
     },
   };
 });
@@ -126,6 +115,9 @@ beforeEach(() => {
     saved_env[key] = process.env[key];
     delete process.env[key];
   }
+  // An empty HOME per test, so a real ~/.lich or ~/.config/lich never leaks in.
+  saved_env["HOME"] = process.env.HOME;
+  process.env.HOME = make_temp_dir("home");
 });
 
 afterEach(() => {
@@ -373,10 +365,13 @@ describe("lich init and bare lich", () => {
     }
   });
 
-  it("pins a home-config skip into the load instead of a later discovery", async () => {
+  it("skips setup on a global ~/.lich/config.json and loads it for --work-dir, not the cwd project", async () => {
     const dir = make_temp_dir("pin-home");
-    const home = path.join(dir, "missing-home-config.json");
-    writeFileSync(home, JSON.stringify({ providers: [{ kind: "ollama", name: "main", model: "from-home" }] }));
+    const global_dir = path.join(String(process.env.HOME), ".lich");
+    mkdirSync(global_dir, { recursive: true });
+    writeFileSync(path.join(global_dir, "config.json"), JSON.stringify({
+      providers: [{ kind: "ollama", name: "main", model: "from-home" }],
+    }));
     const cwd_dir = make_temp_dir("pin-cwd");
     mkdirSync(path.join(cwd_dir, ".lich"), { recursive: true });
     writeFileSync(path.join(cwd_dir, ".lich", "config.json"), JSON.stringify({
@@ -394,6 +389,32 @@ describe("lich init and bare lich", () => {
       expect(existsSync(project_config_path(dir))).toBe(false);
     } finally {
       process.chdir(previous);
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("bare lich merges the project config over the global one", async () => {
+    const dir = make_temp_dir("merge");
+    const global_dir = path.join(String(process.env.HOME), ".lich");
+    mkdirSync(global_dir, { recursive: true });
+    writeFileSync(path.join(global_dir, "config.json"), JSON.stringify({
+      agent_name: "wight",
+      max_turns: 7,
+      providers: [{ kind: "ollama", name: "main", model: "from-home" }],
+    }));
+    mkdirSync(path.join(dir, ".lich"), { recursive: true });
+    writeFileSync(project_config_path(dir), JSON.stringify({ max_turns: 3 }));
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["--work-dir", dir])).toBe(0);
+      expect(writes.calls).toHaveLength(0);
+      const config = tui_run.configs[0];
+      expect(config?.agent_name).toBe("wight");
+      expect(config?.max_turns).toBe(3);
+      expect(config?.providers?.[0]?.model).toBe("from-home");
+    } finally {
       stdout.mockRestore();
       restore_tty();
     }

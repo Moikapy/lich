@@ -40,7 +40,7 @@ lich config > .lich/config.json
 # edit .lich/config.json and replace "<model-name>"
 ```
 
-`lich config` honors `LICH_PROVIDER_KIND` and `LICH_MODEL` when you have them set, and otherwise prints an ollama-oriented template. The file is picked up automatically from `.lich/config.json` in the working directory (or `~/.config/lich/config.json` as a fallback) — after this, plain `lich "task"` needs no env vars.
+`lich config` honors `LICH_PROVIDER_KIND` and `LICH_MODEL` when you have them set, and otherwise prints an ollama-oriented template. The file is picked up automatically from `.lich/config.json` in the working directory, merged over `~/.lich/config.json` if you keep defaults there — after this, plain `lich "task"` needs no env vars.
 
 `lich init` writes that same starter file for you (it creates `.lich/` and never overwrites an existing `.lich/config.json`). Bare `lich` on a TTY, with no config in that search chain, runs a setup wizard and writes `.lich/config.json` once before opening the TUI. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. Non-TTY stdin skips the wizard. `.lich/` is gitignored.
 
@@ -50,7 +50,7 @@ lich config > .lich/config.json
 lich --config ./lich.json "Reply with ok"
 ```
 
-The full schema is documented in [the CLI reference](user-guide/cli.md#config-file-reference). Search order: `--config` path first (must exist), then `./.lich/config.json`, then `~/.config/lich/config.json`.
+The full schema is documented in [the CLI reference](user-guide/cli.md#config-file-reference). Search order: a `--config` path (must exist) is used alone; otherwise `./.lich/config.json` is merged over `~/.lich/config.json` (see [Global config](user-guide/cli.md#global-config)).
 
 ## Your first one-shot
 

@@ -24,7 +24,7 @@ lich --help            # usage text
 lich --version         # package.json version (published package and this tree: 0.8.0)
 ```
 
-- **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if neither `.lich/config.json` nor `~/.config/lich/config.json` exists, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. An existing config in that chain skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
+- **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if none of `.lich/config.json`, `~/.lich/config.json` or the legacy `~/.config/lich/config.json` exists, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. An existing config in that chain skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
 - **`lich init`** writes that starter file without prompts, using the same writer as the wizard. Existing flags such as `--model` are written into the file and win over `LICH_MODEL`. It never overwrites an existing `.lich/config.json`. `.lich/` is gitignored.
 - **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr. Ctrl+C cancels the run (exit `1`); a second Ctrl+C quits at once (exit `130`).
 - **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer. Ctrl+C cancels the running turn and keeps the session; at the prompt it ends chat. A second Ctrl+C while a turn is still cancelling quits at once (exit `130`).
@@ -69,7 +69,7 @@ Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a posit
 The effective provider for a run is decided in this order:
 
 1. If `--config <path>` was passed, that file is the whole configuration (it must exist and be a JSON object, or the CLI fails with `cannot use config file <path>: ...`).
-2. Otherwise the discovery chain is walked: `./.lich/config.json`, then `~/.config/lich/config.json`. The first file found becomes the config. `LICH_*` env vars are *not* merged into a discovered file.
+2. Otherwise the project file `./.lich/config.json` (under `--work-dir` when given) is merged over the global file `~/.lich/config.json`. Either one alone is enough. `LICH_*` env vars are *not* merged into a discovered file. See [Global config](#global-config).
 3. If no config file exists, one is built from the environment: `--provider-kind` / `LICH_PROVIDER_KIND` (default `openai_compat`), `--model` / `LICH_MODEL` (required — without it the CLI fails with `no model configured`), `--base-url` / `LICH_BASE_URL`, and `--api-key-env` / `LICH_API_KEY_ENV`, each falling back to the per-kind defaults below.
 4. Provider override flags (`--model`, `--provider-kind`, `--base-url`, `--api-key-env`) always win over the chosen source: with a config file present they patch `providers[0]` in place; without one they seed a fresh provider from the environment.
 
@@ -80,6 +80,19 @@ Per-kind defaults:
 | `openai_compat` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | Works with any OpenAI-shaped `/chat/completions` API. |
 | `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | |
 | `ollama` | `http://localhost:11434` | none | No key needed locally; `api_key`/`api_key_env` are sent as a Bearer header when set, which Ollama cloud (`https://ollama.com`, `OLLAMA_API_KEY`) requires. |
+
+## Global config
+
+`~/.lich/config.json` holds defaults for every project: provider, model, `agent_name`, `max_turns`, gateway settings, plugins and so on. A project `.lich/config.json` overrides it key by key:
+
+- **Shallow merge, project wins.** A top-level key in the project file replaces the global value whole. `gateway` and `mcp_servers` are not merged entry by entry.
+- **`providers`:** a project `providers` array replaces the global one. The global `models` role chains are then dropped (they name the global providers) unless the project sets its own `models`.
+- **Per-project keys:** `work_dir` and `session_dir` in the global file are ignored.
+- **Paths:** relative `plugins` paths in the global file resolve against `~/.lich/`. MCP `command` and `args` are used as written.
+- **Legacy location:** `~/.config/lich/config.json` is still read when `~/.lich/config.json` is absent, with a one-line hint to move it. Lich never writes there.
+- **`--config <path>`** replaces the whole chain; nothing is merged.
+
+`lich init`, the setup wizard and `lich mcp` write only the project file.
 
 ## Config file reference
 

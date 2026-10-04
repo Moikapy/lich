@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Global defaults live in `~/.lich/config.json`. A project `.lich/config.json`
+  is merged over it key by key instead of hiding it (#117). A project
+  `providers` array replaces the global one and drops the global `models`
+  unless the project sets its own. `work_dir` and `session_dir` in the global
+  file are ignored, and its relative plugin paths resolve against `~/.lich/`.
+  The old `~/.config/lich/config.json` is read only when `~/.lich/config.json`
+  is absent, with a hint to move it. **Behavior change:** before, a project
+  file hid the user file entirely; now its unset keys come from the global file.
 - Ctrl+C in a one-shot run or in `lich chat` cancels the run or turn
   through its abort signal; chat keeps the session and returns to the prompt.
   A second Ctrl+C quits at once (exit `130`). In the TUI, Esc cancels a running

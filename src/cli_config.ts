@@ -9,7 +9,10 @@ import { safe_json_parse } from "./util/json.js";
 
 const LICH_DIRNAME = ".lich";
 const CONFIG_RELPATH = `${LICH_DIRNAME}/config.json`;
-const DEFAULT_USER_CONFIG = ".config/lich/config.json";
+/** Read only when `~/.lich/config.json` is absent; never written. */
+const LEGACY_USER_CONFIG = ".config/lich/config.json";
+/** Keys that stay per project: a global layer never sets them. */
+const PROJECT_ONLY_KEYS = ["work_dir", "session_dir"] as const;
 
 export type ProviderKind = "openai_compat" | "anthropic" | "ollama";
 
@@ -36,12 +39,19 @@ function parse_template_kind(raw: string): ProviderKind {
   return "ollama";
 }
 
-/** Ordered absolute chain: work_dir (default cwd) first, then the user config home. */
+/** The global default config: `~/.lich/config.json`. */
+export function global_config_path(): string {
+  return path.resolve(homedir(), CONFIG_RELPATH);
+}
+
+/**
+ * Ordered absolute chain: the work_dir (default cwd) project config, the
+ * global `~/.lich/config.json`, then the legacy `~/.config/lich/config.json`.
+ */
 export function config_search_paths(work_dir?: string): string[] {
   const root = work_dir ?? process.cwd();
-  const first = path.resolve(root, CONFIG_RELPATH);
-  const second = path.resolve(homedir(), DEFAULT_USER_CONFIG);
-  return first === second ? [first] : [first, second];
+  const chain = [path.resolve(root, CONFIG_RELPATH), global_config_path(), path.resolve(homedir(), LEGACY_USER_CONFIG)];
+  return chain.filter((entry, index) => chain.indexOf(entry) === index);
 }
 
 /** Explicit path must exist (else throw); otherwise walk the chain, undefined when absent. */
@@ -61,6 +71,87 @@ export function load_config(explicit?: string): Record<string, unknown> | undefi
   if (found === undefined) {
     return undefined;
   }
+  return read_config_object(found);
+}
+
+export interface LayeredConfig {
+  config: Record<string, unknown>;
+  /** Files merged, base first. */
+  sources: string[];
+  /** One-line notices for the user (for example, the legacy location in use). */
+  notes: string[];
+}
+
+/**
+ * Project `.lich/config.json` merged over the global base (`~/.lich/config.json`,
+ * else the legacy `~/.config/lich/config.json`). Undefined when neither exists.
+ */
+export function load_layered_config(work_dir: string): LayeredConfig | undefined {
+  const project_path = project_config_path(work_dir);
+  const notes: string[] = [];
+  let base_path: string | undefined;
+  for (const candidate of config_search_paths(work_dir).slice(1)) {
+    if (candidate !== project_path && existsSync(candidate) === true) {
+      base_path = candidate;
+      break;
+    }
+  }
+  const legacy = path.resolve(homedir(), LEGACY_USER_CONFIG);
+  if (base_path === legacy) {
+    notes.push(`lich: reading ${legacy}; move it to ${global_config_path()} (the old location is read-only)`);
+  }
+  const project = existsSync(project_path) === true ? read_config_object(project_path) : undefined;
+  const base = base_path === undefined ? undefined : global_layer(read_config_object(base_path), path.dirname(base_path));
+  if (project === undefined && base === undefined) {
+    return undefined;
+  }
+  const sources = [base_path, project === undefined ? undefined : project_path].filter(
+    (entry): entry is string => entry !== undefined,
+  );
+  return { config: merge_config_layers(base ?? {}, project ?? {}), sources, notes };
+}
+
+/**
+ * Shallow merge, project wins per key. A project `providers` array replaces
+ * the base's; the base `models` is then dropped unless the project sets its
+ * own, since its role chains name the base's providers.
+ */
+export function merge_config_layers(
+  base: Record<string, unknown>,
+  project: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...base, ...project };
+  if (Object.hasOwn(project, "providers") === true && Object.hasOwn(project, "models") === false) {
+    delete merged["models"];
+  }
+  return merged;
+}
+
+/**
+ * A global file as a base layer: per-project keys are ignored, and relative
+ * plugin paths resolve against the file's own directory instead of the project.
+ */
+function global_layer(config: Record<string, unknown>, home: string): Record<string, unknown> {
+  const layer = { ...config };
+  for (const key of PROJECT_ONLY_KEYS) {
+    delete layer[key];
+  }
+  const plugins = layer["plugins"];
+  if (Array.isArray(plugins) === true) {
+    layer["plugins"] = plugins.map((entry: unknown) => {
+      if (typeof entry === "string") {
+        return path.resolve(home, entry);
+      }
+      if (typeof entry === "object" && entry !== null && typeof (entry as { path?: unknown }).path === "string") {
+        return { ...entry, path: path.resolve(home, (entry as { path: string }).path) };
+      }
+      return entry;
+    });
+  }
+  return layer;
+}
+
+function read_config_object(found: string): Record<string, unknown> {
   const raw = readFileSync(found, "utf8");
   const parsed = safe_json_parse<unknown>(raw);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
