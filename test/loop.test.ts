@@ -137,6 +137,8 @@ describe("run_conversation", () => {
     expect(outcome.stopped_reason).toBe("budget");
     expect(calls).toHaveLength(1);
     expect(event_types(events).filter((type) => type === "tool_call_start")).toHaveLength(1);
+    const skipped = events.filter((event) => event.type === "tool_call_end").at(-1);
+    expect(skipped).toMatchObject({ type: "tool_call_end", turn: 2, cancelled: true, result: { error: "turn_budget_exhausted" } });
     const last = outcome.messages.at(-1);
     expect(last).toMatchObject({ role: "tool", tool_call_id: "late", is_error: true });
     expect(last?.content).toContain("turn_budget_exhausted");

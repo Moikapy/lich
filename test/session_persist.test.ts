@@ -109,6 +109,13 @@ describe("session run_end", () => {
     expect(events.some((record) => record.meta?.event === "budget_exhausted")).toBe(true);
     const run_end = events.find((record) => record.meta?.event === "run_end");
     expect(run_end?.meta).toMatchObject({ event: "run_end", stopped_reason: "budget", usage: result.usage_total });
+    // Raw JSONL, not read_session_messages (which would fill a missing result itself).
+    const raw = await readFile(result.session_path ?? "", "utf8");
+    const tool_lines = raw
+      .split("\n")
+      .filter((line) => line.includes('"role":"tool"'));
+    expect(tool_lines).toHaveLength(1);
+    expect(tool_lines[0]).toContain("turn_budget_exhausted");
   });
 
   it("appends run_end when the run is aborted before a turn", async () => {

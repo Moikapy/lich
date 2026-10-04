@@ -178,10 +178,20 @@ async function call_chat(
   }
 }
 
-/** Close final-turn tool calls with not-run results so the history stays valid for resume. */
-function skip_tool_calls(history: Message[], calls: readonly ToolCall[]): void {
+/**
+ * Close final-turn tool calls with not-run results so the history stays valid
+ * for resume; tool_call_end (as on the abort path) lets the recorder persist them.
+ */
+function skip_tool_calls(
+  history: Message[],
+  turn: number,
+  calls: readonly ToolCall[],
+  emitter: AgentEmitter | undefined,
+): void {
+  const skipped: ToolResult = { ok: false, output: "", error: "turn_budget_exhausted" };
   for (const call of calls) {
-    history.push(tool_message_from_result(call, { ok: false, output: "", error: "turn_budget_exhausted" }));
+    history.push(tool_message_from_result(call, skipped));
+    emitter?.emit({ type: "tool_call_end", turn, call, result: skipped, cancelled: true });
   }
 }
 
@@ -388,7 +398,7 @@ export async function run_conversation(
     }
     if (turn === params.max_turns) {
       // The model gets no turn to read results, so do not run side effects it cannot see.
-      skip_tool_calls(history, calls);
+      skip_tool_calls(history, turn, calls, emitter);
       break;
     }
     const tool_status = await run_tool_calls(deps, history, turn, calls, emitter, params.signal);

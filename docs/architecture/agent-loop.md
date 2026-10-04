@@ -36,8 +36,9 @@ stateDiagram-v2
     Aborted : error event, stopped_reason = aborted
     Aborted --> [*]
     note right of Final
-      budget path: after the last allowed turn
-      budget_exhausted then turn_end, stopped_reason = budget
+      budget path: tool calls on the last allowed turn are not run
+      (cancelled tool_call_end each), then budget_exhausted then turn_end,
+      stopped_reason = budget
     end note
 ```
 
@@ -62,7 +63,10 @@ export interface LoopOutcome {
 **`max_turns` is an LLM-call budget, not a tool budget.** Each iteration makes
 exactly one LLM call; the tool executions between turns are free - a turn that
 calls three tools still consumes one turn. A model that always asks for tools
-will run out of budget even though the tools all succeeded.
+will run out of budget even though the tools all succeeded. Tool calls the model
+requests on the last allowed turn are not executed, since no turn is left to read
+their results: each is closed with a `turn_budget_exhausted` tool result and a
+`tool_call_end` with `cancelled: true`.
 
 **Stopping conditions**, exactly as implemented:
 
@@ -95,7 +99,7 @@ swallowed; handlers may unsubscribe mid-emit (the emitter iterates a snapshot).
 | `llm_start` | `{ turn }` | Just before the chat call | Exactly one per LLM call |
 | `llm_end` | `{ turn, result }` | Chat call resolved | Pairs with `llm_start`; never fires if the call throws |
 | `tool_call_start` | `{ turn, call }` | Before each tool executes | After `llm_end`, sequential per call |
-| `tool_call_end` | `{ turn, call, result, cancelled? }` | After that tool resolves, or when abort skips a pending call | Normally pairs with `tool_call_start`; cancelled skips emit `cancelled: true` with no start |
+| `tool_call_end` | `{ turn, call, result, cancelled? }` | After that tool resolves, or when abort or the last-turn budget skips a call | Normally pairs with `tool_call_start`; skipped calls emit `cancelled: true` with no start |
 | `final` | `{ message, result }` | A turn produced no tool calls | At most once per run; only on a real final |
 | `budget_exhausted` | `{ turns_used }` | Loop exits without a final | Follows the last `tool_call_end` |
 | `turn_end` | `{ turn }` | Last event of a turn | After `final` **or** after `budget_exhausted` |
