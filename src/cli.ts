@@ -8,6 +8,7 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./agent/agent.js";
+import { history_after_run_error } from "./agent/loop.js";
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import type { EnvelopedAgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
@@ -469,7 +470,7 @@ async function run_chat_turn(agent: Agent, input: string, history: readonly Mess
     return result.messages;
   } catch (error) {
     process.stderr.write(`[lich] ${error_message(error)}\n`);
-    return [...history];
+    return history_after_run_error(error) ?? [...history];
   } finally {
     stop_progress();
   }

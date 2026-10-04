@@ -183,6 +183,30 @@ describe("S-8 grep_files ReDoS caps", () => {
     expect(meta.ok).toBe(true);
     expect(meta.output).toContain("cols.txt:1:");
   });
+
+  it("matches only inside the first 4000 characters of a long line", async () => {
+    const work = await make_temp_dir();
+    const inside = `${"a".repeat(3990)}NEEDLE${"b".repeat(200)}`;
+    const straddling = `${"a".repeat(3995)}NEEDLE${"b".repeat(200)}`;
+    const past = `${"c".repeat(4100)}NEEDLE`;
+    const regex_inside = `${"d".repeat(100)}QUACK${"e".repeat(4000)}`;
+    const regex_past = `${"f".repeat(4100)}QUACK`;
+    await writeFile(
+      path.join(work, "lines.txt"),
+      `${inside}\n${straddling}\n${past}\n${regex_inside}\n${regex_past}\n`,
+      "utf8",
+    );
+    const executor = make_executor(work);
+    const literal = await executor.execute("grep_files", { pattern: "NEEDLE", path: "lines.txt" });
+    const regex = await executor.execute("grep_files", { pattern: "QUA.+K", path: "lines.txt" });
+    expect(literal.ok).toBe(true);
+    expect(literal.output).toContain("lines.txt:1:");
+    expect(literal.output).not.toContain("lines.txt:2:");
+    expect(literal.output).not.toContain("lines.txt:3:");
+    expect(regex.ok).toBe(true);
+    expect(regex.output).toContain("lines.txt:4:");
+    expect(regex.output).not.toContain("lines.txt:5:");
+  });
 });
 
 describe("S-9 HTTP stream clamp", () => {

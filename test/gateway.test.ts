@@ -17,6 +17,7 @@ import { assert_bind_allowed, create_webhook_adapter, MAX_WEBHOOK_BODY_BYTES } f
 import { format_agent_reply, split_text } from "../src/gateway/format.js";
 import { create_telegram_adapter } from "../src/gateway/telegram.js";
 import { parse_irc_line, sanitize_twitch_outbound, TWITCH_MESSAGE_CAP } from "../src/gateway/twitch.js";
+import { note_partial_messages } from "../src/agent/loop.js";
 import { GatewayBus } from "../src/gateway/bus.js";
 import type { Agent, AgentRunResult } from "../src/agent/agent.js";
 import type { Message, Usage } from "../src/providers/types.js";
@@ -82,6 +83,42 @@ function reply_result(reply: string, history: readonly Message[], input: string)
 function temp_work_dir(): string {
   mkdirSync(TMP_BASE, { recursive: true });
   return mkdtempSync(join(TMP_BASE, "lich-gw-"));
+}
+
+/** Second handle() sees whatever cap_history stored from the first run's messages. */
+async function capped_followup_history(
+  work_dir: string,
+  first_messages: Message[],
+  history_cap: number,
+): Promise<readonly Message[]> {
+  const records: RunRecord[] = [];
+  let runs = 0;
+  const probe_factory = (): Agent =>
+    ({
+      run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+        runs += 1;
+        if (runs === 1) {
+          return {
+            outcome: {
+              messages: first_messages,
+              final: undefined,
+              result: undefined,
+              turns_used: 1,
+              stopped_reason: "final",
+            },
+            messages: first_messages,
+            usage_total: usage_zero,
+            session_path: undefined,
+          };
+        }
+        records.push({ input: options.input, history: options.history ?? [] });
+        return reply_result("ok", options.history ?? [], options.input);
+      },
+    }) as unknown as Agent;
+  const bus = new GatewayBus({ config: config_for(work_dir), agent_factory: probe_factory }, { history_cap });
+  await bus.handle("webhook", "cap-edge", "u1", "go");
+  await bus.handle("webhook", "cap-edge", "u1", "again");
+  return records[0]?.history ?? [];
 }
 
 describe("gateway bus", () => {
@@ -305,6 +342,47 @@ describe("gateway bus", () => {
     }
   });
 
+  it("drops a leading tool fragment and keeps the next assistant when the cap has no user", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const transcript: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c1", name: "read_file", args: {} }] },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "stale" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c2", name: "read_file", args: {} }] },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "fresh" },
+      ];
+      const seen = await capped_followup_history(work_dir, transcript, 3);
+      expect(seen.map((message) => message.role)).toEqual(["user", "assistant", "tool"]);
+      expect(seen[0]).toEqual({ role: "user", content: "(earlier conversation trimmed)" });
+      expect(seen[2]?.content).toBe("fresh");
+      expect(seen.some((message) => message.content === "stale")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores no history when a capped tool window has no owning assistant", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const from_user: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "orphan" },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "orphan-2" },
+      ];
+      expect(await capped_followup_history(work_dir, from_user, 2)).toEqual([]);
+      const empty_calls: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "no calls", tool_calls: [] },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "orphan" },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "orphan-2" },
+      ];
+      expect(await capped_followup_history(work_dir, empty_calls, 2)).toEqual([]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("releases settled promise chains so the chains map stays bounded (G-6)", async () => {
     const work_dir = temp_work_dir();
     try {
@@ -338,6 +416,41 @@ describe("gateway bus", () => {
       expect(reply?.includes("boom")).toBe(true);
       expect(reply?.includes("\n")).toBe(false);
       expect(reply?.length).toBeLessThanOrEqual("agent error: ".length + 300);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps completed tool turns when a later model call throws", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const partial: Message[] = [
+        { role: "user", content: "go" },
+        { role: "assistant", content: "", tool_calls: [{ id: "t1", name: "read_file", args: { path: "a.txt" } }] },
+        { role: "tool", tool_call_id: "t1", name: "read_file", content: "file-body" },
+      ];
+      let thrown = false;
+      const bus = new GatewayBus({
+        config: config_for(work_dir),
+        agent_factory: () =>
+          ({
+            run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+              records.push({ input: options.input, history: options.history ?? [] });
+              if (thrown === false) {
+                thrown = true;
+                throw note_partial_messages(new Error("provider down"), partial);
+              }
+              return reply_result("ok", options.history ?? [], options.input);
+            },
+          }) as unknown as Agent,
+      });
+      const reply = await bus.handle("webhook", "err", "u1", "go");
+      expect(reply?.includes("provider down")).toBe(true);
+      expect(await bus.handle("webhook", "err", "u1", "again")).toBe("ok");
+      expect(records[1]?.history.some((message) => message.role === "tool" && message.content === "file-body")).toBe(
+        true,
+      );
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }

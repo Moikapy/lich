@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `prompt.abort` cancels a `prompt.submit` already accepted on the same
+  socket but still waiting behind another frame, so a cancel issued during
+  resume, list, or another in-flight call cannot miss that run.
+- `lich serve` `prompt.submit` keeps completed tool turns in the session when a
+  later model call throws, unless `session.clear` reset it mid-run.
+- Resuming a session killed mid tool call no longer fails at the provider:
+  each tool call with no recorded result gets a `cancelled` tool message.
+- Gateway, CLI chat, the TUI, and the persona orchestrator keep completed tool
+  turns when a later model call throws, so the next message still sees that work.
 - New `examples/decision_lane/`: a prototype plugin that asks a local Ollama
   decision model (`/v1/systemone`) to pick each game_bridge enemy's action
   before the LLM turn. Shadow mode (default) only logs; act mode queues orders
