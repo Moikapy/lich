@@ -132,7 +132,8 @@ Usage comes from `prompt_eval_count` / `eval_count`.
 ## Error taxonomy
 
 `ProviderErrorKind` and the mapping rules are identical across clients
-(`status_to_error_kind` in each client), with one anthropic addition:
+(`status_to_error_kind` in `src/providers/http.ts`, shared by all clients;
+ollama passes its own overflow regex), with one anthropic addition:
 
 | Kind | Meaning | OpenAI mapping | Anthropic mapping | Ollama mapping |
 | --- | --- | --- | --- | --- |

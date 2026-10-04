@@ -1,4 +1,12 @@
-import { safe_json_parse, safe_stringify, truncate_text } from "../util/json.js";
+import { safe_stringify } from "../util/json.js";
+import {
+  build_abort_signal,
+  build_request_init,
+  do_fetch,
+  is_record,
+  read_success_json,
+  to_http_error,
+} from "./http.js";
 import { ProviderError } from "./types.js";
 import type {
   AssistantMessage,
@@ -8,7 +16,6 @@ import type {
   LLMProvider,
   Message,
   ProviderConfig,
-  ProviderErrorKind,
   ToolCall,
   ToolDefinition,
   Usage,
@@ -17,10 +24,6 @@ import type {
 const DEFAULT_BASE_URL = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY";
-const MAX_ERROR_BODY_CHARS = 500;
-const OVERFLOW_BODY_PATTERN =
-  /context.?length|maximum context|prompt(?: is)? too (?:long|large)|token.?limit|context window|too many tokens|exceed.{0,30}context limit/i;
-const OVERLOADED_STATUS = 529;
 const UNPARSEABLE_ARGS_NOTE = "[unparseable tool arguments]";
 const TRUNCATED_TOOL_CALLS_NOTE = "[truncated tool call omitted]";
 const EMPTY_TEXT_PLACEHOLDER = "(empty)";
@@ -115,7 +118,7 @@ export class AnthropicProvider implements LLMProvider {
       this.config.fetch_fn ?? fetch,
       build_endpoint(this.config),
       build_request_init(
-        api_key,
+        build_headers(api_key),
         safe_stringify(build_request_body(this.config.model, messages, tools, options, this.config)),
         build_abort_signal(options, this.config.timeout_ms),
       ),
@@ -124,7 +127,7 @@ export class AnthropicProvider implements LLMProvider {
     if (response.ok === false) {
       throw await to_http_error(response, this.config.name);
     }
-    return parse_chat_response(await read_success_json(response, this.config.name), this.config);
+    return parse_chat_response(await read_success_json<AnthropicChatResponseDto>(response, this.config.name), this.config);
   }
 }
 
@@ -152,21 +155,6 @@ function build_headers(api_key: string): Record<string, string> {
     "x-api-key": api_key,
     "anthropic-version": ANTHROPIC_VERSION,
   };
-}
-
-function build_abort_signal(options: ChatOptions | undefined, timeout_ms: number | undefined): AbortSignal | undefined {
-  const signals: AbortSignal[] = [];
-  if (timeout_ms !== undefined && timeout_ms > 0) {
-    signals.push(AbortSignal.timeout(timeout_ms));
-  }
-  if (options?.signal !== undefined) {
-    signals.push(options.signal);
-  }
-  const [only_signal] = signals;
-  if (only_signal !== undefined && signals.length === 1) {
-    return only_signal;
-  }
-  return AbortSignal.any(signals);
 }
 
 function build_request_body(
@@ -297,92 +285,6 @@ function to_anthropic_tools(tools: readonly ToolDefinition[]): AnthropicToolDto[
   }));
 }
 
-function build_request_init(api_key: string, body: string, signal: AbortSignal | undefined): RequestInit {
-  return {
-    method: "POST",
-    headers: build_headers(api_key),
-    body,
-    ...(signal !== undefined ? { signal } : {}),
-  };
-}
-
-async function do_fetch(fetch_fn: typeof fetch, url: string, init: RequestInit, provider_name: string): Promise<Response> {
-  try {
-    return await fetch_fn(url, init);
-  } catch (error) {
-    const label = is_abort_like(error) === true ? "request aborted or timed out" : "fetch failed";
-    throw new ProviderError({
-      kind: "network",
-      provider_name,
-      message: `${label}: ${describe_error(error)}`,
-      cause: error,
-    });
-  }
-}
-
-async function read_response_text(response: Response, provider_name: string): Promise<string> {
-  try {
-    return await response.text();
-  } catch (error) {
-    throw new ProviderError({
-      kind: "network",
-      provider_name,
-      message: `failed to read response body: ${describe_error(error)}`,
-      cause: error,
-    });
-  }
-}
-
-async function read_success_json(response: Response, provider_name: string): Promise<AnthropicChatResponseDto> {
-  const text = await read_response_text(response, provider_name);
-  const dto = safe_json_parse<AnthropicChatResponseDto>(text);
-  if (dto === undefined) {
-    throw new ProviderError({
-      kind: "bad_request",
-      provider_name,
-      message: `unparseable success response: ${truncate_text(text, MAX_ERROR_BODY_CHARS)}`,
-    });
-  }
-  return dto;
-}
-
-function parse_retry_after_ms(response: Response): number | undefined {
-  const raw = response.headers.get("retry-after");
-  if (raw === null) {
-    return undefined;
-  }
-  const seconds = Number(raw);
-  if (Number.isFinite(seconds) === false || seconds < 0) {
-    return undefined;
-  }
-  return Math.round(seconds * 1000);
-}
-
-function status_to_error_kind(status: number, body_text: string): ProviderErrorKind {
-  if (status === 401 || status === 403) {
-    return "auth";
-  }
-  if (status === 429 || status === OVERLOADED_STATUS || status >= 500) {
-    return "rate_limit";
-  }
-  if (status === 413 || (status === 400 && OVERFLOW_BODY_PATTERN.test(body_text) === true)) {
-    return "overflow";
-  }
-  return "bad_request";
-}
-
-async function to_http_error(response: Response, provider_name: string): Promise<ProviderError> {
-  const body_text = truncate_text(await read_response_text(response, provider_name), MAX_ERROR_BODY_CHARS);
-  const retry_after_ms = parse_retry_after_ms(response);
-  return new ProviderError({
-    kind: status_to_error_kind(response.status, body_text),
-    provider_name,
-    message: `${provider_name} http ${response.status}: ${body_text}`,
-    status: response.status,
-    ...(retry_after_ms !== undefined ? { retry_after_ms } : {}),
-  });
-}
-
 function parse_chat_response(dto: AnthropicChatResponseDto, config: ProviderConfig): ChatResult {
   const finish_reason = map_stop_reason(dto.stop_reason);
   return {
@@ -478,25 +380,4 @@ function map_stop_reason(raw: string | null | undefined): FinishReason {
     return "length";
   }
   return "unknown";
-}
-
-function is_record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function describe_error(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function error_name(error: unknown): string | undefined {
-  if (typeof error === "object" && error !== null && "name" in error) {
-    const name = (error as { name?: unknown }).name;
-    return typeof name === "string" ? name : undefined;
-  }
-  return undefined;
-}
-
-function is_abort_like(error: unknown): boolean {
-  const name = error_name(error);
-  return name === "AbortError" || name === "TimeoutError";
 }
