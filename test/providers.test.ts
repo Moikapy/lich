@@ -195,6 +195,7 @@ describe("openai compat provider", () => {
               tool_calls: [
                 { type: "function", function: { name: "list_dir", arguments: "{}" } },
                 { id: "", type: "function", function: { name: "read_file", arguments: "{}" } },
+                { id: null, type: "function", function: { name: "list_dir", arguments: "{}" } },
               ],
             },
             finish_reason: "tool_calls",
@@ -206,9 +207,9 @@ describe("openai compat provider", () => {
     const provider = new OpenAICompatProvider(openai_config({ fetch_fn }));
     const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
     const ids = (result.message.tool_calls ?? []).map((call) => call.id);
-    expect(ids).toHaveLength(2);
-    expect(ids.every((id) => id.length > 0)).toBe(true);
-    expect(new Set(ids).size).toBe(2);
+    expect(ids).toHaveLength(3);
+    expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+    expect(new Set(ids).size).toBe(3);
   });
 
   it("omits executable tool calls and appends a note when arguments do not parse", async () => {

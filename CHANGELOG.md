@@ -3,7 +3,7 @@
 ## Unreleased
 
 - `http_request` reports a non-2xx status as `ok: false` (`error: http_<status>`)
-  and still returns the status and body, like `fetch_url`.
+  and still returns the status and body in `output`.
 - `terminal` uses config `terminal_timeout_ms` as its default command timeout
   (it was ignored); a `timeout_ms` argument still overrides it.
 - File tools accept names that only start with `..` (such as `..notes.txt`);

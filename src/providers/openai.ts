@@ -391,7 +391,7 @@ function parse_assistant_message(
       raw_arguments.length === 0 ? {} : safe_json_parse<Record<string, unknown>>(raw_arguments);
     if (is_record(parsed_arguments) === true) {
       tool_calls.push({
-        id: raw_call.id !== undefined && raw_call.id.length > 0 ? raw_call.id : next_tool_call_id(),
+        id: typeof raw_call.id === "string" && raw_call.id.length > 0 ? raw_call.id : next_tool_call_id(),
         name: raw_call.function?.name ?? "",
         args: parsed_arguments,
       });
