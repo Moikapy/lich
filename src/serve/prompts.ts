@@ -27,11 +27,12 @@ export interface ServePromptService {
   /**
    * Register an AbortController when a submit frame is accepted, before the
    * per-connection queue reaches it. prompt.abort can then cancel that run
-   * while it is still waiting behind another frame.
+   * while it is still waiting behind another frame. Optional so other
+   * implementations of this exported interface keep compiling.
    */
-  prepare_submit(session_id: string): AbortController;
+  prepare_submit?(session_id: string): AbortController;
   /** Drop a controller from prepare_submit that never reached submit(). */
-  release_submit(session_id: string, controller: AbortController): void;
+  release_submit?(session_id: string, controller: AbortController): void;
   abort(params: PromptAbortParams): PromptAbortResult;
   /** Abort every in-flight run and forget the controllers (server stop). */
   abort_all(): void;

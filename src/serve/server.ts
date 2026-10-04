@@ -279,7 +279,8 @@ function arm_queued_submit(
   if (session_id === undefined) {
     return undefined;
   }
-  return { session_id, controller: prompts.prepare_submit(session_id) };
+  const controller = prompts.prepare_submit?.(session_id);
+  return controller === undefined ? undefined : { session_id, controller };
 }
 
 /** session_id of a prompt.submit request, or undefined when this frame is not one. */
@@ -343,7 +344,7 @@ async function handle_client_message(
     }
   } finally {
     if (prepared !== undefined && claimed === false) {
-      prompts?.release_submit(prepared.session_id, prepared.controller);
+      prompts?.release_submit?.(prepared.session_id, prepared.controller);
     }
   }
 }
