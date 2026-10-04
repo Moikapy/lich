@@ -4,6 +4,7 @@
  */
 import type { Agent, AgentRunResult } from "../agent/agent.js";
 import type { AgentEvent } from "../agent/events.js";
+import { history_after_run_error } from "../agent/loop.js";
 import { create_session_manager } from "../session/manager.js";
 import type {
   PromptAbortParams,
@@ -13,7 +14,7 @@ import type {
   ServeEventNotification,
 } from "./protocol.js";
 import { SERVE_NOTIFICATION_EVENT } from "./protocol.js";
-import type { ServeSessionStore } from "./sessions.js";
+import type { ServeSessionBag, ServeSessionStore } from "./sessions.js";
 
 export type ServeEventNotify = (notification: ServeEventNotification) => void;
 
@@ -106,6 +107,9 @@ export function create_serve_prompt_service(
             bag_after.history = [...result.messages];
           }
           return map_submit_result(params.session_id, result);
+        } catch (error) {
+          keep_completed_turns(sessions, params.session_id, bag_before, epoch_before, error);
+          throw error;
         } finally {
           unregister_controller(params.session_id, controller);
         }
@@ -130,6 +134,26 @@ export function create_serve_prompt_service(
       inflight.clear();
     },
   };
+}
+
+/**
+ * Chat threw after earlier turns in this run already finished. Keep those
+ * turns unless clear() (or eviction) reset the bag mid-run; a trailing user
+ * with no assistant reply is dropped, matching resume hygiene.
+ */
+function keep_completed_turns(
+  sessions: ServeSessionStore,
+  session_id: string,
+  bag_before: ServeSessionBag,
+  epoch_before: number,
+  error: unknown,
+): void {
+  const kept = history_after_run_error(error);
+  const bag_after = sessions.get(session_id);
+  if (kept === undefined || bag_after !== bag_before || bag_after.epoch !== epoch_before) {
+    return;
+  }
+  bag_after.history = kept;
 }
 
 function map_submit_result(session_id: string, result: AgentRunResult): PromptSubmitResult {
