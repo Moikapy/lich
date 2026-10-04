@@ -39,3 +39,4 @@ Append-only. One line per action: `- YYYY-MM-DD <op> | <summary> | <pages>`. Ops
 - 2026-10-04 update | Decision models and game_bridge pages link the decision_lane prototype | concepts/decision-models.md, entities/game-bridge-example.md
 - 2026-10-04 update | #161 merged: tools_enabled filters plugin tools and git_commit, throwing before_tool_call blocks, last-turn tool calls not run; holes lists and index updated, code pinned at 029b7e8 | entities/lich-plugins-and-hooks.md, entities/lich-tools-and-guardrails.md, entities/lich-agent-loop.md, index.md
 - 2026-10-04 update | #163 merged: S-11 items (http_request status, .. guard, terminal_timeout_ms) moved out of open holes, pinned at 7001e31 | entities/lich-tools-and-guardrails.md
+- 2026-10-04 update | Roadmap map lists #113 children and related issues (#133 P0, #134 P1, #117 P2, #144, #148, #149); supersedes stale PR #135 | entities/roadmap-issues.md
