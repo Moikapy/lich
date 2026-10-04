@@ -38,3 +38,4 @@ Append-only. One line per action: `- YYYY-MM-DD <op> | <summary> | <pages>`. Ops
 - 2026-10-04 create | decision_lane example merged in #159: plugin-owned System One client, shadow/act modes, game_bridge checks still apply, bench pending | entities/decision-lane-example.md, index.md
 - 2026-10-04 update | Decision models and game_bridge pages link the decision_lane prototype | concepts/decision-models.md, entities/game-bridge-example.md
 - 2026-10-04 update | #161 merged: tools_enabled filters plugin tools and git_commit, throwing before_tool_call blocks, last-turn tool calls not run; holes lists and index updated, code pinned at 029b7e8 | entities/lich-plugins-and-hooks.md, entities/lich-tools-and-guardrails.md, entities/lich-agent-loop.md, index.md
+- 2026-10-04 update | #163 merged: S-11 items (http_request status, .. guard, terminal_timeout_ms) moved out of open holes, pinned at 7001e31 | entities/lich-tools-and-guardrails.md
