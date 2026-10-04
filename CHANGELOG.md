@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Resuming a session killed mid tool call no longer fails at the provider:
+  each tool call with no recorded result gets a `cancelled` tool message.
 - Gateway, CLI chat, the TUI, and the persona orchestrator keep completed tool
   turns when a later model call throws, so the next message still sees that work.
 - New `examples/decision_lane/`: a prototype plugin that asks a local Ollama
