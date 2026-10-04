@@ -39,7 +39,7 @@ Tool shapes and the meteor gate: [`examples/game_bridge/README.md`](../game_brid
 
 ## HTTP
 
-Loopback only (`127.0.0.1`), default port `8090` so it does not collide with the CLI webhook (`8089` on `0.0.0.0`). A non-empty `token` is **required**; requests must send matching `x-lich-token`. `POST /message` also requires `Host` to be loopback, `Content-Type: application/json`, and a body under ~1 MB.
+Loopback only (`127.0.0.1`), default port `8090` so it does not collide with the CLI webhook (`8089`, also loopback by default). A non-empty `token` is **required**; requests must send matching `x-lich-token`. `POST /message` also requires `Host` to be loopback, `Content-Type: application/json`, and a body under ~1 MB.
 
 ```sh
 export LICH_GATEWAY_TOKEN=sekrit

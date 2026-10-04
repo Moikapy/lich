@@ -30,7 +30,7 @@ A game backend may instead call `run_agent`, which loads `config.plugins`. `crea
 
 ## Gateway contract
 
-`lich gateway webhook` binds `0.0.0.0` on `LICH_GATEWAY_PORT` (default `8089`). `GET /health` is `200 {"status":"ok"}` — the process is up, not that a provider is healthy. Check it before the first round.
+`lich gateway webhook` binds `127.0.0.1` on `LICH_GATEWAY_PORT` (default `8089`). To reach it from another machine, set `LICH_GATEWAY_HOST` (for example `0.0.0.0`); a non-loopback bind requires `LICH_GATEWAY_TOKEN`. `GET /health` is `200 {"status":"ok"}` — the process is up, not that a provider is healthy. Check it before the first round.
 
 `POST /message`. Only `text` is required. Omitted fields default to `platform` `"webhook"`, `chat_id` `"default"`, `user_id` `"anonymous"`.
 
@@ -148,7 +148,7 @@ The plugin checks the line shape and returns `{ok: false, error}` instead of thr
 
 ## Security
 
-Set `LICH_GATEWAY_TOKEN`. The webhook binds all interfaces, so an open port is an open chatbot with your provider keys and your tools. Mismatch or a missing header is `401`.
+Set `LICH_GATEWAY_TOKEN`. The webhook binds loopback by default and refuses a non-loopback `LICH_GATEWAY_HOST` without a token, because an open port is an open chatbot with your provider keys and your tools. Mismatch or a missing header is `401`.
 
 Players' Godot clients do not talk to lich in production. Godot talks to your backend; the backend holds the token, sets `chat_id` / `user_id`, and rate-limits. Same split as embedding the library in that backend.
 
