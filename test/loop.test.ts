@@ -373,6 +373,83 @@ describe("run_conversation", () => {
     expect(compress_calls).toBe(2);
   });
 
+  it("backs off after a failed compression instead of retrying every turn", async () => {
+    const pad = "y".repeat(2000);
+    const seed: Message[] = Array.from({ length: 12 }, (_unused, index) => ({
+      role: "user" as const,
+      content: `keep-${index} ${pad}`,
+    }));
+    const emitter = new AgentEmitter();
+    const events: AgentEventBody[] = [];
+    emitter.on((event) => events.push(event));
+    let compress_calls = 0;
+    const chat: ChatFn = async (messages) => {
+      const system_message = messages[0];
+      if (system_message?.role === "system" && system_message.content.includes("compress")) {
+        compress_calls += 1;
+        throw new Error("summarizer down");
+      }
+      return result("again", [{ id: `c${compress_calls}`, name: "noop", args: {} }]);
+    };
+    const deps: LoopDeps = {
+      chat,
+      tools: make_tool_runner("ok").runner,
+      definitions: () => [],
+      emitter,
+    };
+
+    const outcome = await run_conversation(deps, seed, {
+      max_turns: 4,
+      context_budget_tokens: 50,
+      compress_threshold: 0.5,
+    });
+
+    expect(compress_calls).toBe(1);
+    expect(outcome.stopped_reason).toBe("budget");
+    expect(outcome.messages.some((message) => message.role === "user" && message.content.includes("[context summary"))).toBe(
+      false,
+    );
+    const compress_ends = events.filter((event) => event.type === "compress_end");
+    expect(compress_ends).toHaveLength(1);
+    expect(compress_ends[0]).toMatchObject({ type: "compress_end", summary_chars: 0 });
+  });
+
+  it("does not compress an over-budget history that still fits the recent window", async () => {
+    const pad = "z".repeat(2000);
+    const seed: Message[] = Array.from({ length: 8 }, (_unused, index) => ({
+      role: "user" as const,
+      content: `recent-${index} ${pad}`,
+    }));
+    const emitter = new AgentEmitter();
+    const events: AgentEventBody[] = [];
+    emitter.on((event) => events.push(event));
+    let compress_calls = 0;
+    const chat: ChatFn = async (messages) => {
+      const system_message = messages[0];
+      if (system_message?.role === "system" && system_message.content.includes("compress")) {
+        compress_calls += 1;
+        return result("should-not-run");
+      }
+      return result("ok");
+    };
+    const deps: LoopDeps = {
+      chat,
+      tools: make_tool_runner("ok").runner,
+      definitions: () => [],
+      emitter,
+    };
+
+    const outcome = await run_conversation(deps, seed, {
+      max_turns: 1,
+      context_budget_tokens: 50,
+      compress_threshold: 0.5,
+    });
+
+    expect(outcome.stopped_reason).toBe("final");
+    expect(compress_calls).toBe(0);
+    expect(events.some((event) => event.type === "compress_start" || event.type === "compress_end")).toBe(false);
+  });
+
   it("seeds system prompt only when missing, replaces when different", async () => {
     const seen: Message[][] = [];
     const chat: ChatFn = async (messages) => {
