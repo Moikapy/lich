@@ -55,8 +55,8 @@ LICH_MODEL=gpt-4o-mini LICH_PROVIDER_KIND=openai_compat lich "summarize this rep
 LICH_MODEL=claude-sonnet-4-20250514 LICH_PROVIDER_KIND=anthropic lich chat
 
 # local ollama (no api key needed)
-ollama pull llama3.2
-LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich "hello"
+ollama pull qwen3:8b
+LICH_PROVIDER_KIND=ollama LICH_MODEL=qwen3:8b lich "hello"
 
 # terminal UI
 lich tui
@@ -81,7 +81,7 @@ import { run_agent } from "@moikapy/lich";
 const result = await run_agent(
   {
     providers: [
-      { kind: "ollama", name: "local", model: "llama3.2:latest" },
+      { kind: "ollama", name: "local", model: "qwen3:8b" },
     ],
   },
   "Use the list_dir tool to list files, then summarize.",
@@ -133,10 +133,10 @@ the next self-commit. One gated `git_commit` per run requires
 
 | Variable | Purpose |
 | --- | --- |
-| `LICH_MODEL` | model id your provider accepts (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`, `llama3.2`) |
+| `LICH_MODEL` | model id your provider accepts (e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`, `qwen3:8b`) |
 | `LICH_PROVIDER_KIND` | `openai_compat` \| `anthropic` \| `ollama` (default `openai_compat`) |
 | `LICH_BASE_URL` | provider base url (ollama default: `http://localhost:11434`) |
-| `LICH_API_KEY_ENV` | env var holding the api key (unused by ollama) |
+| `LICH_API_KEY_ENV` | env var holding the api key (optional for ollama; set it for Ollama cloud) |
 | `LICH_ALLOW_SELF_COMMIT` | set to `1` to allow one gated `git_commit` per run; unset is fail-closed |
 | `LICH_ALLOW_PRIVATE_URLS` | set to exactly `1` to let `fetch_url` / `http_request` reach private or loopback URLs; unset or any other value is fail-closed (blocked) |
 | `LICH_TEST_COMMAND` | command `run_tests` runs (default: `node node_modules/vitest/vitest.mjs run`) |
@@ -159,10 +159,25 @@ Short map of who can do what:
 
 ## Ollama
 
-Ollama needs no api key and defaults to `http://localhost:11434`:
+Local Ollama needs no api key and defaults to `http://localhost:11434`:
 
 ```sh
-LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich "Reply with ok"
+ollama pull qwen3:8b
+LICH_PROVIDER_KIND=ollama LICH_MODEL=qwen3:8b lich "Reply with ok"
+```
+
+`qwen3:8b` (about 5 GB) calls tools reliably. On a low-memory machine,
+`llama3.2` (3B) still works but calls tools less reliably.
+
+Ollama's hosted models use the same provider kind. Create an API key at
+[ollama.com](https://ollama.com), then point the base url there; when
+`api_key` or `api_key_env` resolves, requests carry
+`Authorization: Bearer <key>`:
+
+```sh
+export OLLAMA_API_KEY=...
+LICH_PROVIDER_KIND=ollama LICH_BASE_URL=https://ollama.com \
+  LICH_API_KEY_ENV=OLLAMA_API_KEY LICH_MODEL=<cloud-model> lich "Reply with ok"
 ```
 
 Notes:

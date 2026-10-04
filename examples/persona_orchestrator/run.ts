@@ -18,7 +18,7 @@ export async function main(): Promise<void> {
   const orchestrator = create_orchestrator({
     factory,
     shared: {
-      providers: [{ kind: "ollama", name: "local", model: "llama3.2" }],
+      providers: [{ kind: "ollama", name: "local", model: "qwen3:8b" }],
       work_dir: process.cwd(),
     },
     personas: PERSONA_TABLE,

@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { AgentEmitter, type AgentEvent } from "../src/agent/events.js";
+import { AgentEmitter, type AgentEventBody } from "../src/agent/events.js";
 import type { ChatFn } from "../src/context/compressor.js";
-import { partial_messages_of, run_conversation, type LoopDeps, type ToolRunner } from "../src/agent/loop.js";
-import type { ChatResult, Message, ToolCall } from "../src/providers/types.js";
+import {
+  history_after_run_error,
+  partial_messages_of,
+  run_conversation,
+  type LoopDeps,
+  type ToolRunner,
+} from "../src/agent/loop.js";
+import { ProviderError, type ChatResult, type Message, type ToolCall } from "../src/providers/types.js";
 
 function result(content: string, calls?: ToolCall[]): ChatResult {
   return {
@@ -40,7 +46,7 @@ function make_tool_runner(output: string): { runner: ToolRunner; calls: ToolCall
   return { runner, calls };
 }
 
-function event_types(events: AgentEvent[]): string[] {
+function event_types(events: AgentEventBody[]): string[] {
   return events.map((event) => event.type);
 }
 
@@ -49,7 +55,7 @@ const tool_call_t1: ToolCall = { id: "t1", name: "read_file", args: { path: "a.t
 describe("run_conversation", () => {
   it("scenario A: tool turn then final answer, events in order", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat = make_chat_queue([result("", [tool_call_t1]), result("all done")]);
     const { runner, calls } = make_tool_runner("file contents here");
@@ -101,7 +107,7 @@ describe("run_conversation", () => {
 
   it("scenario B: endless tool calls stop at max_turns with budget_exhausted", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat: ChatFn = async () => result("", [{ id: "loop", name: "noop", args: {} }]);
     const { runner } = make_tool_runner("noop output");
@@ -121,7 +127,7 @@ describe("run_conversation", () => {
   it("scenario C: abort signal stops the loop before the next LLM call", async () => {
     const controller = new AbortController();
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     let chat_calls = 0;
     const chat: ChatFn = async () => {
@@ -147,8 +153,7 @@ describe("run_conversation", () => {
       expect(cancelled.content).toContain("cancelled");
       expect(cancelled.is_error).toBe(true);
     }
-    expect(events.some((event) => event.type === "error")).toBe(true);
-    expect(event_types(events).at(-1)).toBe("error");
+    expect(events.some((event) => event.type === "error")).toBe(false);
     expect(event_types(events).filter((type) => type === "tool_call_end")).toHaveLength(1);
     expect(events.some((event) => event.type === "tool_call_end" && event.cancelled === true)).toBe(true);
   });
@@ -156,7 +161,7 @@ describe("run_conversation", () => {
   it("returns aborted when chat throws after the signal aborts mid-call", async () => {
     const controller = new AbortController();
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat: ChatFn = async () => {
       controller.abort();
@@ -175,7 +180,7 @@ describe("run_conversation", () => {
     expect(outcome.stopped_reason).toBe("aborted");
     expect(outcome.turns_used).toBe(0);
     expect(outcome.messages).toHaveLength(1);
-    expect(events.some((event) => event.type === "error")).toBe(true);
+    expect(events.some((event) => event.type === "error")).toBe(false);
   });
 
   it("skips remaining tool calls when the signal aborts between them", async () => {
@@ -220,7 +225,7 @@ describe("run_conversation", () => {
   it("emits cancelled tool_call_end for skipped tool calls so persistence stays paired", async () => {
     const controller = new AbortController();
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const runner: ToolRunner = {
       execute: async () => {
@@ -256,7 +261,7 @@ describe("run_conversation", () => {
 
   it("scenario D: compresses history when the context budget is exceeded", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const pad = "x".repeat(400);
     const seed: Message[] = [
@@ -374,6 +379,83 @@ describe("run_conversation", () => {
     expect(compress_calls).toBe(2);
   });
 
+  it("backs off after a failed compression instead of retrying every turn", async () => {
+    const pad = "y".repeat(2000);
+    const seed: Message[] = Array.from({ length: 12 }, (_unused, index) => ({
+      role: "user" as const,
+      content: `keep-${index} ${pad}`,
+    }));
+    const emitter = new AgentEmitter();
+    const events: AgentEventBody[] = [];
+    emitter.on((event) => events.push(event));
+    let compress_calls = 0;
+    const chat: ChatFn = async (messages) => {
+      const system_message = messages[0];
+      if (system_message?.role === "system" && system_message.content.includes("compress")) {
+        compress_calls += 1;
+        throw new Error("summarizer down");
+      }
+      return result("again", [{ id: `c${compress_calls}`, name: "noop", args: {} }]);
+    };
+    const deps: LoopDeps = {
+      chat,
+      tools: make_tool_runner("ok").runner,
+      definitions: () => [],
+      emitter,
+    };
+
+    const outcome = await run_conversation(deps, seed, {
+      max_turns: 4,
+      context_budget_tokens: 50,
+      compress_threshold: 0.5,
+    });
+
+    expect(compress_calls).toBe(1);
+    expect(outcome.stopped_reason).toBe("budget");
+    expect(outcome.messages.some((message) => message.role === "user" && message.content.includes("[context summary"))).toBe(
+      false,
+    );
+    const compress_ends = events.filter((event) => event.type === "compress_end");
+    expect(compress_ends).toHaveLength(1);
+    expect(compress_ends[0]).toMatchObject({ type: "compress_end", summary_chars: 0 });
+  });
+
+  it("does not compress an over-budget history that still fits the recent window", async () => {
+    const pad = "z".repeat(2000);
+    const seed: Message[] = Array.from({ length: 8 }, (_unused, index) => ({
+      role: "user" as const,
+      content: `recent-${index} ${pad}`,
+    }));
+    const emitter = new AgentEmitter();
+    const events: AgentEventBody[] = [];
+    emitter.on((event) => events.push(event));
+    let compress_calls = 0;
+    const chat: ChatFn = async (messages) => {
+      const system_message = messages[0];
+      if (system_message?.role === "system" && system_message.content.includes("compress")) {
+        compress_calls += 1;
+        return result("should-not-run");
+      }
+      return result("ok");
+    };
+    const deps: LoopDeps = {
+      chat,
+      tools: make_tool_runner("ok").runner,
+      definitions: () => [],
+      emitter,
+    };
+
+    const outcome = await run_conversation(deps, seed, {
+      max_turns: 1,
+      context_budget_tokens: 50,
+      compress_threshold: 0.5,
+    });
+
+    expect(outcome.stopped_reason).toBe("final");
+    expect(compress_calls).toBe(0);
+    expect(events.some((event) => event.type === "compress_start" || event.type === "compress_end")).toBe(false);
+  });
+
   it("seeds system prompt only when missing, replaces when different", async () => {
     const seen: Message[][] = [];
     const chat: ChatFn = async (messages) => {
@@ -427,7 +509,7 @@ describe("run_conversation", () => {
 
   it("does not consume extra turns for tool execution", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat = make_chat_queue([
       result("", [{ id: "t1", name: "read_file", args: { path: "a.txt" } }]),
@@ -446,7 +528,7 @@ describe("run_conversation", () => {
 
   it("rethrows provider errors from chat", async () => {
     const emitter = new AgentEmitter();
-    const events: AgentEvent[] = [];
+    const events: AgentEventBody[] = [];
     emitter.on((event) => events.push(event));
     const chat: ChatFn = async () => {
       throw new Error("provider exploded");
@@ -482,5 +564,50 @@ describe("run_conversation", () => {
     const partial = partial_messages_of(caught);
     expect(partial?.some((message) => message.role === "assistant")).toBe(true);
     expect(partial?.some((message) => message.role === "tool" && message.content.includes("file-body"))).toBe(true);
+    const kept = history_after_run_error(caught);
+    expect(kept?.some((message) => message.role === "tool" && message.content.includes("file-body"))).toBe(true);
+    expect(kept?.at(-1)?.role).not.toBe("user");
+  });
+
+  it("drops a failed first turn that never reached an assistant", async () => {
+    const chat: ChatFn = async () => {
+      throw new Error("provider exploded");
+    };
+    const deps: LoopDeps = { chat, tools: make_tool_runner("ok").runner, definitions: () => [] };
+    let caught: unknown;
+    try {
+      await run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 2 });
+    } catch (error) {
+      caught = error;
+    }
+    expect(history_after_run_error(caught)).toBeUndefined();
+  });
+
+  it("emits only kind and message when chat throws ProviderError", async () => {
+    const emitter = new AgentEmitter();
+    const events: AgentEventBody[] = [];
+    emitter.on((event) => events.push(event));
+    const cause: { self?: unknown } = {};
+    cause.self = cause;
+    const chat: ChatFn = async () => {
+      throw new ProviderError({
+        kind: "auth",
+        provider_name: "mock",
+        message: "bad key",
+        status: 401,
+        cause,
+      });
+    };
+    const deps: LoopDeps = { chat, tools: make_tool_runner("ok").runner, definitions: () => [], emitter };
+
+    await expect(
+      run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 2 }),
+    ).rejects.toThrow("bad key");
+
+    const error_event = events.find((event) => event.type === "error");
+    expect(error_event).toEqual({ type: "error", error: { kind: "auth", message: "bad key" } });
+    expect(JSON.stringify(error_event)).toBe(
+      '{"type":"error","error":{"kind":"auth","message":"bad key"}}',
+    );
   });
 });

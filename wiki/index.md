@@ -1,12 +1,12 @@
 ---
 title: Wiki index
 type: index
-updated: 2026-09-25
+updated: 2026-10-04
 ---
 
 # Lich Wiki: Index
 
-Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md) for recent activity. There are 39 pages.
+Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md) for recent activity. There are 40 pages.
 
 **New to the codebase?** Read [[tao-loop]], then [[lich-agent-loop]], [[lich-vs-hermes]], [[0008-idea-agnostic-extensible-harness]] and [[roadmap-issues]].
 **Working on the game features?** Read [[game-transports]], then [[action-terminal-mode]], [[client-executed-tools]] and [[embedded-safety-profile]].
@@ -15,9 +15,9 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 ## Entities: Lich subsystems
 
 - [[lich-agent-loop]]: `run_conversation` + `Agent`. A dependency-injected TAO loop. Its P0 gaps are that events aren't scoped to a run, there is no streaming, it has global state, and each agent is heavyweight.
-- [[lich-providers]]: openai_compat, anthropic and ollama clients without SDKs, plus failover. They have no streaming, `tool_choice` or cache_control, and ~150 lines of their helpers are duplicated.
+- [[lich-providers]]: openai_compat, anthropic and ollama clients without SDKs, plus failover and per-role chains (`models.chat` / `models.compress`, #154). They have no streaming, `tool_choice` or cache_control, and ~150 lines of their helpers are duplicated.
 - [[lich-tools-and-guardrails]]: builtins, an executor that never throws, and the wards. Known holes: `tools_enabled` doesn't restrict plugin tools, and `terminal` isn't sandboxed.
-- [[lich-plugins-and-hooks]]: tool-call hooks with veto, and the gatekeeper's single gated `git_commit`. There are no prompt-level hooks, and hooks fail open.
+- [[lich-plugins-and-hooks]]: tool-call hooks with veto, the gatekeeper's single gated `git_commit`, and (#157) per-plugin settings, granted model roles and a `before_llm_call` note hook. There is no `build_system_prompt` hook yet, and hooks fail open.
 - [[lich-sessions]]: JSONL phylacteries used as combat logs. There is no search, and gateway files are supersets of each other.
 - [[lich-mcp]]: an MCP client and catalog. Redot is a real entry and Godot has none. The code is spread over 21 micro-files.
 - [[lich-gateway]]: familiars routed into one shared Agent. The per-chat bus and read-only defaults make it a good hub.
@@ -26,10 +26,11 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 
 ## Entities: the ecosystem and games
 
-- [[hermes-agent]]: the Python agent that inspired Lich, with local paths and the mechanisms worth studying. Its RL environments were removed in `5af672c753`.
+- [[hermes-agent]]: the Python agent that inspired Lich, with local paths and the mechanisms worth studying, including per-task model roles, memory-plugin embedders and its Jev plugin ecosystem. Its RL environments were removed in `5af672c753`.
 - [[godot-and-redot]]: the game→Lich direction (webhook plus file bus) and the Lich→editor direction (Redot MCP). `WebSocketPeer` is the path to a GDScript SDK.
 - [[game-bridge-example]]: the file-bus enemy commander. It's racy, needs 2 LLM calls per decision, and will retire once client tools exist.
 - [[persona-orchestrator-example]]: one Agent per NPC persona, which collapses to ~20 lines once Profiles and Sessions exist.
+- [[decision-lane-example]]: a local decision model picks game_bridge enemy orders before the LLM turn; shadow by default, guarded by game_bridge's checks, not yet measured (#148).
 - [[roadmap-issues]]: what #113, #114, #79 (closed) and #46/#47 (closed) are each for; north star + verticals + six phases. Status lives on the kanban, not here.
 
 ## Concepts
@@ -37,13 +38,14 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[tao-loop]]: the think-act-observe loop and the invariants every harness has to keep.
 - [[action-terminal-mode]]: one LLM call per decision, using `stop_on_tools`, `tool_choice` and deadlines with a fallback action.
 - [[client-executed-tools]]: the game owns its tools through `tool.invoke`/`tool.result`, which replaces the file bus.
-- [[event-envelope]]: events scoped by run and session, JSON-safe, with a per-run `on_event`. Still needed — the panes now read raw fields (#114 item 2).
+- [[event-envelope]]: events scoped by run and session, JSON-safe, with a per-run `on_event`. Landed in #134 (0.10.0); gateway adapter adoption still #114.
 - [[runtime-profile-session]]: one Runtime per process, cheap Profiles, and a Session per NPC.
 - [[prompt-cache-tiers]]: a byte-stable system prompt built in tiers, plus `cache_control` breakpoints (the Hermes approach).
 - [[memory-vs-skills]]: declarative memory vs procedural skills, loaded by progressive disclosure. Lich has neither yet.
 - [[npc-memory-namespaces]]: private `npc:<id>` memory and shared `world` memory, with identity carried in `ToolContext`.
 - [[streaming-deltas]]: `text_delta` events for dialogue, TTS and the chat pane. Lich has no streaming today.
 - [[embedded-safety-profile]]: the game-safe preset: no builtins, hooks that fail closed, untrusted player text, and budgets.
+- [[decision-models]]: typed, calibrated decisions (Jev / Clef / Ollama `/v1/systemone`) as an optional fast lane beside the TAO loop; prototype in #148.
 - [[llm-wiki-pattern]]: Karpathy's compiled-knowledge wiki, which this wiki uses. It also doubles as a design for Lich's memory.
 
 ## Comparisons

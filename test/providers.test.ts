@@ -434,6 +434,48 @@ describe("anthropic provider", () => {
     ]);
   });
 
+  it("folds users separated only by system text and stops the fold at an assistant turn", async () => {
+    const { fetch_fn, requests } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        model: "claude-test",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    await provider.chat(
+      [
+        { role: "system", content: "be terse" },
+        { role: "user", content: "summary" },
+        { role: "system", content: "stay terse" },
+        { role: "user", content: "question" },
+        { role: "assistant", content: "answer" },
+        { role: "user", content: "again" },
+      ],
+      [],
+    );
+    const [first_request] = requests;
+    expect(first_request).toBeDefined();
+    if (first_request === undefined) {
+      return;
+    }
+    const body = request_json(first_request);
+    expect(body["system"]).toBe("be terse\nstay terse");
+    expect(as_array(body["messages"])).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "summary" },
+          { type: "text", text: "question" },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "answer" }] },
+      { role: "user", content: [{ type: "text", text: "again" }] },
+    ]);
+  });
+
   it("parses text plus tool_use blocks and maps usage and stop reasons", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,

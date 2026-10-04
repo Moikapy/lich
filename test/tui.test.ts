@@ -106,9 +106,15 @@ describe("apply_event transitions", () => {
   it("flags budget exhaustion and errors", () => {
     const budgeted = apply_event(INITIAL_UI_STATE, ({ type: "budget_exhausted", turns_used: 25 }));
     expect(budgeted.budget_exhausted).toBe(true);
-    const errored = apply_event(INITIAL_UI_STATE, ({ type: "error", error: new Error("nope") }));
+    const errored = apply_event(INITIAL_UI_STATE, {
+      type: "error",
+      error: { kind: "Error", message: "nope" },
+    });
     expect(errored.last_error).toBe("nope");
-    const string_errored = apply_event(INITIAL_UI_STATE, ({ type: "error", error: "plain" }));
+    const string_errored = apply_event(INITIAL_UI_STATE, {
+      type: "error",
+      error: { kind: "Error", message: "plain" },
+    });
     expect(string_errored.last_error).toBe("plain");
   });
 
@@ -430,6 +436,17 @@ describe("notice blocks", () => {
       "glm-5.3-flash:cloud",
     );
     expect(unknown_command_block("wat").role).toBe("error");
+  });
+
+  it("labels the first models.chat provider when roles are set", () => {
+    const config = {
+      providers: [
+        { name: "a", model: "first", kind: "openai_compat" },
+        { name: "b", model: "chosen", kind: "ollama" },
+      ],
+      models: { chat: ["b"] },
+    };
+    expect(model_label_block(config).lines[0]).toContain("model: chosen");
   });
 
   it("formats tool result blocks with ok and error styling flags", () => {

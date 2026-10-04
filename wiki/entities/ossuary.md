@@ -1,7 +1,7 @@
 ---
 title: Ossuary (desktop app)
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 type: entity
 tags: [ossuary, surface, serve]
 sources: [raw/issues/issue-79.md, raw/audits/2026-09-23-game-surface-audit.md]
@@ -27,7 +27,7 @@ Ossuary is a Hermes-shaped desktop app built with Electron, React and Dockview (
 
 ## Coupling risk
 
-Every pane renders from serve `event` notifications, and those carry raw `AgentEvent` values with no run or session id. [[0002-serve-pr-merge-path]] planned the [[event-envelope]] before #102 merged, but #101/#102 went in with the Ossuary wave (#123) without it — the panes already read a few payload fields (`apps/ossuary/src/chat/event_blocks.ts:6-20@db5c797`), so an envelope change now touches their parse path too. The remaining work is #114 item 2.
+Every pane renders from serve `event` notifications. #134 landed the [[event-envelope]]; Ossuary's wire parse keeps payload switches on `type` and accepts optional `run_id` / `session_id` / `seq` / `ts` (`apps/ossuary/src/chat/parse_wire_event.ts`). Gateway adapter migration of SessionManager remains on #114.
 
 The Ossuary client depends only on the method names from #80, which are stable, so the gateway-hub plan does not block it ([[0001-gateway-as-hub]]).
 

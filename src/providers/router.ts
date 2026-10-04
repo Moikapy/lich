@@ -18,13 +18,26 @@ const FAILOVER_MAX_ATTEMPTS = 3;
 
 export class ProviderRouter {
   private readonly configs: ProviderConfig[];
-  private readonly cache: Map<string, LLMProvider> = new Map();
+  private readonly cache: Map<string, LLMProvider>;
 
-  constructor(configs: ProviderConfig[]) {
+  constructor(configs: ProviderConfig[], cache: Map<string, LLMProvider> = new Map()) {
     if (configs.length === 0) {
       throw new Error("at least one provider is required");
     }
     this.configs = [...configs];
+    this.cache = cache;
+  }
+
+  /** Router over a named subset, in the given order, sharing built clients. */
+  for_role(names: readonly string[]): ProviderRouter {
+    const configs = names.map((name) => {
+      const config = this.find_config(name);
+      if (config === undefined) {
+        throw new Error(`unknown provider "${name}"`);
+      }
+      return config;
+    });
+    return new ProviderRouter(configs, this.cache);
   }
 
   get(name: string): LLMProvider | undefined {

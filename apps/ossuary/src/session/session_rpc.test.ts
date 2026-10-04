@@ -58,5 +58,16 @@ describe("session_rpc", () => {
   it("rejects malformed list payloads", async () => {
     request.mockResolvedValueOnce({ sessions: [{ id: "x" }] });
     await expect(session_list()).rejects.toThrow(/unexpected session.list entry/);
+    request.mockResolvedValueOnce({ sessions: "nope" });
+    await expect(session_list()).rejects.toThrow(/unexpected session.list result/);
+  });
+
+  it("rejects create, resume, and clear results that omit required fields", async () => {
+    request.mockResolvedValueOnce({ session_id: 1 });
+    await expect(session_create("ossuary")).rejects.toThrow(/unexpected session.create result/);
+    request.mockResolvedValueOnce({ session_id: "bag", message_count: "4" });
+    await expect(session_resume("alpha")).rejects.toThrow(/unexpected session.resume result/);
+    request.mockResolvedValueOnce(null);
+    await expect(session_clear("bag")).rejects.toThrow(/unexpected session.clear result/);
   });
 });

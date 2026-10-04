@@ -3,7 +3,7 @@
  * slash-command parsing, transcript block mapping, and display formatters.
  * No ink/react imports here — this module is unit-tested without a TTY.
  */
-import type { AgentEvent } from "../agent/events.js";
+import type { AgentEventBody } from "../agent/events.js";
 import type { AgentRunResult } from "../agent/agent.js";
 import type { AssistantMessage, Message, ToolCall, Usage } from "../providers/types.js";
 import { safe_json_parse, truncate_text } from "../util/json.js";
@@ -43,11 +43,17 @@ function error_text(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
+  if (error !== null && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.length > 0) {
+      return message;
+    }
+  }
   return String(error);
 }
 
-/** Reducer over UiState; one pure mapping per AgentEvent variant. */
-export function apply_event(state: UiState, event: AgentEvent): UiState {
+/** Reducer over UiState; one pure mapping per AgentEvent body variant. */
+export function apply_event(state: UiState, event: AgentEventBody): UiState {
   switch (event.type) {
     case "llm_start":
       return { ...state, phase: "thinking", active_tool: undefined };
@@ -276,8 +282,22 @@ export function help_block(): HistoryBlock {
   return { role: "meta", lines: [...HELP_LINES] };
 }
 
-export function model_label_block(config: { providers: readonly { model: string; kind: string }[] }): HistoryBlock {
-  const provider = config.providers[0];
+interface ChatProviderView {
+  providers: readonly { name?: string; model: string; kind: string }[];
+  models?: { chat?: readonly string[] };
+}
+
+/** First provider of the main chat chain: `models.chat[0]` when set, else `providers[0]`. */
+export function chat_provider(config: ChatProviderView): { model: string; kind: string } | undefined {
+  const first = config.models?.chat?.[0];
+  if (first === undefined) {
+    return config.providers[0];
+  }
+  return config.providers.find((provider) => provider.name === first);
+}
+
+export function model_label_block(config: ChatProviderView): HistoryBlock {
+  const provider = chat_provider(config);
   return {
     role: "meta",
     lines: [`\u00b7 model: ${provider?.model ?? "unknown"} \u00b7 provider: ${provider?.kind ?? "unknown"}`],
