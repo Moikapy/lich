@@ -206,6 +206,47 @@ describe("serve prompt rpc", () => {
     expect(follow_up).toContain("look around");
   });
 
+  it("does not write kept turns back after session.clear when the model call fails", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-partial-clear");
+    const session_dir = path.join(work_dir, "sessions");
+    let second_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      second_started = resolve;
+    });
+    let release_second!: () => void;
+    const second_gate = new Promise<void>((resolve) => {
+      release_second = resolve;
+    });
+    let calls = 0;
+    const fetch_fn: typeof fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        const call = { id: "c1", type: "function", function: { name: "list_dir", arguments: JSON.stringify({ path: "." }) } };
+        return new Response(
+          JSON.stringify(completion_body({ role: "assistant", content: "", tool_calls: [call] }, "tool_calls")),
+          { status: 200 },
+        );
+      }
+      second_started();
+      await second_gate;
+      return new Response("bad request", { status: 400 });
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const submit_promise = rpc(context, "prompt.submit", { session_id: created.session_id, text: "look around" }, 2);
+    await started;
+    await rpc(context, "session.clear", { session_id: created.session_id }, 3);
+    release_second();
+    expect((await submit_promise).error).toBeDefined();
+    expect(sessions.get(created.session_id)?.history).toEqual([]);
+  });
+
   it("aborts an in-flight run via prompt.abort", async () => {
     const work_dir = await make_temp_dir("serve-prompt-abort");
     const session_dir = path.join(work_dir, "sessions");

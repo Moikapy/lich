@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `lich serve` `prompt.submit` keeps completed tool turns in the session when a
+  later model call throws, unless `session.clear` reset it mid-run.
 - Gateway, CLI chat, the TUI, and the persona orchestrator keep completed tool
   turns when a later model call throws, so the next message still sees that work.
 - New `examples/decision_lane/`: a prototype plugin that asks a local Ollama
