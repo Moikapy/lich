@@ -1,7 +1,7 @@
 ---
 title: game_bridge example (file-bus combat commander)
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-04
 type: entity
 tags: [games, npc, plugins]
 sources: [raw/audits/2026-09-23-game-surface-audit.md]
@@ -27,4 +27,6 @@ confidence: high
 
 Deferred in #114, item 4: retire the file bus once [[client-executed-tools]] and the GDScript SDK exist. The proposed replacement for the double LLM call is [[action-terminal-mode]]. Until then, keep the docs, because this is the only working Godot path.
 
-Related: [[godot-and-redot]], [[persona-orchestrator-example]], [[lich-sessions]].
+[[decision-lane-example]] can pick a round's orders with a local decision model before the LLM turn; its act-mode orders still go through `enemy_actions` and the meteor veto.
+
+Related: [[godot-and-redot]], [[persona-orchestrator-example]], [[decision-lane-example]], [[lich-sessions]].
