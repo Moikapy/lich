@@ -161,7 +161,8 @@ function replace_file(file: string, text: string): void {
   const temp = `${file}.${process.pid}.tmp`;
   const mode = statSync(file, { throwIfNoEntry: false })?.mode;
   try {
-    writeFileSync(temp, text, "utf8");
+    // Create it with the old mode so a 0600 config is never briefly wider.
+    writeFileSync(temp, text, { encoding: "utf8", mode: mode === undefined ? undefined : mode & 0o777 });
     if (mode !== undefined) {
       chmodSync(temp, mode);
     }

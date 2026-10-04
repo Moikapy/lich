@@ -236,7 +236,8 @@ export function run_notice_blocks(result: AgentRunResult, theme: ThemeSpec): His
     blocks.push({ role: "error", lines: [`\u00b7 ${fill_template(theme.notices.budget_exhausted, {})}`] });
   }
   if (result.outcome.stopped_reason === "aborted") {
-    blocks.push({ role: "error", lines: ["\u00b7 run cancelled"] });
+    // `final` on abort is the last assistant so far, already on screen.
+    return [...blocks, { role: "error", lines: ["\u00b7 run cancelled"] }];
   }
   const final_block = result.outcome.final === undefined ? undefined : assistant_result_block(result.outcome.final, theme);
   if (final_block !== undefined) {

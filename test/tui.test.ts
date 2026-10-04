@@ -418,9 +418,9 @@ describe("notice blocks", () => {
     expect(blocks[1]?.lines[0]).toBe(`${LICH_THEME.response_label} › partial`);
   });
 
-  it("shows a cancelled notice for an aborted run", () => {
+  it("shows only a cancelled notice for an aborted run, not the earlier reply", () => {
     const blocks = run_notice_blocks({
-      outcome: { messages: [], final: undefined, result: undefined, turns_used: 1, stopped_reason: "aborted" },
+      outcome: { messages: [], final: { role: "assistant", content: "earlier" }, result: undefined, turns_used: 0, stopped_reason: "aborted" },
       messages: [],
       usage_total: usage(0),
       session_path: undefined,

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Box, Text } from "ink";
 import type { Agent, AgentRunResult } from "../agent/agent.js";
-import { history_after_run_error } from "../agent/loop.js";
+import { history_after_abort, history_after_run_error } from "../agent/loop.js";
 import type { AgentEvent } from "../agent/events.js";
 import type { AgentConfig } from "../agent/config.js";
 import type { Message } from "../providers/types.js";
@@ -135,7 +135,8 @@ function use_agent_run(
   }, []);
 
   const finish_run = useCallback((result: AgentRunResult): void => {
-    history_ref.current = result.messages;
+    history_ref.current =
+      result.outcome.stopped_reason === "aborted" ? history_after_abort(result.messages) : result.messages;
     set_state((current) => apply_run_result(current, result));
     add_blocks(run_notice_blocks(result, theme));
   }, [add_blocks, set_state, theme]);

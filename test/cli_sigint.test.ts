@@ -10,8 +10,9 @@ const sigint_state = vi.hoisted(() => ({
   lines: [] as string[],
   rl: undefined as (EventEmitter & { closed: boolean }) | undefined,
   signals: [] as AbortSignal[],
-  runs: [] as string[],
+  runs: [] as Array<{ input: string; history: readonly Message[] }>,
   finished: 0,
+  release: undefined as (() => void) | undefined,
 }));
 
 vi.mock("node:readline", async () => {
@@ -44,21 +45,32 @@ vi.mock("../src/agent/agent.js", () => ({
     config: { theme: "lich" },
     events: { on: () => () => undefined },
     close: () => undefined,
+    // "slow" waits for the abort, "stuck" also ignores it until released; anything else replies at once.
     run: async (options: { input: string; history?: readonly Message[]; signal?: AbortSignal }) => {
       const signal = options.signal;
       if (signal === undefined) {
         throw new Error("no signal");
       }
+      const history = options.history ?? [];
       sigint_state.signals.push(signal);
-      sigint_state.runs.push(options.input);
+      sigint_state.runs.push({ input: options.input, history });
+      const messages: Message[] = [...history, { role: "user", content: options.input }];
+      const usage_total = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+      if (options.input !== "slow" && options.input !== "stuck") {
+        messages.push({ role: "assistant", content: `echo:${options.input}` });
+        const final = messages[messages.length - 1];
+        return { outcome: { final, turns_used: 1, stopped_reason: "final", messages }, messages, usage_total };
+      }
       await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      if (options.input === "stuck") {
+        await new Promise<void>((resolve) => {
+          sigint_state.release = resolve;
+        });
+      }
       sigint_state.finished += 1;
-      const messages: Message[] = [...(options.history ?? []), { role: "user", content: options.input }];
-      return {
-        outcome: { final: undefined, turns_used: 1, stopped_reason: "aborted", messages },
-        messages,
-        usage_total: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-      };
+      // Like the loop: on abort `final` is the last assistant so far, from an earlier turn.
+      const final = [...history].reverse().find((message) => message.role === "assistant");
+      return { outcome: { final, turns_used: 0, stopped_reason: "aborted", messages }, messages, usage_total };
     },
   }),
 }));
@@ -79,6 +91,7 @@ afterEach(() => {
   sigint_state.signals = [];
   sigint_state.runs = [];
   sigint_state.finished = 0;
+  sigint_state.release = undefined;
 });
 
 async function until(check: () => boolean): Promise<void> {
@@ -109,20 +122,42 @@ describe("CLI Ctrl+C", () => {
     expect(process.listeners("SIGINT")).toEqual(baseline);
   });
 
+  it("one-shot: a second SIGINT while the run is still cancelling exits 130", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const baseline = process.listeners("SIGINT");
+    const pending = run_one_shot(CONFIG, "stuck");
+    await until(() => sigint_state.signals.length === 1);
+    send_sigint(baseline);
+    await until(() => sigint_state.release !== undefined);
+    expect(exit).not.toHaveBeenCalled();
+    send_sigint(baseline);
+    expect(exit).toHaveBeenCalledWith(130);
+    sigint_state.release?.();
+    expect(await pending).toBe(1);
+  });
+
   it("chat: Ctrl+C cancels the running turn, then ends chat at the prompt", async () => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stdout: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    });
     const baseline = process.listeners("SIGINT");
-    sigint_state.lines = ["slow"];
+    sigint_state.lines = ["first", "slow", "after"];
     const pending = run_chat(CONFIG);
-    await until(() => sigint_state.signals.length === 1);
+    await until(() => sigint_state.signals.length === 2);
     sigint_state.rl?.emit("SIGINT");
-    await until(() => sigint_state.finished === 1);
-    expect(sigint_state.signals[0]?.aborted).toBe(true);
+    await until(() => sigint_state.runs.length === 3);
+    expect(sigint_state.signals[1]?.aborted).toBe(true);
     expect(sigint_state.rl?.closed).toBe(false);
+    // The cancelled line is dropped and the previous reply is not printed again.
+    expect(sigint_state.runs[2]?.history.map((message) => message.content)).toEqual(["first", "echo:first"]);
+    expect(stdout.filter((chunk) => chunk === "echo:first\n")).toHaveLength(1);
     send_sigint(baseline);
     expect(await pending).toBe(0);
-    expect(sigint_state.runs).toEqual(["slow"]);
+    expect(sigint_state.runs.map((run) => run.input)).toEqual(["first", "slow", "after"]);
     expect(process.listeners("SIGINT")).toEqual(baseline);
   });
 });

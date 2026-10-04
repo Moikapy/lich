@@ -345,6 +345,14 @@ export function history_after_run_error(error: unknown): Message[] | undefined {
   return progressed ? kept : undefined;
 }
 
+/**
+ * Messages to keep after an aborted run: completed turns stay, the trailing
+ * user line that never got an answer is dropped.
+ */
+export function history_after_abort(messages: readonly Message[]): Message[] {
+  return drop_trailing_users(messages);
+}
+
 function drop_trailing_users(messages: readonly Message[]): Message[] {
   const kept = [...messages];
   while (kept.at(-1)?.role === "user") {
