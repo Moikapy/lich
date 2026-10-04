@@ -145,7 +145,7 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `context_budget_tokens` | positive int | `100000` | Estimated budget before compression triggers. |
 | `compress_threshold` | 0.1–0.95 | `0.8` | Compress when usage >= this fraction of the budget. |
 | `session_dir` | string | `<work_dir>/.lich/sessions` | Transcript directory. |
-| `terminal_timeout_ms` | positive int | `60000` | Written into tool context as `LICH_TERMINAL_TIMEOUT_MS`. The `terminal` tool does **not** read it yet; pass `timeout_ms` on the tool call (default 60000, max 300000). |
+| `terminal_timeout_ms` | positive int | `60000` | Default command timeout for the `terminal` tool (passed in tool context as `LICH_TERMINAL_TIMEOUT_MS`). A `timeout_ms` on the tool call overrides it (max 300000). |
 | `log_level` | enum | `info` | Logger verbosity. |
 
 Minimal per-provider examples:
@@ -175,7 +175,7 @@ never accepted as a config passthrough.
 | `LICH_ALLOW_PRIVATE_URLS` | Set to exactly `1` to let `fetch_url` / `http_request` reach private or loopback URLs. Unset or any other value is fail-closed (they are blocked). |
 | `LICH_TEST_COMMAND` | Command `run_tests` runs in `work_dir` (default `node node_modules/vitest/vitest.mjs run`). An optional `filter` argument is appended. |
 | `LICH_DOCS_DIR` | Optional docs root for `docs_read` / `docs_search` (dir with `index.md`, or a parent containing `docs/`). Else `<work_dir>/docs` or package docs. |
-| `LICH_TERMINAL_TIMEOUT_MS` | Injected from config `terminal_timeout_ms` into tool context. Unused by `terminal` today — use the tool's `timeout_ms` arg. |
+| `LICH_TERMINAL_TIMEOUT_MS` | Injected from config `terminal_timeout_ms` into tool context; the `terminal` tool's default command timeout. |
 
 Veto reasons, the terminal git denylist, skills, and `MEMORY.md` are in the
 [plugins guide](plugins.md#self-improvement-loop).

@@ -89,7 +89,10 @@ async function run_http(args: Record<string, unknown>, external?: AbortSignal): 
     "",
     clamp_output(clamped.text, max_chars),
   ];
-  return { ok: true, output: sections.join("\n") };
+  const output = sections.join("\n");
+  // Non-2xx reports failure but keeps status and body in output on purpose (API error
+  // bodies matter); unlike fetch_url, which returns an empty output.
+  return response.ok ? { ok: true, output } : { ok: false, output, error: `http_${response.status}` };
 }
 
 export const http_request_tool: Tool = {

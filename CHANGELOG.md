@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `http_request` reports a non-2xx status as `ok: false` (`error: http_<status>`)
+  and still returns the status and body in `output`.
+- `terminal` uses config `terminal_timeout_ms` as its default command timeout
+  (it was ignored); a `timeout_ms` argument still overrides it.
+- File tools accept names that only start with `..` (such as `..notes.txt`);
+  `..` and `../x` are still rejected.
+- OpenAI-compatible tool calls without an id get a unique generated id
+  instead of `""`.
+- MCP tools whose names collide after sanitizing log a warning; the first one
+  registered wins (#133).
 - **Breaking:** a `tools_enabled` list (top-level or `gateway.tools_enabled`)
   now filters plugin tools too, including the gatekeeper's `git_commit`. List
   each plugin tool you want exposed; `"all"` is unchanged. Previously plugin

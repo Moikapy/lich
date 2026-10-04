@@ -42,9 +42,9 @@ confinement root), a process environment map (the agent injects
 from `Agent.run` so tools cancel on caller abort **or** the executor deadline
 (`tool.timeout_ms`, else
 `DEFAULT_TOOL_TIMEOUT_MS` = 30000). `terminal` sets 300000, `run_tests` sets
-600000, and registered MCP tools set 120000. Note: `LICH_TERMINAL_TIMEOUT_MS`
-is injected from config `terminal_timeout_ms` but the `terminal` tool ignores
-it today — use the tool's `timeout_ms` argument (default 60000).
+600000, and registered MCP tools set 120000. The `terminal` tool's own
+command timeout defaults to config `terminal_timeout_ms` (injected as
+`LICH_TERMINAL_TIMEOUT_MS`, default 60000); a `timeout_ms` argument overrides it.
 
 **Parameter schemas.** `parameters` is a `JsonSchemaObject`
 (`src/util/json_schema.ts`) passed through verbatim into provider requests.
@@ -157,7 +157,7 @@ Docs tools join the list only when a docs root resolves.
 | `grep_files` | `pattern`, `path?`, `glob?`, `max_results?` | Explicit stack walk (no recursion), skips `SKIP_DIRS` entries and symbolic links, per-file `assert_file_tool_access` check (`.lich/config.json` is denied), binary sniff (NUL byte in first 1000 bytes), 1 MB file cap, `*.ext` suffix-glob matcher, overcollect-by-one to report suppressed counts. |
 | `fetch_url` | `url`, `max_chars?`, `timeout_ms?` | GET only; rejects non-http(s) protocols; refuses images/octet-stream; tags HTML bodies with `[html content]`; status/type header line first. |
 | `web_search` | `query`, `max_results?` | Scrapes DuckDuckGo's HTML endpoint (no API key); unwraps `uddg=` redirect links; decodes the handful of entities DDG emits. |
-| `http_request` | `url`, `method?`, `headers?`, `body?`, ... | Method allowlist (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS); stringified caller headers; reports `content-length`, `ratelimit-remaining`, `retry-after`. |
+| `http_request` | `url`, `method?`, `headers?`, `body?`, ... | Method allowlist (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS); stringified caller headers; reports `content-length`, `ratelimit-remaining`, `retry-after`. A non-2xx status returns `ok: false` with `error: http_<status>` and keeps the status and body in `output`. |
 | `process_list` | `filter?`, `max_results?` | Reads `/proc` synchronously: numeric dirs are pids, `cmdline` is NUL-separated; missing entries (process died mid-scan) read as empty. |
 | `disk_usage` | `path?`, `max_entries?` | One `du -sb` subprocess per depth-1 entry with a 10 s timeout; sorted desc with a `TOTAL` row; `du` missing yields `du_unavailable`. |
 | `env_get` | `keys?`, `prefix?`, `reveal?` | Values are hidden unless `reveal`; names matching `/(secret\|token\|password\|key\|credential\|auth)/i` are **always** masked as `<redacted: N chars>`. |

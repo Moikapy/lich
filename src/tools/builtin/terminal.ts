@@ -25,7 +25,7 @@ const parameters: JsonSchemaObject = {
   type: "object",
   properties: {
     command: { type: "string", description: "Shell command to run via bash -lc" },
-    timeout_ms: { type: "number", description: "Kill the command after this many ms (default 60000, max 300000)" },
+    timeout_ms: { type: "number", description: "Kill the command after this many ms (default: config terminal_timeout_ms, 60000; max 300000)" },
   },
   required: ["command"],
   additionalProperties: false,
@@ -39,6 +39,12 @@ function stream_chunk(current: { text: string }, chunk: Buffer): void {
   if (current.text.length > MAX_STREAM_CHARS) {
     current.text = current.text.slice(0, MAX_STREAM_CHARS);
   }
+}
+
+/** `terminal_timeout_ms` from config (passed as LICH_TERMINAL_TIMEOUT_MS), else the built-in default. */
+function configured_timeout(env: Record<string, string>): number {
+  const configured = Number(env["LICH_TERMINAL_TIMEOUT_MS"]);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_TIMEOUT_MS;
 }
 
 function clamp_timeout(raw: number): number {
@@ -148,7 +154,7 @@ export const terminal_tool: Tool = {
   execute: async (args, context) =>
     capture_errors(async () => {
       const command = require_string_arg(args, "command");
-      const timeout_ms = clamp_timeout(optional_number_arg(args, "timeout_ms", DEFAULT_TIMEOUT_MS));
+      const timeout_ms = clamp_timeout(optional_number_arg(args, "timeout_ms", configured_timeout(context.env)));
       const outcome = await run_command(command, context.work_dir, context.env, timeout_ms, context.signal);
       return terminal_result(outcome);
     }),

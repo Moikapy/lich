@@ -182,6 +182,36 @@ describe("openai compat provider", () => {
     expect(result.provider_name).toBe("openai-main");
   });
 
+  it("gives tool calls without an id a unique non-empty id", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        model: "gpt-test",
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                { type: "function", function: { name: "list_dir", arguments: "{}" } },
+                { id: "", type: "function", function: { name: "read_file", arguments: "{}" } },
+                { id: null, type: "function", function: { name: "list_dir", arguments: "{}" } },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      },
+    }));
+    const provider = new OpenAICompatProvider(openai_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    const ids = (result.message.tool_calls ?? []).map((call) => call.id);
+    expect(ids).toHaveLength(3);
+    expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+    expect(new Set(ids).size).toBe(3);
+  });
+
   it("omits executable tool calls and appends a note when arguments do not parse", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,

@@ -141,7 +141,7 @@ the next self-commit. One gated `git_commit` per run requires
 | `LICH_ALLOW_PRIVATE_URLS` | set to exactly `1` to let `fetch_url` / `http_request` reach private or loopback URLs; unset or any other value is fail-closed (blocked) |
 | `LICH_TEST_COMMAND` | command `run_tests` runs (default: `node node_modules/vitest/vitest.mjs run`) |
 | `LICH_DOCS_DIR` | optional docs root for `docs_read` / `docs_search` (directory with `index.md`, or a parent containing `docs/`); else `<work_dir>/docs` or the package docs |
-| `LICH_TERMINAL_TIMEOUT_MS` | injected into tool context from config `terminal_timeout_ms`; the `terminal` tool does **not** read it yet — use the tool's `timeout_ms` arg (default 60000) |
+| `LICH_TERMINAL_TIMEOUT_MS` | injected into tool context from config `terminal_timeout_ms`; the `terminal` tool's default command timeout (60000), overridden by the tool's `timeout_ms` arg |
 
 Gateway-only vars are listed under [Gateway](#gateway).
 

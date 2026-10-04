@@ -21,8 +21,10 @@ export function classify_error(error: unknown): ProviderErrorKind {
 }
 
 /**
- * Deterministic exponential backoff: base * 2**attempt capped at max, plus a
- * fixed jitter term so simultaneous callers spread out without Math.random.
+ * Deterministic exponential backoff: base * 2**attempt plus a fixed term,
+ * capped at max. It is deterministic on purpose (testable, reproducible), so
+ * callers that fail at the same moment also retry at the same moment; it does
+ * not desynchronize them.
  */
 export function compute_backoff_ms(
   attempt: number,

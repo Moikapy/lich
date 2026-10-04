@@ -108,6 +108,11 @@ describe("guard", () => {
     expect(() => resolve_safe_path(tmp_root, "/etc/passwd")).toThrow(/path_escape/);
   });
 
+  it("resolve_safe_path accepts a name that only starts with two dots", () => {
+    expect(resolve_safe_path(tmp_root, "..notes.txt")).toBe(path.join(tmp_root, "..notes.txt"));
+    expect(() => resolve_safe_path(tmp_root, "..")).toThrow(/path_escape/);
+  });
+
   it("resolve_safe_path accepts inside paths", () => {
     const relative = resolve_safe_path(tmp_root, "./sub/file.txt");
     expect(relative.startsWith(tmp_root) === true).toBe(true);
@@ -244,6 +249,14 @@ describe("executor", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe("timeout: tool:hanging exceeded 150ms");
     expect(Date.now() - started < 2000).toBe(true);
+  });
+
+  it("terminal defaults its timeout to config terminal_timeout_ms", async () => {
+    const context: ToolContext = { work_dir: tmp_root, env: { LICH_TERMINAL_TIMEOUT_MS: "200" } };
+    const started = Date.now();
+    const result = await terminal_tool.execute({ command: "sleep 5" }, context);
+    expect(result.error).toBe("timeout");
+    expect(Date.now() - started < 4000).toBe(true);
   });
 
   it("terminal declares a 300000ms executor timeout", () => {

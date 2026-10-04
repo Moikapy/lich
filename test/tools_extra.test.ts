@@ -326,6 +326,15 @@ describe("http_request", () => {
     expect(result.output.includes('{"ok":true}')).toBe(true);
   });
 
+  it("reports a non-2xx status as a failure but keeps status and body", async () => {
+    stub_fetch(vi.fn(async () => fake_response('{"error":"nope"}', { status: 404, headers: { "content-type": "application/json" } })));
+    const result = await executor.execute("http_request", { url: "https://api.example.com/missing" });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("http_404");
+    expect(result.output).toContain("# status 404");
+    expect(result.output).toContain('{"error":"nope"}');
+  });
+
   it("sends no body for GET and rejects invalid methods", async () => {
     const fetch_mock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => fake_response("fine"));
     stub_fetch(fetch_mock);
