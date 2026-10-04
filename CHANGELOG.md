@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Gateway, CLI chat, the TUI, and the persona orchestrator keep completed tool
+  turns when a later model call throws, so the next message still sees that work.
 - New `examples/decision_lane/`: a prototype plugin that asks a local Ollama
   decision model (`/v1/systemone`) to pick each game_bridge enemy's action
   before the LLM turn. Shadow mode (default) only logs; act mode queues orders

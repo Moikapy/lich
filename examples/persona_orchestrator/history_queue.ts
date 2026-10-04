@@ -91,6 +91,30 @@ export function recall_history<T>(map: Map<string, T>, key: string, max_entries:
   return map.get(key);
 }
 
+/**
+ * Turns that finished before the agent threw, read from the non-enumerable
+ * `lich_partial_messages` field the loop attaches. Undefined when there is
+ * no completed assistant or tool turn to keep.
+ */
+export function history_after_run_error(error: unknown): unknown[] | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const value = (error as { lich_partial_messages?: unknown }).lich_partial_messages;
+  if (Array.isArray(value) === false) {
+    return undefined;
+  }
+  const kept = [...value];
+  while (kept.length > 0 && role_of(kept[kept.length - 1]) === "user") {
+    kept.pop();
+  }
+  const progressed = kept.some((message) => {
+    const role = role_of(message);
+    return role === "assistant" || role === "tool";
+  });
+  return progressed ? kept : undefined;
+}
+
 /** Serializes tasks for one key. A rejected task does not stall the next. Idle keys are evicted. */
 export function enqueue<T>(chains: Map<string, Promise<void>>, key: string, task: () => Promise<T>): Promise<T> {
   const previous = chains.get(key) ?? Promise.resolve();

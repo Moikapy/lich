@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { AgentEmitter, type AgentEventBody } from "../src/agent/events.js";
 import type { ChatFn } from "../src/context/compressor.js";
-import { run_conversation, type LoopDeps, type ToolRunner } from "../src/agent/loop.js";
+import {
+  history_after_run_error,
+  partial_messages_of,
+  run_conversation,
+  type LoopDeps,
+  type ToolRunner,
+} from "../src/agent/loop.js";
 import { ProviderError, type ChatResult, type Message, type ToolCall } from "../src/providers/types.js";
 
 function result(content: string, calls?: ToolCall[]): ChatResult {
@@ -533,6 +539,48 @@ describe("run_conversation", () => {
       run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 2 }),
     ).rejects.toThrow("provider exploded");
     expect(events.some((event) => event.type === "error")).toBe(true);
+  });
+
+  it("attaches completed tool turns when a later chat throws", async () => {
+    const state = { calls: 0 };
+    const chat: ChatFn = async () => {
+      state.calls += 1;
+      if (state.calls === 1) {
+        return result("", [{ id: "t1", name: "read_file", args: { path: "a.txt" } }]);
+      }
+      throw new Error("provider exploded");
+    };
+    const { runner } = make_tool_runner("file-body");
+    const deps: LoopDeps = { chat, tools: runner, definitions: () => [] };
+
+    let caught: unknown;
+    try {
+      await run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 3 });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("provider exploded");
+    const partial = partial_messages_of(caught);
+    expect(partial?.some((message) => message.role === "assistant")).toBe(true);
+    expect(partial?.some((message) => message.role === "tool" && message.content.includes("file-body"))).toBe(true);
+    const kept = history_after_run_error(caught);
+    expect(kept?.some((message) => message.role === "tool" && message.content.includes("file-body"))).toBe(true);
+    expect(kept?.at(-1)?.role).not.toBe("user");
+  });
+
+  it("drops a failed first turn that never reached an assistant", async () => {
+    const chat: ChatFn = async () => {
+      throw new Error("provider exploded");
+    };
+    const deps: LoopDeps = { chat, tools: make_tool_runner("ok").runner, definitions: () => [] };
+    let caught: unknown;
+    try {
+      await run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 2 });
+    } catch (error) {
+      caught = error;
+    }
+    expect(history_after_run_error(caught)).toBeUndefined();
   });
 
   it("emits only kind and message when chat throws ProviderError", async () => {

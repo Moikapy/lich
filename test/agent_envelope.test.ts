@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { create_agent } from "../src/agent/agent.js";
 import type { AgentEvent } from "../src/agent/events.js";
+import { history_after_run_error } from "../src/agent/loop.js";
 import { open_session } from "../src/session/store.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
@@ -225,8 +226,14 @@ describe("agent event envelope", () => {
 
     const events: AgentEvent[] = [];
     const stop = agent.events.on((event) => events.push(event));
-    await expect(agent.run({ input: "ping" })).rejects.toThrow();
+    let caught: unknown;
+    try {
+      await agent.run({ input: "ping" });
+    } catch (error) {
+      caught = error;
+    }
     stop();
+    expect(caught).toBeInstanceOf(Error);
 
     const end = events.at(-1);
     expect(end?.type).toBe("run_end");
@@ -234,5 +241,7 @@ describe("agent event envelope", () => {
       expect(end.stopped_reason).toBe("error");
       expect(end.turns_used).toBe(1);
     }
+    const kept = history_after_run_error(caught);
+    expect(kept?.some((message) => message.role === "tool")).toBe(true);
   });
 });
