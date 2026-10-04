@@ -10,6 +10,7 @@ import { compress_messages, should_compress, split_keep_recent, type ChatFn } fr
 import { estimate_messages_tokens } from "../context/tokens.js";
 import type {
   AssistantMessage,
+  ChatOptions,
   ChatResult,
   Message,
   ToolCall,
@@ -17,6 +18,7 @@ import type {
   ToolMessage,
   Usage,
 } from "../providers/types.js";
+import type { BeforeLlmCallInfo, HookContext } from "../plugins/types.js";
 import { ProviderError } from "../providers/types.js";
 import type { ToolContext, ToolResult } from "../tools/types.js";
 import { logger } from "../util/log.js";
@@ -34,6 +36,10 @@ export interface ToolRunner {
 
 export interface LoopDeps {
   chat: ChatFn;
+  /** Context-compression chat; falls back to `chat` when unset or failing. */
+  compress_chat?: ChatFn;
+  /** Plugin before_llm_call fan-out; returned notes apply to that one main-loop call. */
+  before_llm_call?: (info: BeforeLlmCallInfo, ctx: HookContext) => Promise<string[]>;
   tools: ToolRunner;
   definitions: () => ToolDefinition[];
   emitter?: AgentEmitter;
@@ -130,14 +136,30 @@ async function run_tool_calls(
   return signal_aborted(signal) === true ? "aborted" : "continued";
 }
 
+/** History plus any before_llm_call notes as one trailing system message; history itself is untouched. */
+async function messages_for_call(deps: LoopDeps, history: readonly Message[], turn: number): Promise<readonly Message[]> {
+  if (deps.before_llm_call === undefined) {
+    return history;
+  }
+  const ctx: HookContext = { work_dir: deps.tool_context?.work_dir ?? process.cwd() };
+  // Deep copy: hooks must not reach live history objects or the session transcript.
+  const notes = await deps.before_llm_call({ turn, messages: structuredClone(history) }, ctx);
+  if (notes.length === 0) {
+    return history;
+  }
+  return [...history, { role: "system", content: notes.join("\n\n") }];
+}
+
 async function call_chat(
   deps: LoopDeps,
   history: readonly Message[],
   params: LoopParams,
   emitter: AgentEmitter | undefined,
+  turn: number,
 ): Promise<ChatResult> {
   try {
-    return await deps.chat(history, deps.definitions(), {
+    const messages = await messages_for_call(deps, history, turn);
+    return await deps.chat(messages, deps.definitions(), {
       temperature: params.temperature,
       max_tokens: params.max_tokens,
       signal: params.signal,
@@ -180,6 +202,28 @@ function schedule_compress_backoff(backoff: CompressBackoff, turn: number): void
   backoff.skip_until_turn = turn + COMPRESS_BACKOFF_TURNS + 1;
 }
 
+/** Compression role first; on a non-abort failure, retry on the main chat chain. */
+async function compress_chat(
+  deps: LoopDeps,
+  messages: readonly Message[],
+  tools: readonly ToolDefinition[],
+  options?: ChatOptions,
+): Promise<ChatResult> {
+  if (deps.compress_chat === undefined) {
+    return await deps.chat(messages, tools, options);
+  }
+  try {
+    return await deps.compress_chat(messages, tools, options);
+  } catch (error) {
+    if (options?.signal?.aborted === true) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`compress chain failed (${message}); falling back to chat chain`);
+    return await deps.chat(messages, tools, options);
+  }
+}
+
 async function compress_if_needed(
   deps: LoopDeps,
   history: Message[],
@@ -207,7 +251,7 @@ async function compress_if_needed(
   emitter?.emit({ type: "compress_start", estimated_tokens: estimate_messages_tokens(history) });
   let summarizer_usage: Usage | undefined;
   const counting_chat: ChatFn = async (messages, tools, options) => {
-    const result = await deps.chat(messages, tools, options);
+    const result = await compress_chat(deps, messages, tools, options);
     summarizer_usage = result.usage;
     return result;
   };
@@ -320,7 +364,7 @@ export async function run_conversation(
     emitter?.emit({ type: "llm_start", turn });
     let result: ChatResult;
     try {
-      result = await call_chat(deps, history, params, emitter);
+      result = await call_chat(deps, history, params, emitter, turn);
     } catch (error) {
       if (signal_aborted(params.signal) === true) {
         return aborted_outcome(history, turn - 1);

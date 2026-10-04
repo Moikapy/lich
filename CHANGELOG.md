@@ -4,6 +4,18 @@
 
 - Gateway, CLI chat, the TUI, and the persona orchestrator keep completed tool
   turns when a later model call throws, so the next message still sees that work.
+- New `examples/decision_lane/`: a prototype plugin that asks a local Ollama
+  decision model (`/v1/systemone`) to pick each game_bridge enemy's action
+  before the LLM turn. Shadow mode (default) only logs; act mode queues orders
+  through game_bridge's own checks when every answer clears the threshold.
+  Includes a replay benchmark (#148).
+- Plugin entries may be `{ path, settings?, models? }`. Hooks and plugin tools
+  get the frozen `settings` and `models.chat(role, …)`, which refuses roles not
+  granted. New `before_llm_call` hook can add a capped note to one model call;
+  it fails open (#149).
+- Optional `models` config block assigns provider chains per role: `chat` for
+  the main loop and `compress` for context compression (falls back to `chat`
+  on failure). Without it, behavior is unchanged (#149).
 - Docs, examples and the setup wizard now default local Ollama to `qwen3:8b`
   (`llama3.2` stays as the low-memory option), and document Ollama cloud:
   `LICH_BASE_URL=https://ollama.com` with `LICH_API_KEY_ENV=OLLAMA_API_KEY`.

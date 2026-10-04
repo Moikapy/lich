@@ -40,6 +40,17 @@ Point your config at it and restart:
 
 Entry paths are relative to `work_dir` (or absolute). Restarting the agent reloads plugins — there is no hot reload.
 
+An entry can also be an object with free-form `settings` and the model roles the plugin may call:
+
+```json
+"plugins": [
+  "./.lich/plugins/my-plugin.ts",
+  { "path": "./.lich/plugins/lane.mjs", "settings": { "mode": "shadow", "threshold": 0.75 }, "models": ["compress"] }
+]
+```
+
+`models` lists roles from the [`models` config](cli.md#config-file-reference) (`chat`, `compress`); it defaults to none. Unknown keys and roles are rejected.
+
 ## Hook reference
 
 All hooks are awaited. Hook errors are logged as warnings and skipped — a broken hook never breaks the run.
@@ -48,10 +59,33 @@ All hooks are awaited. Hook errors are logged as warnings and skipped — a brok
 | --- | --- | --- |
 | `before_tool_call` | `(info: {tool_name, args}, ctx) => {block?: boolean, reason?: string} \| void` | Runs before each tool call in plugin registration order. Return `{block: true, reason}` to veto. |
 | `after_tool_call` | `(info: {tool_name, args, result_summary, ok, error?}, ctx) => void` | Runs after each tool call with a 300-char summary plus structured `ok`/`error`. |
+| `before_llm_call` | `(info: {turn, messages}, ctx) => {note?: string} \| void` | Runs before each main-loop model call (not compression). A returned `note` is capped at 2000 chars, prefixed `[plugin <name>]`, and sent as a trailing system message on that one call only; it is never saved to history. |
 | `on_run_start` | `(info: {input_chars}, ctx) => void` | Runs once before the conversation loop starts. |
 | `on_run_end` | `(info: {stopped_reason, turns_used}, ctx) => void` | Runs once after the loop ends with the outcome. |
 
-`ctx` is `{work_dir, state?}` — the agent's working directory plus that plugin's per-run bag.
+`ctx` is `{work_dir, state?, settings?, models?}`:
+
+- `state`: that plugin's per-run bag.
+- `settings`: that plugin's frozen `settings` from its config entry (`{}` for a bare path).
+- `models.chat(role, messages, options?)`: calls the host's provider chain for `role`. A role not granted in the entry's `models` is refused with an error. `compress` uses the `chat` chain when no `models.compress` is configured.
+
+Plugin tools get the same `settings` and `models` on their `ToolContext`.
+
+```mjs
+export default {
+  name: "lane",
+  hooks: {
+    async before_llm_call(info, ctx) {
+      if (ctx.settings.mode !== "act") return;
+      const last = info.messages.at(-1);
+      const reply = await ctx.models.chat("compress", [
+        { role: "user", content: `One line: what is the user asking?\n\n${last?.content ?? ""}` },
+      ]);
+      return { note: `Request summary: ${reply.message.content}` };
+    },
+  },
+};
+```
 
 ## Tool authoring
 

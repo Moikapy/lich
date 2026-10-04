@@ -478,6 +478,57 @@ describe("serve prompt rpc", () => {
     expect(JSON.stringify(history_after)).not.toContain("clear-me");
   });
 
+  it("does not resurrect a session bag evicted while its run is in flight", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-evict-race");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    let release_first!: () => void;
+    const first_gate = new Promise<void>((resolve) => {
+      release_first = resolve;
+    });
+    const fetch_fn: typeof fetch = async () => {
+      fetch_started();
+      await first_gate;
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "evicted-reply" }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir, 2);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const submit_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "evict-me" },
+      2,
+    );
+    await started;
+    const second = (await rpc(context, "session.create", { source: "test" }, 3)).result as {
+      session_id: string;
+    };
+    const third = (await rpc(context, "session.create", { source: "test" }, 4)).result as {
+      session_id: string;
+    };
+    expect(sessions.get(created.session_id)).toBeUndefined();
+
+    release_first();
+    const submit = (await submit_promise).result as { stopped_reason: string; reply: string };
+    expect(submit.stopped_reason).toBe("final");
+    expect(submit.reply).toBe("evicted-reply");
+    expect(sessions.get(created.session_id)).toBeUndefined();
+    expect(sessions.get(second.session_id)?.history).toEqual([]);
+    expect(sessions.get(third.session_id)?.history).toEqual([]);
+  });
+
   it("reuses one SessionHandle transcript across multi-turn submits", async () => {
     const work_dir = await make_temp_dir("serve-prompt-multi");
     const session_dir = path.join(work_dir, "sessions");

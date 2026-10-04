@@ -85,6 +85,42 @@ function temp_work_dir(): string {
   return mkdtempSync(join(TMP_BASE, "lich-gw-"));
 }
 
+/** Second handle() sees whatever cap_history stored from the first run's messages. */
+async function capped_followup_history(
+  work_dir: string,
+  first_messages: Message[],
+  history_cap: number,
+): Promise<readonly Message[]> {
+  const records: RunRecord[] = [];
+  let runs = 0;
+  const probe_factory = (): Agent =>
+    ({
+      run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+        runs += 1;
+        if (runs === 1) {
+          return {
+            outcome: {
+              messages: first_messages,
+              final: undefined,
+              result: undefined,
+              turns_used: 1,
+              stopped_reason: "final",
+            },
+            messages: first_messages,
+            usage_total: usage_zero,
+            session_path: undefined,
+          };
+        }
+        records.push({ input: options.input, history: options.history ?? [] });
+        return reply_result("ok", options.history ?? [], options.input);
+      },
+    }) as unknown as Agent;
+  const bus = new GatewayBus({ config: config_for(work_dir), agent_factory: probe_factory }, { history_cap });
+  await bus.handle("webhook", "cap-edge", "u1", "go");
+  await bus.handle("webhook", "cap-edge", "u1", "again");
+  return records[0]?.history ?? [];
+}
+
 describe("gateway bus", () => {
   it("keeps conversation continuity across handle() calls", async () => {
     const work_dir = temp_work_dir();
@@ -301,6 +337,47 @@ describe("gateway bus", () => {
       expect(seen.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool"]);
       expect(seen[2]?.content).toBe("one");
       expect(seen[3]?.content).toBe("two");
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops a leading tool fragment and keeps the next assistant when the cap has no user", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const transcript: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c1", name: "read_file", args: {} }] },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "stale" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c2", name: "read_file", args: {} }] },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "fresh" },
+      ];
+      const seen = await capped_followup_history(work_dir, transcript, 3);
+      expect(seen.map((message) => message.role)).toEqual(["user", "assistant", "tool"]);
+      expect(seen[0]).toEqual({ role: "user", content: "(earlier conversation trimmed)" });
+      expect(seen[2]?.content).toBe("fresh");
+      expect(seen.some((message) => message.content === "stale")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores no history when a capped tool window has no owning assistant", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const from_user: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "orphan" },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "orphan-2" },
+      ];
+      expect(await capped_followup_history(work_dir, from_user, 2)).toEqual([]);
+      const empty_calls: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "no calls", tool_calls: [] },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "orphan" },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "orphan-2" },
+      ];
+      expect(await capped_followup_history(work_dir, empty_calls, 2)).toEqual([]);
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }

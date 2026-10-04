@@ -1,3 +1,4 @@
+import type { PluginModels } from "../plugins/types.js";
 import type { JsonSchemaObject } from "../util/json_schema.js";
 
 export interface ToolResult {
@@ -10,6 +11,10 @@ export interface ToolContext {
   work_dir: string;
   env: Record<string, string>;
   signal?: AbortSignal;
+  /** Plugin tools only: the owning plugin's frozen config settings. */
+  settings?: Readonly<Record<string, unknown>>;
+  /** Plugin tools only: model access limited to the owning plugin's granted roles. */
+  models?: PluginModels;
 }
 
 export interface Tool {
