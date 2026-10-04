@@ -19,6 +19,7 @@ vi.mock("node:readline", () => ({
       }
     },
     close: () => undefined,
+    on: () => undefined,
   }),
 }));
 

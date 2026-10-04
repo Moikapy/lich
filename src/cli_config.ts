@@ -2,7 +2,7 @@
  * Config-file discovery for the CLI: an ordered search chain, safe loading,
  * and a starter template so `lich tui` works with zero environment setup.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { safe_json_parse } from "./util/json.js";
@@ -137,19 +137,40 @@ export function write_lich_config(
   if (existsSync(file) === true && update !== true) {
     return already_exists(file);
   }
+  const text = `${JSON.stringify(config, null, 2)}\n`;
+  if (update === true) {
+    replace_file(file, text);
+    return { path: file, written: true, message: `updated ${file}` };
+  }
   try {
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: update === true ? "w" : "wx",
-    });
+    writeFileSync(file, text, { encoding: "utf8", flag: "wx" });
   } catch (error) {
-    if (update !== true && is_eexist(error) === true) {
+    if (is_eexist(error) === true) {
       return already_exists(file);
     }
     throw error;
   }
-  const verb = update === true ? "updated" : "wrote";
-  return { path: file, written: true, message: `${verb} ${file}` };
+  return { path: file, written: true, message: `wrote ${file}` };
+}
+
+/**
+ * Write a sibling temp file, then rename it over `file`, so readers never see
+ * a partial config. The temp file takes the existing file's mode.
+ */
+function replace_file(file: string, text: string): void {
+  const temp = `${file}.${process.pid}.tmp`;
+  const mode = statSync(file, { throwIfNoEntry: false })?.mode;
+  try {
+    // Create it with the old mode so a 0600 config is never briefly wider.
+    writeFileSync(temp, text, { encoding: "utf8", mode: mode === undefined ? undefined : mode & 0o777 });
+    if (mode !== undefined) {
+      chmodSync(temp, mode);
+    }
+    renameSync(temp, file);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
 }
 
 function already_exists(file: string): LichConfigWriteResult {

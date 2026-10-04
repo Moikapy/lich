@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Box, Text } from "ink";
 import type { Agent, AgentRunResult } from "../agent/agent.js";
-import { history_after_run_error } from "../agent/loop.js";
+import { history_after_abort, history_after_run_error } from "../agent/loop.js";
 import type { AgentEvent } from "../agent/events.js";
 import type { AgentConfig } from "../agent/config.js";
 import type { Message } from "../providers/types.js";
@@ -55,6 +55,7 @@ type SetHistory = (messages: readonly Message[]) => void;
 
 interface AgentRunControls {
   readonly start_message_run: (text: string) => void;
+  readonly cancel_run: () => void;
   readonly set_history: SetHistory;
 }
 
@@ -134,7 +135,8 @@ function use_agent_run(
   }, []);
 
   const finish_run = useCallback((result: AgentRunResult): void => {
-    history_ref.current = result.messages;
+    history_ref.current =
+      result.outcome.stopped_reason === "aborted" ? history_after_abort(result.messages) : result.messages;
     set_state((current) => apply_run_result(current, result));
     add_blocks(run_notice_blocks(result, theme));
   }, [add_blocks, set_state, theme]);
@@ -167,9 +169,13 @@ function use_agent_run(
     [agent, add_blocks, finish_run, session, set_blocks, set_state, theme],
   );
 
+  const cancel_run = useCallback((): void => {
+    controller_ref.current?.abort();
+  }, []);
+
   useEffect(() => () => controller_ref.current?.abort(), []);
 
-  return { start_message_run, set_history };
+  return { start_message_run, cancel_run, set_history };
 }
 
 /** Slash-command dispatch: pure client-side actions, never hits the agent. */
@@ -289,7 +295,7 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
     set_blocks((current) => [...current, ...added].slice(-HISTORY_CAP));
   }, []);
 
-  const { start_message_run, set_history } = use_agent_run(
+  const { start_message_run, cancel_run, set_history } = use_agent_run(
     agent,
     theme,
     add_blocks,
@@ -334,7 +340,7 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
       <Text dimColor>{resume_line === undefined ? banner : `${banner}\n${resume_line}`}</Text>
       <MessageView blocks={blocks} state={state} />
       <StatusBar state={state} model={provider?.model ?? "unknown"} theme={theme} />
-      <CommandBar busy={state.phase !== "idle" || resume_loading} on_submit={submit} />
+      <CommandBar busy={state.phase !== "idle" || resume_loading} on_submit={submit} on_cancel={cancel_run} />
     </Box>
   );
 }

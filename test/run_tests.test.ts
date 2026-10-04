@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { ToolExecutor } from "../src/tools/executor.js";
 import { register_builtin_tools } from "../src/tools/builtin/index.js";
@@ -46,8 +46,9 @@ beforeEach(async () => {
   executor = new ToolExecutor(registry);
 });
 
-afterEach(() => {
+afterEach(async () => {
   reset_test_command_runner();
+  await rm(tmp_root, { recursive: true, force: true });
 });
 
 describe("run_tests", () => {

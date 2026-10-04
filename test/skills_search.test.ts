@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ToolExecutor } from "../src/tools/executor.js";
@@ -26,9 +26,10 @@ beforeEach(async () => {
   reset_docs_cache();
 });
 
-afterEach(() => {
+afterEach(async () => {
   reset_docs_search_cache();
   reset_docs_cache();
+  await rm(tmp_root, { recursive: true, force: true });
 });
 
 async function write_skill(name: string, content: string): Promise<void> {

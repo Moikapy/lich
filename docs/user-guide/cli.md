@@ -26,8 +26,8 @@ lich --version         # package.json version (published package and this tree: 
 
 - **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if neither `.lich/config.json` nor `~/.config/lich/config.json` exists, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. An existing config in that chain skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
 - **`lich init`** writes that starter file without prompts, using the same writer as the wizard. Existing flags such as `--model` are written into the file and win over `LICH_MODEL`. It never overwrites an existing `.lich/config.json`. `.lich/` is gitignored.
-- **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr.
-- **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer.
+- **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr. Ctrl+C cancels the run (exit `1`); a second Ctrl+C quits at once (exit `130`).
+- **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer. Ctrl+C cancels the running turn and keeps the session; at the prompt it ends chat. A second Ctrl+C while a turn is still cancelling quits at once (exit `130`).
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
 - **Serve** starts a loopback-only WebSocket JSON-RPC server with the same Agent/config resolution as TUI/chat. On listen it prints one JSON line `{"port":…,"token":…}` to stdout for clients (e.g. ossuary) to parse. `--host` defaults to `127.0.0.1` and must be loopback; `--port` defaults to `0` (ephemeral). See the [serve architecture note](../architecture/serve.md).
 - **Ossuary** opens the Electron desktop shell when `apps/ossuary` is present (git clone). It does not require a model flag at the CLI entry — the window spawns `lich serve` using `--work-dir` / `LICH_WORK_DIR` (default cwd). Missing `apps/ossuary` fails with a clone hint. See the [Ossuary guide](ossuary.md).
@@ -204,6 +204,7 @@ jq -r 'select(.kind=="message") | "\(.message.role): \(.message.content // "(too
 | --- | --- |
 | `0` | Success: final answer produced (also `--help`, `--version`, `config`, `init`, a successful `mcp` action, `update` when nothing newer is installed or the install succeeds, and a TUI that exits cleanly). |
 | `1` | Any failure: unknown flag, missing model, unreadable config, provider error after failover, aborted run, budget exhaustion, non-TTY bare `lich`, or a cancelled setup wizard. |
+| `130` | A second Ctrl+C while a one-shot run or chat turn was still cancelling. |
 
 ## Log levels
 

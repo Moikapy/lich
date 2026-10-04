@@ -418,6 +418,27 @@ describe("notice blocks", () => {
     expect(blocks[1]?.lines[0]).toBe(`${LICH_THEME.response_label} › partial`);
   });
 
+  it("shows only a cancelled notice for an aborted run, not the earlier reply", () => {
+    const blocks = run_notice_blocks({
+      outcome: { messages: [], final: { role: "assistant", content: "earlier" }, result: undefined, turns_used: 0, stopped_reason: "aborted" },
+      messages: [],
+      usage_total: usage(0),
+      session_path: undefined,
+    }, LICH_THEME);
+    expect(blocks).toEqual([{ role: "error", lines: ["\u00b7 run cancelled"] }]);
+  });
+
+  it("shows a reply the aborted run wrote before the cancel notice", () => {
+    const reply = { role: "assistant" as const, content: "partial" };
+    const blocks = run_notice_blocks({
+      outcome: { messages: [{ role: "user", content: "go" }, reply], final: reply, result: undefined, turns_used: 1, stopped_reason: "aborted" },
+      messages: [],
+      usage_total: usage(0),
+      session_path: undefined,
+    }, LICH_THEME);
+    expect(blocks.map((block) => block.lines[0])).toEqual([`${LICH_THEME.response_label} › partial`, "\u00b7 run cancelled"]);
+  });
+
   it("omits the final block when content is empty", () => {
     const blocks = run_notice_blocks({
       outcome: { messages: [], final: { role: "assistant", content: "" }, result: undefined, turns_used: 1, stopped_reason: "final" },

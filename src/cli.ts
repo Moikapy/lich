@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./agent/agent.js";
-import { history_after_run_error } from "./agent/loop.js";
+import { history_after_abort, history_after_run_error, reply_after_abort } from "./agent/loop.js";
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import type { EnvelopedAgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
@@ -436,10 +436,13 @@ export async function run_one_shot(config: unknown, input: string): Promise<numb
   const agent = await create_agent_with_plugins(config);
   const theme = load_theme(agent.config.theme);
   const stop_progress = attach_progress(agent.events);
+  const controller = new AbortController();
+  const stop_sigint = abort_on_sigint(controller);
   let result: AgentRunResult;
   try {
-    result = await agent.run({ input });
+    result = await agent.run({ input, signal: controller.signal });
   } finally {
+    stop_sigint();
     stop_progress();
     agent.close();
   }
@@ -458,10 +461,39 @@ export async function run_one_shot(config: unknown, input: string): Promise<numb
   return 0;
 }
 
-async function run_chat_turn(agent: Agent, input: string, history: readonly Message[]): Promise<Message[]> {
+/** Ctrl+C aborts the run; a second Ctrl+C exits at once. Returns the remover. */
+function abort_on_sigint(controller: AbortController): () => void {
+  const on_sigint = (): void => {
+    if (controller.signal.aborted === true) {
+      process.exit(130);
+    }
+    process.stderr.write("[lich] cancelling (Ctrl+C again to quit)\n");
+    controller.abort();
+  };
+  process.on("SIGINT", on_sigint);
+  return () => {
+    process.off("SIGINT", on_sigint);
+  };
+}
+
+async function run_chat_turn(
+  agent: Agent,
+  input: string,
+  history: readonly Message[],
+  signal: AbortSignal,
+): Promise<Message[]> {
   const stop_progress = attach_progress(agent.events);
   try {
-    const result = await agent.run({ input, history });
+    const result = await agent.run({ input, history, signal });
+    if (result.outcome.stopped_reason === "aborted") {
+      // `final` on abort is the last assistant so far; print it only if this turn wrote it.
+      const reply = reply_after_abort(result.outcome);
+      if (reply !== undefined && reply.content.length > 0) {
+        process.stdout.write(`${reply.content}\n`);
+      }
+      process.stderr.write("[lich] turn cancelled\n");
+      return history_after_abort(result.messages);
+    }
     const final = result.outcome.final;
     if (final !== undefined && final.content.length > 0) {
       process.stdout.write(`${final.content}\n`);
@@ -487,6 +519,22 @@ export async function run_chat(config: unknown): Promise<number> {
   const theme = load_theme(agent.config.theme);
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   let history: Message[] = [];
+  // Ctrl+C cancels the running turn (twice quits); at the prompt it ends chat.
+  // readline reports it on a TTY, the process signal covers piped stdin.
+  let turn: AbortController | undefined;
+  const on_sigint = (): void => {
+    if (turn === undefined) {
+      rl.close();
+      return;
+    }
+    if (turn.signal.aborted === true) {
+      process.exit(130);
+    }
+    process.stderr.write("[lich] cancelling turn (Ctrl+C again to quit)\n");
+    turn.abort();
+  };
+  rl.on("SIGINT", on_sigint);
+  process.on("SIGINT", on_sigint);
   try {
     process.stdout.write("> ");
     for await (const line of rl) {
@@ -499,11 +547,17 @@ export async function run_chat(config: unknown): Promise<number> {
         process.stdout.write(`${theme.glyph} ${theme.goodbye}\n`);
         return 0;
       }
-      history = await run_chat_turn(agent, command, history);
+      turn = new AbortController();
+      try {
+        history = await run_chat_turn(agent, command, history, turn.signal);
+      } finally {
+        turn = undefined;
+      }
       process.stdout.write("> ");
     }
     return 0;
   } finally {
+    process.off("SIGINT", on_sigint);
     rl.close();
     agent.close();
   }
