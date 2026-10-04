@@ -1,10 +1,10 @@
 ---
 title: Lich tools, executor and guardrails
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-04
 type: entity
 tags: [tools, security, runtime]
-sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md]
+sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, "#161"]
 confidence: high
 ---
 
@@ -36,10 +36,11 @@ It also:
 - **Network tools:** an SSRF guard blocks private and loopback URLs unless `LICH_ALLOW_PRIVATE_URLS=1`, and redirects are re-checked.
 - **`terminal` is not sandboxed.** It runs `bash -lc` in `work_dir` with secret env vars scrubbed. The docs say this plainly.
 
+**Fixed in #161:** a `tools_enabled` list (including `gateway.tools_enabled`) now filters plugin tools and `git_commit` (`src/agent/agent.ts:111@029b7e8`), and a throwing `before_tool_call` blocks the call.
+
 ## Known holes (open on v0.9.0)
 
-- **`tools_enabled` doesn't restrict plugin tools.** It is applied before plugin tools and `git_commit` are registered.
-- **A throwing `before_tool_call` hook lets the call through** (fail-open), and hooks have no timeout.
+- **Hooks have no timeout.**
 - **S-11:** `http_request` always returns `ok:true`; `guard.ts:12` checks `startsWith("..")`; `terminal_timeout_ms` is dead code.
 - **`docs_read` resolves its root from `process.cwd()`** and memoizes it globally.
 
