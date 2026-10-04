@@ -420,6 +420,20 @@ describe("lich init and bare lich", () => {
 });
 
 describe("setup wizard fields", () => {
+  it("defaults a blank ollama setup to qwen3:8b on localhost", async () => {
+    const dir = make_temp_dir("ollama-default");
+    const answers = await collect_setup_answers(dir, async () => "");
+    expect(answers).toMatchObject({
+      agent_name: "lich",
+      provider_kind: "ollama",
+      model: "qwen3:8b",
+      base_url: "http://localhost:11434",
+      platforms: [],
+      plugins: [],
+    });
+    expect(answers?.api_key_env).toBeUndefined();
+  });
+
   it("lands name, provider, gateway env names, and plugins in the agent config", async () => {
     const dir = make_temp_dir("fields");
     mkdirSync(path.join(dir, ".lich", "plugins"), { recursive: true });
