@@ -9,7 +9,8 @@ export const DEFAULT_TOOL_TIMEOUT_MS = 30000;
 /** True when `candidate` is `base` or a descendant (lexical). */
 function is_inside(base: string, candidate: string): boolean {
   const relative = path.relative(base, candidate);
-  return relative.startsWith("..") === false && path.isAbsolute(relative) === false;
+  const escapes = relative === ".." || relative.startsWith(`..${path.sep}`);
+  return escapes === false && path.isAbsolute(relative) === false;
 }
 
 /** Walk up from `target` until an existing path is found (non-recursive). */

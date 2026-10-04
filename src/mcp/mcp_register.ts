@@ -6,6 +6,7 @@ import { mcp_tool_name } from "./mcp_names.js";
 import { pin_for } from "./mcp_pin.js";
 import type { ListedTool } from "./mcp_result.js";
 import type { McpSession } from "./mcp_session.js";
+import { logger } from "../util/log.js";
 
 function name_allowed(enabled: AgentConfig["tools_enabled"], name: string): boolean {
   if (enabled === "all") {
@@ -52,7 +53,12 @@ export function register_listed(
       continue;
     }
     const registered = mcp_tool_name(server, spec.name);
-    if (name_allowed(enabled, registered) === false || registry.has(registered) === true) {
+    if (name_allowed(enabled, registered) === false) {
+      continue;
+    }
+    if (registry.has(registered) === true) {
+      // Sanitizing can map different names to one (e.g. "a-b" and "a_b"); first wins.
+      logger.warn(`mcp tool ${server}/${spec.name} maps to ${registered}, which is already registered; skipping`);
       continue;
     }
     registry.register(tool_for(registered, spec.name, spec, session));

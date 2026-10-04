@@ -15,6 +15,14 @@ import type {
   Usage,
 } from "./types.js";
 
+/** Tool calls the server sent without an id still need a unique one to pair with their results. */
+let tool_call_counter = 0;
+
+function next_tool_call_id(): string {
+  tool_call_counter += 1;
+  return `openai_${Date.now().toString(36)}_${tool_call_counter}`;
+}
+
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const WELL_KNOWN_HOST = "api.openai.com";
 const WELL_KNOWN_KEY_ENV = "OPENAI_API_KEY";
@@ -383,7 +391,7 @@ function parse_assistant_message(
       raw_arguments.length === 0 ? {} : safe_json_parse<Record<string, unknown>>(raw_arguments);
     if (is_record(parsed_arguments) === true) {
       tool_calls.push({
-        id: raw_call.id ?? "",
+        id: raw_call.id !== undefined && raw_call.id.length > 0 ? raw_call.id : next_tool_call_id(),
         name: raw_call.function?.name ?? "",
         args: parsed_arguments,
       });

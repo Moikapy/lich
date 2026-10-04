@@ -194,9 +194,9 @@ jitter      = floor((500 * attempt) / 2)
 delay       = min(exponential + jitter, 8000)
 ```
 
-Attempt 1 waits 1250 ms, attempt 2 waits 2500 ms. The fixed jitter term
-spreads simultaneous callers without nondeterminism (tests assert exact
-values).
+Attempt 1 waits 1250 ms, attempt 2 waits 2500 ms. Because the formula is
+deterministic, callers that fail at the same moment also retry at the same
+moment; it does not desynchronize them (tests assert exact values).
 
 **`Retry-After` floor.** If the failed call produced `retry_after_ms` larger
 than the computed backoff, the server value wins (`delay_for_error`).
