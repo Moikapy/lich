@@ -45,7 +45,8 @@ vi.mock("../src/agent/agent.js", () => ({
     config: { theme: "lich" },
     events: { on: () => () => undefined },
     close: () => undefined,
-    // "slow" waits for the abort, "stuck" also ignores it until released; anything else replies at once.
+    // "slow" waits for the abort, "stuck" also ignores it until released, "midtool" has
+    // already replied this turn when the abort lands; anything else replies at once.
     run: async (options: { input: string; history?: readonly Message[]; signal?: AbortSignal }) => {
       const signal = options.signal;
       if (signal === undefined) {
@@ -56,7 +57,7 @@ vi.mock("../src/agent/agent.js", () => ({
       sigint_state.runs.push({ input: options.input, history });
       const messages: Message[] = [...history, { role: "user", content: options.input }];
       const usage_total = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-      if (options.input !== "slow" && options.input !== "stuck") {
+      if (options.input !== "slow" && options.input !== "stuck" && options.input !== "midtool") {
         messages.push({ role: "assistant", content: `echo:${options.input}` });
         const final = messages[messages.length - 1];
         return { outcome: { final, turns_used: 1, stopped_reason: "final", messages }, messages, usage_total };
@@ -68,8 +69,11 @@ vi.mock("../src/agent/agent.js", () => ({
         });
       }
       sigint_state.finished += 1;
-      // Like the loop: on abort `final` is the last assistant so far, from an earlier turn.
-      const final = [...history].reverse().find((message) => message.role === "assistant");
+      if (options.input === "midtool") {
+        messages.push({ role: "assistant", content: "partial reply" });
+      }
+      // Like the loop: on abort `final` is the last assistant so far.
+      const final = [...messages].reverse().find((message) => message.role === "assistant");
       return { outcome: { final, turns_used: 0, stopped_reason: "aborted", messages }, messages, usage_total };
     },
   }),
@@ -135,6 +139,25 @@ describe("CLI Ctrl+C", () => {
     expect(exit).toHaveBeenCalledWith(130);
     sigint_state.release?.();
     expect(await pending).toBe(1);
+  });
+
+  it("chat: a reply this turn wrote before the cancel is printed and kept", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdout: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    });
+    const baseline = process.listeners("SIGINT");
+    sigint_state.lines = ["midtool", "after"];
+    const pending = run_chat(CONFIG);
+    await until(() => sigint_state.signals.length === 1);
+    sigint_state.rl?.emit("SIGINT");
+    await until(() => sigint_state.runs.length === 2);
+    expect(stdout).toContain("partial reply\n");
+    expect(sigint_state.runs[1]?.history.map((message) => message.content)).toEqual(["midtool", "partial reply"]);
+    send_sigint(baseline);
+    expect(await pending).toBe(0);
   });
 
   it("chat: Ctrl+C cancels the running turn, then ends chat at the prompt", async () => {

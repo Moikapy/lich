@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./agent/agent.js";
-import { history_after_abort, history_after_run_error } from "./agent/loop.js";
+import { history_after_abort, history_after_run_error, reply_after_abort } from "./agent/loop.js";
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import type { EnvelopedAgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
@@ -486,7 +486,11 @@ async function run_chat_turn(
   try {
     const result = await agent.run({ input, history, signal });
     if (result.outcome.stopped_reason === "aborted") {
-      // `final` on abort is the last assistant so far, often the previous turn's reply.
+      // `final` on abort is the last assistant so far; print it only if this turn wrote it.
+      const reply = reply_after_abort(result.outcome);
+      if (reply !== undefined && reply.content.length > 0) {
+        process.stdout.write(`${reply.content}\n`);
+      }
       process.stderr.write("[lich] turn cancelled\n");
       return history_after_abort(result.messages);
     }

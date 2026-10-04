@@ -353,6 +353,27 @@ export function history_after_abort(messages: readonly Message[]): Message[] {
   return drop_trailing_users(messages);
 }
 
+/**
+ * `final` of an aborted run when this run produced it (it comes after the last
+ * user line); undefined when it is an earlier turn's reply.
+ */
+export function reply_after_abort(outcome: LoopOutcome): AssistantMessage | undefined {
+  const final = outcome.final;
+  if (final === undefined) {
+    return undefined;
+  }
+  for (let index = outcome.messages.length - 1; index >= 0; index -= 1) {
+    const message = outcome.messages[index];
+    if (message === final) {
+      return final;
+    }
+    if (message?.role === "user") {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 function drop_trailing_users(messages: readonly Message[]): Message[] {
   const kept = [...messages];
   while (kept.at(-1)?.role === "user") {

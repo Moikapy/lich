@@ -5,6 +5,7 @@
  */
 import type { AgentEventBody } from "../agent/events.js";
 import type { AgentRunResult } from "../agent/agent.js";
+import { reply_after_abort } from "../agent/loop.js";
 import type { AssistantMessage, Message, ToolCall, Usage } from "../providers/types.js";
 import { safe_json_parse, truncate_text } from "../util/json.js";
 import type { ThemeSpec } from "../util/lore.js";
@@ -236,8 +237,10 @@ export function run_notice_blocks(result: AgentRunResult, theme: ThemeSpec): His
     blocks.push({ role: "error", lines: [`\u00b7 ${fill_template(theme.notices.budget_exhausted, {})}`] });
   }
   if (result.outcome.stopped_reason === "aborted") {
-    // `final` on abort is the last assistant so far, already on screen.
-    return [...blocks, { role: "error", lines: ["\u00b7 run cancelled"] }];
+    // `final` on abort is the last assistant so far; show it only if this run wrote it.
+    const reply = reply_after_abort(result.outcome);
+    const reply_block = reply === undefined ? undefined : assistant_result_block(reply, theme);
+    return [...blocks, ...(reply_block === undefined ? [] : [reply_block]), { role: "error", lines: ["\u00b7 run cancelled"] }];
   }
   const final_block = result.outcome.final === undefined ? undefined : assistant_result_block(result.outcome.final, theme);
   if (final_block !== undefined) {
