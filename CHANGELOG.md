@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `prompt.abort` no longer returns the previous turn's reply, and the cancelled
+  prompt is left out of the next `prompt.submit`. Resuming a session also drops
+  a user line that a later turn followed after the run was aborted or failed
+  before any assistant reply. Adjacent user lines with nothing between them
+  (a compression summary and the next question) stay.
 - Ctrl+C in a one-shot run or in `lich chat` cancels the run or turn
   through its abort signal; chat keeps the session and returns to the prompt.
   A second Ctrl+C quits at once (exit `130`). In the TUI, Esc cancels a running
