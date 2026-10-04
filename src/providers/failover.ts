@@ -1,4 +1,5 @@
 import { sleep } from "../util/sleep.js";
+import { is_abort_like } from "./http.js";
 import { ProviderError } from "./types.js";
 import type { ProviderErrorKind } from "./types.js";
 
@@ -152,17 +153,4 @@ function make_abort_error(cause: unknown): Error {
 
 function is_type_error(error: unknown): boolean {
   return error instanceof TypeError;
-}
-
-function error_name(error: unknown): string | undefined {
-  if (typeof error === "object" && error !== null && "name" in error) {
-    const name = (error as { name?: unknown }).name;
-    return typeof name === "string" ? name : undefined;
-  }
-  return undefined;
-}
-
-function is_abort_like(error: unknown): boolean {
-  const name = error_name(error);
-  return name === "AbortError" || name === "TimeoutError";
 }

@@ -99,13 +99,15 @@ adding ollama required:
    - Typed wire DTOs (request/response), never `any`.
    - Small pure mapping helpers: `to_*_messages` (our `Message` -> wire),
      `assistant_to_wire` / `tool_to_wire`, `to_*_tools`, `build_request_body`.
-   - The fetch skeleton shared by all clients: resolve auth, `build_endpoint`,
+   - The fetch skeleton: resolve auth and `build_endpoint` per client, then
+     the shared helpers from [`http.ts`](../../src/providers/http.ts):
      `do_fetch` (fetch throws -> `network`), `to_http_error` (non-OK ->
      classified kind + `Retry-After`), `read_success_json` (unparseable 2xx ->
      `bad_request`).
-   - An error mapper: a `status_to_error_kind` function implementing the
-     taxonomy table from [providers](./providers.md#error-taxonomy), plus a
-     body-sniffing regex for `overflow` on 400s.
+   - Error mapping: `to_http_error` applies the shared `status_to_error_kind`
+     (the taxonomy table from [providers](./providers.md#error-taxonomy));
+     pass your own body-sniffing regex for `overflow` on 400s if the default
+     `OVERFLOW_BODY_PATTERN` does not fit.
    - A factory export (`create_ollama_provider`) if construction may grow.
 
 2. **The `ProviderConfig` union.** Add the kind string to the `kind` union in
