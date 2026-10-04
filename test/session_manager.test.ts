@@ -61,4 +61,63 @@ describe("session_manager", () => {
     await pending;
     expect(manager.pending_count()).toBe(0);
   });
+
+  it("runs the next task on the same session after a rejection", async () => {
+    const manager = create_session_manager();
+    const first = manager.enqueue("s1", async () => {
+      throw new Error("boom");
+    });
+    const second = manager.enqueue("s1", async () => "ok");
+    const settled = await Promise.allSettled([first, second]);
+
+    expect(settled[0]).toMatchObject({ status: "rejected" });
+    if (settled[0].status === "rejected") {
+      expect(settled[0].reason).toMatchObject({ message: "boom" });
+    }
+    expect(settled[1]).toEqual({ status: "fulfilled", value: "ok" });
+    expect(manager.pending_count()).toBe(0);
+  });
+
+  it("keeps a follower queued so a later task cannot overlap it", async () => {
+    const manager = create_session_manager();
+    let release_holder!: () => void;
+    const hold_holder = new Promise<void>((resolve) => {
+      release_holder = resolve;
+    });
+    let release_follower!: () => void;
+    const hold_follower = new Promise<void>((resolve) => {
+      release_follower = resolve;
+    });
+    let mark_follower_started!: () => void;
+    const follower_started = new Promise<void>((resolve) => {
+      mark_follower_started = resolve;
+    });
+    let third_started = false;
+
+    const holder = manager.enqueue("s1", async () => {
+      await hold_holder;
+      return "holder";
+    });
+    const follower = manager.enqueue("s1", async () => {
+      mark_follower_started();
+      await hold_follower;
+      return "follower";
+    });
+
+    release_holder();
+    await holder;
+    await follower_started;
+    expect(manager.pending_count()).toBe(1);
+
+    const third = manager.enqueue("s1", async () => {
+      third_started = true;
+      return "third";
+    });
+    expect(third_started).toBe(false);
+
+    release_follower();
+    await expect(Promise.all([follower, third])).resolves.toEqual(["follower", "third"]);
+    expect(third_started).toBe(true);
+    expect(manager.pending_count()).toBe(0);
+  });
 });

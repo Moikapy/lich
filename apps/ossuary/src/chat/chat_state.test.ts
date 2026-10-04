@@ -177,6 +177,42 @@ describe("parse_serve_event_params", () => {
       ts: 1_700_000_000_000,
     });
   });
+
+  it("accepts run_end error and drops mistyped envelope fields", () => {
+    const parsed = parse_serve_event_params({
+      session_id: "abc",
+      event: {
+        type: "run_end",
+        stopped_reason: "error",
+        turns_used: 2,
+        run_id: 9,
+        session_id: null,
+        seq: "1",
+        ts: 50,
+      },
+    });
+    expect(parsed?.event).toEqual({
+      type: "run_end",
+      stopped_reason: "error",
+      turns_used: 2,
+      ts: 50,
+    });
+  });
+
+  it("rejects run_end with an unknown reason or a non-numeric turns_used", () => {
+    expect(
+      parse_serve_event_params({
+        session_id: "abc",
+        event: { type: "run_end", stopped_reason: "crashed", turns_used: 1 },
+      }),
+    ).toBeUndefined();
+    expect(
+      parse_serve_event_params({
+        session_id: "abc",
+        event: { type: "run_end", stopped_reason: "error", turns_used: "1" },
+      }),
+    ).toBeUndefined();
+  });
 });
 
 describe("transcript helpers", () => {

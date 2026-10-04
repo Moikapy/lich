@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AgentEmitter, type AgentEventBody } from "../src/agent/events.js";
 import type { ChatFn } from "../src/context/compressor.js";
 import { run_conversation, type LoopDeps, type ToolRunner } from "../src/agent/loop.js";
-import type { ChatResult, Message, ToolCall } from "../src/providers/types.js";
+import { ProviderError, type ChatResult, type Message, type ToolCall } from "../src/providers/types.js";
 
 function result(content: string, calls?: ToolCall[]): ChatResult {
   return {
@@ -533,5 +533,33 @@ describe("run_conversation", () => {
       run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 2 }),
     ).rejects.toThrow("provider exploded");
     expect(events.some((event) => event.type === "error")).toBe(true);
+  });
+
+  it("emits only kind and message when chat throws ProviderError", async () => {
+    const emitter = new AgentEmitter();
+    const events: AgentEventBody[] = [];
+    emitter.on((event) => events.push(event));
+    const cause: { self?: unknown } = {};
+    cause.self = cause;
+    const chat: ChatFn = async () => {
+      throw new ProviderError({
+        kind: "auth",
+        provider_name: "mock",
+        message: "bad key",
+        status: 401,
+        cause,
+      });
+    };
+    const deps: LoopDeps = { chat, tools: make_tool_runner("ok").runner, definitions: () => [], emitter };
+
+    await expect(
+      run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 2 }),
+    ).rejects.toThrow("bad key");
+
+    const error_event = events.find((event) => event.type === "error");
+    expect(error_event).toEqual({ type: "error", error: { kind: "auth", message: "bad key" } });
+    expect(JSON.stringify(error_event)).toBe(
+      '{"type":"error","error":{"kind":"auth","message":"bad key"}}',
+    );
   });
 });
