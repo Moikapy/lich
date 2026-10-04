@@ -1,10 +1,10 @@
 ---
 title: Lich plugins, hooks and the gatekeeper
 created: 2026-09-23
-updated: 2026-10-03
+updated: 2026-10-04
 type: entity
 tags: [plugins, security, runtime]
-sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#149", "#157"]
+sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#149", "#157", "#161"]
 confidence: high
 ---
 
@@ -38,10 +38,10 @@ It also denies certain git operations. It is **not** Hermes-style learning (comp
 
 ## Holes
 
-- Hooks fail open when they throw, and have no timeout.
-- `git_commit` is always registered, even with `tools_enabled: []`.
+- Hooks have no timeout. Since #161 a throwing `before_tool_call` blocks the call (`blocked_by_plugin: hook_error`, `src/plugins/hooks.ts:142@029b7e8`); other hooks still fail open.
+- Since #161 a `tools_enabled` list filters plugin tools too, so `git_commit` registers only when listed (`src/agent/agent.ts:111@029b7e8`).
 - Plugins run in-process with full privileges.
 
-All three have to change before plugins can be trusted in a shipped game ([[embedded-safety-profile]]).
+The timeout and in-process privileges still have to change before plugins can be trusted in a shipped game ([[embedded-safety-profile]]).
 
 Related: [[lich-tools-and-guardrails]], [[game-bridge-example]].

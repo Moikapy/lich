@@ -1,10 +1,10 @@
 ---
 title: Lich agent loop (run_conversation + Agent)
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-04
 type: entity
 tags: [core, events, context]
-sources: [raw/audits/2026-09-23-core-engine-audit.md]
+sources: [raw/audits/2026-09-23-core-engine-audit.md, "#161"]
 confidence: high
 ---
 
@@ -22,6 +22,7 @@ This is the heart of Lich. `run_conversation` (`src/agent/loop.ts@77bc148`, abou
   4. push the assistant message
   5. no tool calls → `final`; otherwise run the tool calls **sequentially** (`loop.ts:110-121@77bc148`)
 - **Stop reasons:** `final`, `budget` (default `max_turns` 25), `aborted`. Other provider errors are thrown.
+- **Last turn:** tool calls requested on the `max_turns` turn are not run; each gets a `turn_budget_exhausted` result and a cancelled `tool_call_end`, so transcripts stay valid (#161, `src/agent/loop.ts:185,399@029b7e8`).
 - **Events:** 11 synchronous event types (`events.ts:12-24@77bc148`) with **no run or session id** and no token deltas. See [[event-envelope]] and [[streaming-deltas]].
 - **System prompt:** one static string, `config.system_prompt ?? DEFAULT_AGENT_SYSTEM_PROMPT`. Memory and skills are not injected; see [[memory-vs-skills]].
 
