@@ -1,10 +1,10 @@
 ---
 title: Decision models (typed, calibrated decisions)
 created: 2026-10-02
-updated: 2026-10-03
+updated: 2026-10-04
 type: concept
 tags: [providers, performance, research, games, security]
-sources: [raw/audits/2026-10-02-decision-models-ollama-research.md, raw/audits/2026-10-03-ollama-systemone-clef.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#148", "#149"]
+sources: [raw/audits/2026-10-02-decision-models-ollama-research.md, raw/audits/2026-10-03-ollama-systemone-clef.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#148", "#149", "#159"]
 confidence: medium
 ---
 
@@ -22,7 +22,7 @@ confidence: medium
 
 ## Where it could fit
 
-1. **Game action selection**, the first prototype in #148: a `choice` over the legal actions in [[game-bridge-example]], with a scripted or LLM fallback below a confidence threshold.
+1. **Game action selection**, prototyped as [[decision-lane-example]] (#159): a `choice` per enemy action and target in [[game-bridge-example]], shadow by default, falling back to the LLM below a confidence threshold. Not yet measured.
 2. **Gateway triage** in [[lich-gateway]]: "should the agent answer this message?" before a run starts.
 3. **Persona routing** in [[persona-orchestrator-example]], from message content.
 4. **Tool-list narrowing** before an LLM turn, which cuts prompt tokens.

@@ -35,3 +35,5 @@ Append-only. One line per action: `- YYYY-MM-DD <op> | <summary> | <pages>`. Ops
 - 2026-10-03 update | Decision models: correct Clef availability, local-only endpoint, option cap; plugin path now uses #157 host features | concepts/decision-models.md
 - 2026-10-03 update | Model roles (#154) and plugin entries, settings, model access, before_llm_call (#157) pinned at 1567638; Hermes comparison rows marked done | entities/lich-providers.md, entities/lich-plugins-and-hooks.md, comparisons/lich-vs-hermes.md
 - 2026-10-03 update | Index one-liners for providers and plugins match #154 and #157 | index.md
+- 2026-10-04 create | decision_lane example merged in #159: plugin-owned System One client, shadow/act modes, game_bridge checks still apply, bench pending | entities/decision-lane-example.md, index.md
+- 2026-10-04 update | Decision models and game_bridge pages link the decision_lane prototype | concepts/decision-models.md, entities/game-bridge-example.md

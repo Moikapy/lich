@@ -1,7 +1,7 @@
 ---
 title: Wiki index
 type: index
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # Lich Wiki: Index
@@ -30,6 +30,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[godot-and-redot]]: the game→Lich direction (webhook plus file bus) and the Lich→editor direction (Redot MCP). `WebSocketPeer` is the path to a GDScript SDK.
 - [[game-bridge-example]]: the file-bus enemy commander. It's racy, needs 2 LLM calls per decision, and will retire once client tools exist.
 - [[persona-orchestrator-example]]: one Agent per NPC persona, which collapses to ~20 lines once Profiles and Sessions exist.
+- [[decision-lane-example]]: a local decision model picks game_bridge enemy orders before the LLM turn; shadow by default, guarded by game_bridge's checks, not yet measured (#148).
 - [[roadmap-issues]]: what #113, #114, #79 (closed) and #46/#47 (closed) are each for; north star + verticals + six phases. Status lives on the kanban, not here.
 
 ## Concepts
