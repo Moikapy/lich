@@ -21,7 +21,7 @@ flowchart TB
         CLI["src/cli.ts<br/>one-shot, chat, tui,<br/>gateway, mcp"]
         TUI["src/tui/app.tsx<br/>ink TUI"]
         GW["src/gateway/runner.ts<br/>webhook, telegram,<br/>discord, twitch"]
-        SERVE["src/serve/protocol.ts<br/>lich serve contract<br/>(WS JSON-RPC, post-0.9)"]
+        SERVE["src/serve/*<br/>lich serve WS JSON-RPC<br/>(health on loopback)"]
         LIB["src/index.ts<br/>library exports"]
     end
     AGENT["Agent<br/>(src/agent/agent.ts)<br/>wiring, sessions, usage"]
@@ -54,8 +54,8 @@ flowchart TB
 ```
 
 Solid edges are direct calls; dashed edges are side services the loop and the
-agent use between turns, or planned entry surfaces (serve protocol types exist;
-runtime listen is not wired yet — see [serve](./serve.md)).
+agent use between turns, or entry surfaces (loopback `lich serve` WS transport
+is wired for `health` — see [serve](./serve.md)).
 
 ## The dependency-inversion story
 
@@ -190,7 +190,9 @@ Walkthrough of a single `Agent.run({ input })` call
 | `src/gateway/bus.ts` | Conversation-keyed runner over one shared `Agent`. |
 | `src/gateway/runner.ts` | Adapter construction, signal handling, process lifetime. |
 | `src/gateway/{telegram,discord,twitch,webhook}.ts` | Platform adapters. |
-| `src/serve/protocol.ts` | Shared JSON-RPC types for `lich serve` (desktop contract; no listener yet). |
+| `src/serve/protocol.ts` | Shared JSON-RPC types for `lich serve` (desktop contract). |
+| `src/serve/server.ts` / `rpc.ts` | Loopback WS transport + `health` RPC; session/prompt handlers follow. |
+| `src/version.ts` | Shared `LICH_VERSION` (CLI, TUI, serve) without circular imports. |
 | `src/tui/state.ts` | Pure TUI state machine (no ink imports). |
 | `src/tui/app.tsx` | Ink components wiring events into the state machine. |
 | `src/util/*` | `safe_json_parse`/`safe_stringify`/`truncate_text`, `sleep`, logger, JSON Schema types. |

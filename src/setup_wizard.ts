@@ -13,7 +13,7 @@ const PLATFORMS = ["webhook", "telegram", "discord", "twitch"] as const;
 const PLUGIN_EXT = /\.(mjs|js|ts|mts|cts|jsx|tsx)$/;
 
 const PROVIDER_DEFAULTS: Record<ProviderKind, { model: string; base_url: string; api_key_env?: string }> = {
-  ollama: { model: "llama3.2", base_url: "http://localhost:11434" },
+  ollama: { model: "qwen3:8b", base_url: "http://localhost:11434" },
   openai_compat: { model: "gpt-4.1-mini", base_url: "https://api.openai.com/v1", api_key_env: "OPENAI_API_KEY" },
   anthropic: { model: "claude-sonnet-4", base_url: "https://api.anthropic.com", api_key_env: "ANTHROPIC_API_KEY" },
 };

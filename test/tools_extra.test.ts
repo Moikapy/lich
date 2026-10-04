@@ -1,7 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import dns from "node:dns/promises";
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
@@ -9,7 +7,7 @@ import { register_builtin_tools } from "../src/tools/builtin/index.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 import { ToolExecutor } from "../src/tools/executor.js";
 import { ToolRegistry } from "../src/tools/registry.js";
-import { is_blocked_ip, reset_url_guard_fetch, set_url_guard_fetch } from "../src/tools/url_guard.js";
+import { is_blocked_ip, reset_url_guard_fetch, safe_fetch, set_url_guard_fetch } from "../src/tools/url_guard.js";
 
 let tmp_root: string;
 let executor: ToolExecutor;
@@ -31,23 +29,6 @@ function stub_fetch(mock_fn: typeof fetch): void {
 function restore_fetch(): void {
   reset_url_guard_fetch();
   globalThis.fetch = real_fetch;
-}
-
-const MARKER_NAME = "lich_pl_test_marker_7f3d";
-
-interface MarkerProcess {
-  name: string;
-  child: ChildProcess;
-}
-
-/** Spawn a uniquely-named sleeper so process_list filtering is deterministic. */
-async function spawn_marker_process(): Promise<MarkerProcess> {
-  const child = spawn("bash", ["-c", `exec -a ${MARKER_NAME} sleep 60`], { stdio: "ignore" });
-  await new Promise<void>((resolve) => {
-    child.on("spawn", () => resolve());
-    child.on("error", () => resolve());
-  });
-  return { name: MARKER_NAME, child };
 }
 
 async function write_temp(relative: string, content: string | Buffer): Promise<void> {
@@ -221,6 +202,59 @@ describe("fetch_url", () => {
     expect(fetch_mock).toHaveBeenCalledTimes(1);
   });
 
+  it("stops after five redirects and does not replay a POST body", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    set_url_guard_fetch(async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: String(init?.method ?? "GET"),
+        body: init?.body,
+      });
+      const hop = calls.length;
+      if (hop < 3) {
+        return fake_response("", {
+          status: 307,
+          headers: { location: hop === 1 ? "/next" : "http://8.8.8.8/last" },
+        });
+      }
+      return fake_response("landed", { headers: { "content-type": "text/plain" } });
+    });
+    const followed = await safe_fetch("http://1.1.1.1/start", { method: "POST", body: "secret-body" });
+    expect(await followed.text()).toBe("landed");
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://1.1.1.1/start",
+      "http://1.1.1.1/next",
+      "http://8.8.8.8/last",
+    ]);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toBe("secret-body");
+    expect(calls[1]?.method).toBe("GET");
+    expect(calls[1]?.body).toBeUndefined();
+    expect(calls[2]?.body).toBeUndefined();
+
+    calls.length = 0;
+    set_url_guard_fetch(async (input) => {
+      calls.push({ url: String(input), method: "GET", body: undefined });
+      return fake_response("", {
+        status: 302,
+        headers: { location: `http://1.1.1.1/hop-${calls.length}` },
+      });
+    });
+    await expect(safe_fetch("http://1.1.1.1/loop")).rejects.toThrow(/too_many_redirects/);
+    expect(calls).toHaveLength(5);
+  });
+
+  it("returns a non-redirect status without following Location", async () => {
+    const fetch_mock = vi.fn(async () =>
+      fake_response("stay", { status: 200, headers: { location: "http://8.8.8.8/elsewhere" } }),
+    );
+    set_url_guard_fetch(fetch_mock);
+    const response = await safe_fetch("http://1.1.1.1/cached");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("stay");
+    expect(fetch_mock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the https hostname in the URL handed to fetch (TLS/SNI)", async () => {
     const fetch_mock = vi.fn(async (_input: string | URL | Request) =>
       fake_response("zen", { headers: { "content-type": "text/plain" } }),
@@ -315,17 +349,19 @@ describe("process_list", () => {
     const lines = listing.output.split("\n");
     expect(lines.length > 1).toBe(true);
     expect(lines[0]?.includes("\t")).toBe(true);
+    // Anchor the filter assertion to the runner executable itself: guaranteed
+    // present on any CI runner, unlike a spawned marker whose /proc cmdline is
+    // transiently empty mid-exec, which raced on ubuntu runners (#118).
+    const runner = path.basename(process.execPath);
+    const self_filter = await executor.execute("process_list", { filter: runner, max_results: 500 });
+    expect(self_filter.ok).toBe(true);
+    expect(self_filter.output.includes(runner)).toBe(true);
+    // Require our own row via its pid prefix: the bare substring match above
+    // would also pass on any foreign cmdline mentioning the runner token (#119).
+    expect(self_filter.output.split("\n").some((line) => line.startsWith(`${process.pid}\t`))).toBe(true);
     const filtered = await executor.execute("process_list", { filter: "no_such_filter_xyz" });
     expect(filtered.ok).toBe(true);
     expect(filtered.output).toBe("no matching processes");
-    const marker = await spawn_marker_process();
-    try {
-      const marker_filter = await executor.execute("process_list", { filter: marker.name });
-      expect(marker_filter.ok).toBe(true);
-      expect(marker_filter.output.includes(marker.name)).toBe(true);
-    } finally {
-      marker.child.kill("SIGKILL");
-    }
   });
 });
 

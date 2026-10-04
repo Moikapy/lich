@@ -1,7 +1,59 @@
 # Changelog
 
+## Unreleased
+
+- New `examples/decision_lane/`: a prototype plugin that asks a local Ollama
+  decision model (`/v1/systemone`) to pick each game_bridge enemy's action
+  before the LLM turn. Shadow mode (default) only logs; act mode queues orders
+  through game_bridge's own checks when every answer clears the threshold.
+  Includes a replay benchmark (#148).
+- Plugin entries may be `{ path, settings?, models? }`. Hooks and plugin tools
+  get the frozen `settings` and `models.chat(role, …)`, which refuses roles not
+  granted. New `before_llm_call` hook can add a capped note to one model call;
+  it fails open (#149).
+- Optional `models` config block assigns provider chains per role: `chat` for
+  the main loop and `compress` for context compression (falls back to `chat`
+  on failure). Without it, behavior is unchanged (#149).
+- Docs, examples and the setup wizard now default local Ollama to `qwen3:8b`
+  (`llama3.2` stays as the low-memory option), and document Ollama cloud:
+  `LICH_BASE_URL=https://ollama.com` with `LICH_API_KEY_ENV=OLLAMA_API_KEY`.
+  The Ollama api key is optional, not unused (#148).
+- Gateway history cap no longer drops tool-heavy history when the capped window
+  has no user turn. It keeps the window from the owning assistant turn and
+  prepends a stub user turn so providers that require user-first history (Anthropic)
+  still accept it. The persona orchestrator example mirrors the fix.
+
+## 0.10.0
+
+- **Breaking:** `AgentEvent` is always enveloped with `{ run_id, session_id, seq, ts }`
+  plus the payload. `error` is JSON-safe `{ kind, message }` (was `unknown` /
+  `{ name, message }` on the wire). New `run_start` / `run_end` events; aborts
+  no longer emit `type: "error"`. Thrown runs still emit `run_end` with
+  `stopped_reason: "error"` so the bookend holds.
+- Envelope `session_id` defaults to the opened transcript handle id when callers
+  omit `session_id` / `session` (CLI, gateway).
+- `AgentRunOptions` gains `session_id` and per-run `on_event`. Serve uses
+  `on_event` only (no process-wide `agent.events` subscription for routing).
+- `SessionManager` (`create_session_manager`) queues runs per session id so
+  concurrent sessions no longer share serve's global `run_tail`. Idle session
+  tails are dropped after release.
+- Ossuary wire parse accepts envelope fields and `run_start` / `run_end`.
+- Export `EnvelopedAgentEmitter`, `AgentEventBody`, `AgentErrorPayload`,
+  `EventEnvelope`, `to_agent_error_payload`, `create_session_manager`, and
+  related types.
+
 ## 0.9.0
 
+- `lich serve`: headless loopback WebSocket JSON-RPC agent — token-gated
+  upgrade, session.create/list/clear/resume, prompt.submit/abort with event
+  streaming, LRU-capped in-memory session bags, and stable client-facing
+  errors (no absolute paths).
+- `lich ossuary`: Electron desktop shell entry point that spawns `lich serve`
+  and connects the Ossuary renderer over the gateway IPC bridge.
+- export `create_serve_prompt_service`, `ServePromptService`, and
+  `ServeEventNotify` from the public API.
+- serve `error` notifications serialize `Error` as `{ name, message }` so JSON
+  clients no longer receive `{}` from `JSON.stringify`.
 - close agent should-fixes (A-7/A-8/A-10–A-13): a truncated summarizer no longer
   drops recent older turns, ineffective compress attempts back off for three
   turns and their usage lands on `compress_end` so transcripts stay clean,

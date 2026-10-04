@@ -27,7 +27,7 @@ import {
   type HistoryBlock,
   type UiState,
 } from "../src/tui/state.js";
-import { load_resume_view } from "../src/tui/load_resume.js";
+import { load_resume_view, read_transcript_or_not_found } from "../src/tui/load_resume.js";
 import type { AgentRunResult } from "../src/agent/agent.js";
 import { LICH_THEME } from "../src/util/lore.js";
 import type { LoopOutcome } from "../src/agent/loop.js";
@@ -106,9 +106,15 @@ describe("apply_event transitions", () => {
   it("flags budget exhaustion and errors", () => {
     const budgeted = apply_event(INITIAL_UI_STATE, ({ type: "budget_exhausted", turns_used: 25 }));
     expect(budgeted.budget_exhausted).toBe(true);
-    const errored = apply_event(INITIAL_UI_STATE, ({ type: "error", error: new Error("nope") }));
+    const errored = apply_event(INITIAL_UI_STATE, {
+      type: "error",
+      error: { kind: "Error", message: "nope" },
+    });
     expect(errored.last_error).toBe("nope");
-    const string_errored = apply_event(INITIAL_UI_STATE, ({ type: "error", error: "plain" }));
+    const string_errored = apply_event(INITIAL_UI_STATE, {
+      type: "error",
+      error: { kind: "Error", message: "plain" },
+    });
     expect(string_errored.last_error).toBe("plain");
   });
 
@@ -385,6 +391,16 @@ describe("load_resume_view", () => {
     expect(result.block.lines[0]).toContain("session not found");
     expect(result.block.lines[0]).toContain("keep-1");
   });
+
+  it("maps a vanished transcript (read-path ENOENT) to session not found, not a raw path", async () => {
+    const dir = await make_session_dir();
+    await expect(read_transcript_or_not_found(path.join(dir, "missing.jsonl"))).rejects.toThrow(
+      "session not found (transcript deleted)",
+    );
+    await expect(read_transcript_or_not_found(path.join(dir, "missing.jsonl"))).rejects.not.toThrow(
+      /ENOENT/,
+    );
+  });
 });
 
 describe("notice blocks", () => {
@@ -420,6 +436,17 @@ describe("notice blocks", () => {
       "glm-5.3-flash:cloud",
     );
     expect(unknown_command_block("wat").role).toBe("error");
+  });
+
+  it("labels the first models.chat provider when roles are set", () => {
+    const config = {
+      providers: [
+        { name: "a", model: "first", kind: "openai_compat" },
+        { name: "b", model: "chosen", kind: "ollama" },
+      ],
+      models: { chat: ["b"] },
+    };
+    expect(model_label_block(config).lines[0]).toContain("model: chosen");
   });
 
   it("formats tool result blocks with ok and error styling flags", () => {

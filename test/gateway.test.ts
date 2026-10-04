@@ -84,6 +84,42 @@ function temp_work_dir(): string {
   return mkdtempSync(join(TMP_BASE, "lich-gw-"));
 }
 
+/** Second handle() sees whatever cap_history stored from the first run's messages. */
+async function capped_followup_history(
+  work_dir: string,
+  first_messages: Message[],
+  history_cap: number,
+): Promise<readonly Message[]> {
+  const records: RunRecord[] = [];
+  let runs = 0;
+  const probe_factory = (): Agent =>
+    ({
+      run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+        runs += 1;
+        if (runs === 1) {
+          return {
+            outcome: {
+              messages: first_messages,
+              final: undefined,
+              result: undefined,
+              turns_used: 1,
+              stopped_reason: "final",
+            },
+            messages: first_messages,
+            usage_total: usage_zero,
+            session_path: undefined,
+          };
+        }
+        records.push({ input: options.input, history: options.history ?? [] });
+        return reply_result("ok", options.history ?? [], options.input);
+      },
+    }) as unknown as Agent;
+  const bus = new GatewayBus({ config: config_for(work_dir), agent_factory: probe_factory }, { history_cap });
+  await bus.handle("webhook", "cap-edge", "u1", "go");
+  await bus.handle("webhook", "cap-edge", "u1", "again");
+  return records[0]?.history ?? [];
+}
+
 describe("gateway bus", () => {
   it("keeps conversation continuity across handle() calls", async () => {
     const work_dir = temp_work_dir();
@@ -173,6 +209,179 @@ describe("gateway bus", () => {
     }
   });
 
+  it("starts the capped history at a user when the window opens on an assistant reply", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      let runs = 0;
+      const plain: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "u2" },
+        { role: "assistant", content: "a2" },
+      ];
+      const probe_factory = (): Agent =>
+        ({
+          run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+            runs += 1;
+            if (runs === 1) {
+              return {
+                outcome: { messages: plain, final: undefined, result: undefined, turns_used: 1, stopped_reason: "final" },
+                messages: plain,
+                usage_total: usage_zero,
+                session_path: undefined,
+              };
+            }
+            records.push({ input: options.input, history: options.history ?? [] });
+            return reply_result("ok", options.history ?? [], options.input);
+          },
+        }) as unknown as Agent;
+      const bus = new GatewayBus({ config: config_for(work_dir), agent_factory: probe_factory }, { history_cap: 3 });
+      await bus.handle("webhook", "plain", "u1", "go");
+      await bus.handle("webhook", "plain", "u1", "again");
+      const seen = records[0]?.history ?? [];
+      expect(seen.map((message) => message.content)).toEqual(["u2", "a2"]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a tool-heavy turn when the cap window contains no user message", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const heavy: Message[] = [{ role: "user", content: "search the repo" }];
+      for (let index = 0; index < 6; index += 1) {
+        heavy.push({
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: `c${index}`, name: "grep_files", args: {} }],
+        });
+        heavy.push({
+          role: "tool",
+          tool_call_id: `c${index}`,
+          name: "grep_files",
+          content: `hit-${index}`,
+        });
+      }
+      let runs = 0;
+      const probe_factory = (): Agent =>
+        ({
+          run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+            runs += 1;
+            if (runs === 1) {
+              return {
+                outcome: { messages: heavy, final: undefined, result: undefined, turns_used: 6, stopped_reason: "final" },
+                messages: heavy,
+                usage_total: usage_zero,
+                session_path: undefined,
+              };
+            }
+            records.push({ input: options.input, history: options.history ?? [] });
+            return reply_result("ok", options.history ?? [], options.input);
+          },
+        }) as unknown as Agent;
+      const bus = new GatewayBus({ config: config_for(work_dir), agent_factory: probe_factory }, { history_cap: 4 });
+      await bus.handle("webhook", "heavy", "u1", "go");
+      await bus.handle("webhook", "heavy", "u1", "what did you find?");
+      const seen = records[0]?.history ?? [];
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen[0]).toEqual({ role: "user", content: "(earlier conversation trimmed)" });
+      expect(seen[1]?.role).toBe("assistant");
+      expect(seen.some((message) => message.role === "tool" && message.content === "hit-5")).toBe(true);
+      expect(seen.filter((message) => message.role === "user")).toHaveLength(1);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the assistant when the cap window is only its tool results", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const batch: Message[] = [
+        { role: "user", content: "read both" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { id: "c1", name: "read_file", args: {} },
+            { id: "c2", name: "read_file", args: {} },
+          ],
+        },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "one" },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "two" },
+      ];
+      let runs = 0;
+      const probe_factory = (): Agent =>
+        ({
+          run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+            runs += 1;
+            if (runs === 1) {
+              return {
+                outcome: { messages: batch, final: undefined, result: undefined, turns_used: 1, stopped_reason: "final" },
+                messages: batch,
+                usage_total: usage_zero,
+                session_path: undefined,
+              };
+            }
+            records.push({ input: options.input, history: options.history ?? [] });
+            return reply_result("ok", options.history ?? [], options.input);
+          },
+        }) as unknown as Agent;
+      const bus = new GatewayBus({ config: config_for(work_dir), agent_factory: probe_factory }, { history_cap: 2 });
+      await bus.handle("webhook", "batch", "u1", "go");
+      await bus.handle("webhook", "batch", "u1", "again");
+      const seen = records[0]?.history ?? [];
+      expect(seen.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool"]);
+      expect(seen[2]?.content).toBe("one");
+      expect(seen[3]?.content).toBe("two");
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops a leading tool fragment and keeps the next assistant when the cap has no user", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const transcript: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c1", name: "read_file", args: {} }] },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "stale" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c2", name: "read_file", args: {} }] },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "fresh" },
+      ];
+      const seen = await capped_followup_history(work_dir, transcript, 3);
+      expect(seen.map((message) => message.role)).toEqual(["user", "assistant", "tool"]);
+      expect(seen[0]).toEqual({ role: "user", content: "(earlier conversation trimmed)" });
+      expect(seen[2]?.content).toBe("fresh");
+      expect(seen.some((message) => message.content === "stale")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores no history when a capped tool window has no owning assistant", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const from_user: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "orphan" },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "orphan-2" },
+      ];
+      expect(await capped_followup_history(work_dir, from_user, 2)).toEqual([]);
+      const empty_calls: Message[] = [
+        { role: "user", content: "u1" },
+        { role: "assistant", content: "no calls", tool_calls: [] },
+        { role: "tool", tool_call_id: "c1", name: "read_file", content: "orphan" },
+        { role: "tool", tool_call_id: "c2", name: "read_file", content: "orphan-2" },
+      ];
+      expect(await capped_followup_history(work_dir, empty_calls, 2)).toEqual([]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("releases settled promise chains so the chains map stays bounded (G-6)", async () => {
     const work_dir = temp_work_dir();
     try {
@@ -229,6 +438,37 @@ describe("gateway bus", () => {
       expect(await allowed.handle("telegram", "chat-1", "user-1", "hi")).toBe("reply-1");
       expect(await allowed.handle("telegram", "chat-1", "other", "nope")).toBeUndefined();
       expect(records).toHaveLength(1);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("requires both user and chat when both public allowlists are set", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const bus = new GatewayBus({
+        config: config_for(work_dir, {
+          allowed_users: {
+            discord: ["user-1"],
+            twitch: ["user-1"],
+            telegram: ["user-1"],
+          },
+          allowed_chats: {
+            discord: ["chat-1"],
+            twitch: ["chat-1"],
+            telegram: ["chat-1"],
+          },
+        }),
+        agent_factory: () => recording_agent(records),
+      });
+      expect(await bus.handle("discord", "chat-1", "user-1", "hi")).toBe("reply-1");
+      expect(await bus.handle("discord", "chat-1", "user-2", "nope")).toBeUndefined();
+      expect(await bus.handle("discord", "chat-2", "user-1", "nope")).toBeUndefined();
+      expect(await bus.handle("twitch", "chat-9", "user-1", "nope")).toBeUndefined();
+      expect(await bus.handle("telegram", "chat-1", "stranger", "nope")).toBeUndefined();
+      expect(await bus.handle("webhook", "anywhere", "anyone", "hi")).toBe("reply-2");
+      expect(records.map((record) => record.input)).toEqual(["hi", "hi"]);
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }

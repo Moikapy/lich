@@ -285,6 +285,69 @@ describe("persona orchestrator", () => {
     expect(capped.map((message) => message.content)).toEqual(["u2", "a2"]);
   });
 
+  it("cap_history starts at a user when the window opens on an assistant reply", () => {
+    const messages = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "u2" },
+      { role: "assistant", content: "a2" },
+    ];
+    const capped = cap_history(messages, 3);
+    expect(capped.map((message) => message.content)).toEqual(["u2", "a2"]);
+  });
+
+  it("cap_history keeps assistant/tool turns when the window has no user", () => {
+    const messages = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1", tool_calls: [{ id: "t1" }] },
+      { role: "tool", content: "r1" },
+      { role: "assistant", content: "a2", tool_calls: [{ id: "t2" }] },
+      { role: "tool", content: "r2" },
+    ];
+    const capped = cap_history(messages, 4);
+    expect(capped.map((message) => message.content)).toEqual(["(earlier conversation trimmed)", "a1", "r1", "a2", "r2"]);
+  });
+
+  it("cap_history keeps the assistant when the window is only tool results", () => {
+    const messages = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1", tool_calls: [{ id: "t1" }, { id: "t2" }] },
+      { role: "tool", content: "r1" },
+      { role: "tool", content: "r2" },
+    ];
+    const capped = cap_history(messages, 2);
+    expect(capped.map((message) => message.role)).toEqual(["user", "assistant", "tool", "tool"]);
+    expect(capped.map((message) => message.content)).toEqual(["(earlier conversation trimmed)", "a1", "r1", "r2"]);
+  });
+
+  it("cap_history drops a leading tool fragment and keeps the next assistant", () => {
+    const messages = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "a1", tool_calls: [{ id: "t1" }] },
+      { role: "tool", content: "stale" },
+      { role: "assistant", content: "a2", tool_calls: [{ id: "t2" }] },
+      { role: "tool", content: "fresh" },
+    ];
+    const capped = cap_history(messages, 3);
+    expect(capped.map((message) => message.content)).toEqual(["(earlier conversation trimmed)", "a2", "fresh"]);
+  });
+
+  it("cap_history drops a tool window that has no owning assistant", () => {
+    const from_user = [
+      { role: "user", content: "u1" },
+      { role: "tool", content: "orphan" },
+      { role: "tool", content: "orphan-2" },
+    ];
+    expect(cap_history(from_user, 2)).toEqual([]);
+    const empty_calls = [
+      { role: "user", content: "u1" },
+      { role: "assistant", content: "no calls", tool_calls: [] },
+      { role: "tool", content: "orphan" },
+      { role: "tool", content: "orphan-2" },
+    ];
+    expect(cap_history(empty_calls, 2)).toEqual([]);
+  });
+
   it("requires a token and rejects wrong content-type / oversized bodies", async () => {
     const work_dir = await make_temp_dir();
     const factory: AgentFactory = async () => ({

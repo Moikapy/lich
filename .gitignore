@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .lich/
+.worktrees/
 CLAUDE.md
 test/.tmp/
 .env

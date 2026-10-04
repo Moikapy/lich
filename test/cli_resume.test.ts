@@ -28,6 +28,25 @@ vi.mock("../src/tui.js", () => ({
   },
 }));
 
+const read_spy = vi.hoisted(() => ({ fail_read_enoent: false }));
+
+vi.mock("../src/session/store.js", async (import_original) => {
+  const actual = await import_original<typeof import("../src/session/store.js")>();
+  return {
+    ...actual,
+    read_session_messages: (file_path: string) => {
+      if (read_spy.fail_read_enoent === true) {
+        return Promise.reject(
+          Object.assign(new Error("ENOENT: no such file or directory, open '" + file_path + "'"), {
+            code: "ENOENT",
+          }),
+        );
+      }
+      return actual.read_session_messages(file_path);
+    },
+  };
+});
+
 import { parse_args, run_cli } from "../src/cli.js";
 
 const created: string[] = [];
@@ -86,6 +105,12 @@ describe("run_cli --resume mode guard", () => {
     await expect(run_cli(["gateway", "--resume", "x"])).rejects.toThrow(
       "--resume is only supported in TUI mode (not gateway)",
     );
+    await expect(run_cli(["serve", "--resume", "latest"])).rejects.toThrow(
+      "--resume is only supported in TUI mode (not serve)",
+    );
+    await expect(run_cli(["ossuary", "--resume", "latest"])).rejects.toThrow(
+      "--resume is only supported in TUI mode (not ossuary)",
+    );
     await expect(run_cli(["init", "--resume", "latest"])).rejects.toThrow(
       "--resume is only supported in TUI mode (not init)",
     );
@@ -136,5 +161,38 @@ describe("run_cli tui --resume", () => {
       { role: "user", content: "hello" },
       { role: "assistant", content: "hi" },
     ]);
+  });
+
+  it("maps a read-path ENOENT to session not found without leaking the path", async () => {
+    const work_dir = await make_temp_dir("cli-resume-enoent");
+    const session_dir = path.join(work_dir, "sessions");
+    await mkdir(session_dir, { recursive: true });
+    const transcript = path.join(session_dir, "gone-1.jsonl");
+    await writeFile(transcript, "", "utf8");
+
+    read_spy.fail_read_enoent = true;
+    try {
+      const error = await run_cli([
+        "tui",
+        "--resume",
+        "gone-1",
+        "--model",
+        "mock-model",
+        "--work-dir",
+        work_dir,
+        "--session-dir",
+        session_dir,
+      ]).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(Error);
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).toContain("session not found");
+      expect(message).not.toContain(session_dir);
+      expect(message).not.toContain("ENOENT");
+    } finally {
+      read_spy.fail_read_enoent = false;
+    }
   });
 });

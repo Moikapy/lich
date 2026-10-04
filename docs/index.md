@@ -31,6 +31,7 @@ One package, four ways to drive the same agent: a one-shot CLI, an interactive c
 | [Getting started](getting-started.md) | Install, configure a provider, and get your first reply in any mode. |
 | [CLI reference](user-guide/cli.md) | Modes, flags, provider resolution, config files, and `lich mcp`. |
 | [TUI guide](user-guide/tui.md) | Run the terminal UI and use slash commands and the status bar. |
+| [Ossuary guide](user-guide/ossuary.md) | Open the Electron desktop shell from a clone and chat via serve. |
 | [Gateway guide](user-guide/gateway.md) | Wire Telegram, Discord, Twitch, and the HTTP webhook to one agent. |
 | [Library guide](user-guide/library.md) | Embed the agent in TypeScript with events and multi-turn history. |
 | [Plugins guide](user-guide/plugins.md) | Add your own tools and lifecycle hooks, and run the self-improvement loop. |

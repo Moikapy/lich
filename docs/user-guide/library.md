@@ -26,7 +26,7 @@ The package ships ESM (`dist/index.js`, types at `dist/index.d.ts`, binary at `d
 import { create_agent } from "@moikapy/lich";
 
 const agent = create_agent({
-  providers: [{ kind: "ollama", name: "local", model: "llama3.2:latest" }],
+  providers: [{ kind: "ollama", name: "local", model: "qwen3:8b" }],
 });
 
 const result = await agent.run({ input: "Use list_dir to list the files, then summarize." });
@@ -40,7 +40,7 @@ console.log(`tokens: ${result.usage_total.total_tokens}`);
 import { run_agent } from "@moikapy/lich";
 
 const result = await run_agent(
-  { providers: [{ kind: "ollama", name: "local", model: "llama3.2:latest" }] },
+  { providers: [{ kind: "ollama", name: "local", model: "qwen3:8b" }] },
   "Reply with ok",
 );
 ```
@@ -132,7 +132,7 @@ const config = {
   providers: [
     { kind: "openai_compat", name: "openrouter", model: "meta-llama/llama-3.1-8b-instruct",
       base_url: "https://openrouter.ai/api/v1", api_key_env: "OPENROUTER_API_KEY" },
-    { kind: "ollama", name: "local", model: "llama3.2" },  // failover target
+    { kind: "ollama", name: "local", model: "qwen3:8b" },  // failover target
   ],
   max_turns: 25,
   tools_enabled: ["read_file", "list_dir", "terminal", "web_search", "fetch_url"],
@@ -140,7 +140,7 @@ const config = {
 };
 ```
 
-Listed providers form a failover chain tried in order: `rate_limit`/`network` errors retry with backoff (3 attempts) on the current provider before failing over; `auth`, `overflow`, and `bad_request` fail over immediately. The last error is rethrown when all providers fail.
+Listed providers form a failover chain tried in order: `rate_limit`/`network` errors retry with backoff (3 attempts) on the current provider before failing over; `auth`, `overflow`, and `bad_request` fail over immediately. The last error is rethrown when all providers fail. An optional `models` block splits the chain by role: `models.chat` sets the main loop's order and `models.compress` the context-compression chain (see the [config reference](cli.md#config-file-reference)).
 
 `LICH_ALLOW_SELF_COMMIT` and `LICH_TEST_COMMAND` are process-env knobs, not config fields. See the [CLI environment](cli.md#self-improvement-environment).
 
@@ -152,7 +152,7 @@ Listed providers form a failover chain tried in order: `rate_limit`/`network` er
 
 ```ts
 const agent = create_agent({
-  providers: [{ kind: "ollama", name: "local", model: "llama3.2" }],
+  providers: [{ kind: "ollama", name: "local", model: "qwen3:8b" }],
   tools_enabled: ["read_file", "grep_files", "list_dir"],
 });
 ```
@@ -191,6 +191,6 @@ A Godot client does not embed the library. A game backend that does is still one
 
 ## Session access
 
-Each `run()` appends to a JSONL transcript under `config.session_dir` (default `<work_dir>/.lich/sessions`) while the loop runs: `run_start`, seeded system/user (plus history when the handle is new), then assistant/tool messages on `llm_end` / `tool_call_end`, optional `budget_exhausted` / `compress_end` meta, and `run_end` (`stopped_reason`, `usage` matching `usage_total`) when the run completes. Pass `session` to reuse one handle across runs (the TUI does this so one launch = one file). Omit it for per-run files (one-shot, chat, gateway). `result.session_path` is the handle path when recording started. Records carry `{ts, kind: "message"|"meta", message?, meta?}`. Provider throws leave whatever was already appended; they do not write `run_end`. `read_session_messages` drops a trailing user message so resume does not start with two consecutive user turns. Read transcripts with `jq` (see the [games guide](games.md)) or `read_session_messages(path)` from a source checkout — it is not a package export. Persistence is best-effort: a write failure logs a warning and never fails the run.
+Each `run()` appends to a JSONL transcript under `config.session_dir` (default `<work_dir>/.lich/sessions`) while the loop runs: `run_start`, seeded system/user (plus history when the handle is new), then assistant/tool messages on `llm_end` / `tool_call_end`, optional `budget_exhausted` / `compress_end` meta, and `run_end` (`stopped_reason`, `usage` matching `usage_total`) when the run completes. Pass `session` to reuse one handle across runs (the TUI does this so one launch = one file). Omit it for per-run files (one-shot, chat, gateway). `result.session_path` is the handle path when recording started. Records carry `{ts, kind: "message"|"meta", message?, meta?}`. Provider throws leave whatever was already appended; they do not write `run_end`. `read_session_messages` drops every trailing user message so resume does not start with consecutive user turns. Read transcripts with `jq` (see the [games guide](games.md)) or `read_session_messages(path)` from a source checkout — it is not a package export. Persistence is best-effort: a write failure logs a warning and never fails the run.
 
 **CLI resume:** `lich --resume <id|latest>` (TUI only) resolves a transcript via `src/session/resolve.ts`, loads messages with `read_session_messages`, and seeds the TUI history. New turns append into the launch's shared handle (history is written once on first seed).

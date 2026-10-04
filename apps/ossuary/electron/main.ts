@@ -1,6 +1,13 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolve_repo_root_from_electron_dir } from "./backend-command.js";
+import { GatewaySession, type GatewayConnectionInfo } from "./gateway-session.js";
+import { assert_gateway_method, is_allowed_sender_url } from "./ipc-policy.js";
+import { read_layout_file, write_layout_file } from "./layout_store.js";
+import { is_allowed_popout_url } from "./popout_allow.js";
+import { start_renderer_server, type RendererServer } from "./renderer_server.js";
+import { spawn_lich_serve, type RunningServe } from "./serve-process.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,48 +53,230 @@ function is_allowed_navigation(url: string): boolean {
     if (parsed.protocol === "file:") {
       return is_allowed_file_navigation(url);
     }
-    return allowed_origins().has(parsed.origin);
+    return allowed_origins().has(parsed.origin) || parsed.origin === renderer_origin;
   } catch {
     return false;
   }
 }
 
-function create_window(): void {
-  const win = new BrowserWindow({
-    width: 960,
-    height: 640,
-    title: "ossuary",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
+function is_allowed_ipc_sender(url: string | undefined): boolean {
+  return is_allowed_sender_url(url, is_allowed_navigation);
+}
 
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+let main_window: BrowserWindow | undefined;
+let running_serve: RunningServe | undefined;
+let gateway: GatewaySession | undefined;
+let last_connection_info: GatewayConnectionInfo = { status: "connecting" };
+let on_serve_exit: (() => void) | undefined;
+let work_dir = "";
+let renderer_origin = "";
+let renderer_server: RendererServer | undefined;
+
+function publish_connection(info: GatewayConnectionInfo): void {
+  last_connection_info = info;
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send("ossuary:connection", info);
+  }
+}
+
+function preload_path(): string {
+  return path.join(__dirname, "preload.cjs");
+}
+
+function window_web_prefs() {
+  return {
+    preload: preload_path(),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  };
+}
+
+function attach_navigation_guard(win: BrowserWindow): void {
   win.webContents.on("will-navigate", (event, url) => {
     if (!is_allowed_navigation(url)) {
       event.preventDefault();
     }
   });
-
-  const dev_url = process.env.VITE_DEV_SERVER_URL;
-  if (dev_url && !app.isPackaged) {
-    void win.loadURL(dev_url);
-  } else {
-    void win.loadFile(RENDERER_INDEX_PATH);
-  }
 }
 
-app.whenReady().then(() => {
-  create_window();
+function attach_popout_handler(win: BrowserWindow): void {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (is_allowed_popout_url(url, renderer_origin) === false) {
+      return { action: "deny" };
+    }
+    return {
+      action: "allow",
+      overrideBrowserWindowOptions: {
+        webPreferences: window_web_prefs(),
+      },
+    };
+  });
+  win.webContents.on("did-create-window", (child) => {
+    child.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    attach_navigation_guard(child);
+  });
+}
+
+function create_window(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 960,
+    height: 640,
+    title: "ossuary",
+    webPreferences: window_web_prefs(),
+  });
+  attach_popout_handler(win);
+  attach_navigation_guard(win);
+  void win.loadURL(renderer_origin);
+  return win;
+}
+
+function register_ipc(): void {
+  ipcMain.handle("ossuary:get-connection", (event: IpcMainInvokeEvent) => {
+    if (is_allowed_ipc_sender(event.senderFrame?.url) === false) {
+      throw new Error("connection read from disallowed frame");
+    }
+    return gateway?.get_info() ?? last_connection_info;
+  });
+  ipcMain.handle(
+    "ossuary:request-gateway",
+    async (event: IpcMainInvokeEvent, method: unknown, params: unknown) => {
+      if (is_allowed_ipc_sender(event.senderFrame?.url) === false) {
+        throw new Error("gateway request from disallowed frame");
+      }
+      if (typeof method !== "string" || method.length === 0) {
+        throw new Error("method must be a non-empty string");
+      }
+      assert_gateway_method(method);
+      if (gateway === undefined) {
+        throw new Error("gateway not ready");
+      }
+      const body =
+        params !== undefined &&
+        typeof params === "object" &&
+        params !== null &&
+        Array.isArray(params) === false
+          ? (params as Record<string, unknown>)
+          : {};
+      return gateway.request(method, body);
+    },
+  );
+  ipcMain.handle("ossuary:load-layout", async (event: IpcMainInvokeEvent) => {
+    if (is_allowed_ipc_sender(event.senderFrame?.url) === false) {
+      throw new Error("layout load from disallowed frame");
+    }
+    if (work_dir.length === 0) {
+      return null;
+    }
+    return read_layout_file(work_dir);
+  });
+  ipcMain.handle("ossuary:save-layout", async (event: IpcMainInvokeEvent, layout: unknown) => {
+    if (is_allowed_ipc_sender(event.senderFrame?.url) === false) {
+      throw new Error("layout save from disallowed frame");
+    }
+    if (work_dir.length === 0) {
+      throw new Error("work_dir not ready");
+    }
+    if (layout === null || typeof layout !== "object" || Array.isArray(layout)) {
+      throw new Error("layout must be a plain object");
+    }
+    await write_layout_file(work_dir, layout);
+  });
+}
+
+function wire_gateway_notifications(session: GatewaySession): void {
+  session.subscribe((method, params) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("ossuary:notification", { method, params });
+    }
+  });
+}
+
+function wire_serve_exit(child: RunningServe["child"]): void {
+  on_serve_exit = () => {
+    on_serve_exit = undefined;
+    gateway?.close();
+    gateway = undefined;
+    running_serve = undefined;
+    publish_connection({ status: "stopped" });
+  };
+  child.once("exit", on_serve_exit);
+}
+
+function default_work_dir(repo_root: string): string {
+  if (process.env.LICH_WORK_DIR) {
+    return process.env.LICH_WORK_DIR;
+  }
+  if (app.isPackaged) {
+    return app.getPath("userData");
+  }
+  return repo_root;
+}
+
+async function start_backend(): Promise<void> {
+  const repo_root = resolve_repo_root_from_electron_dir(__dirname);
+  work_dir = default_work_dir(repo_root);
+  running_serve = await spawn_lich_serve({ repo_root, work_dir });
+  wire_serve_exit(running_serve.child);
+  gateway = new GatewaySession();
+  wire_gateway_notifications(gateway);
+  await gateway.connect(running_serve.ws_url, running_serve.boot.port);
+  publish_connection(gateway.get_info());
+}
+
+function stop_backend(): void {
+  if (running_serve !== undefined && on_serve_exit !== undefined) {
+    running_serve.child.off("exit", on_serve_exit);
+    on_serve_exit = undefined;
+  }
+  gateway?.close();
+  gateway = undefined;
+  running_serve?.stop();
+  running_serve = undefined;
+}
+
+async function resolve_renderer_origin(): Promise<string> {
+  const dev_url = process.env.VITE_DEV_SERVER_URL;
+  if (dev_url && app.isPackaged === false) {
+    return dev_url.replace(/\/$/, "");
+  }
+  renderer_server = await start_renderer_server(path.join(__dirname, "../renderer"));
+  return renderer_server.origin;
+}
+
+app.whenReady().then(async () => {
+  register_ipc();
+  try {
+    renderer_origin = await resolve_renderer_origin();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    dialog.showErrorBox("ossuary", `Failed to start renderer: ${message}`);
+    app.quit();
+    return;
+  }
+  main_window = create_window();
+  try {
+    await start_backend();
+  } catch (error) {
+    stop_backend();
+    const message = error instanceof Error ? error.message : String(error);
+    publish_connection({
+      status: "error",
+      error: message,
+    });
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      create_window();
+      main_window = create_window();
     }
   });
+});
+
+app.on("before-quit", () => {
+  stop_backend();
+  void renderer_server?.close();
+  renderer_server = undefined;
 });
 
 app.on("window-all-closed", () => {

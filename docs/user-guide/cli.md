@@ -10,6 +10,8 @@ lich init              # write .lich/config.json without the wizard (flags apply
 lich "one shot task"   # run a single task and print the reply
 lich chat              # interactive chat (commands: /exit, /quit)
 lich tui               # interactive terminal UI (ink)
+lich serve             # headless WebSocket JSON-RPC agent on loopback
+lich ossuary           # Electron desktop shell (clone + apps/ossuary)
 lich gateway <plat..>  # messaging gateway (webhook|telegram|discord|twitch)
 lich config            # print a starter config template
 lich update            # install a newer npm release, if one exists
@@ -27,6 +29,8 @@ lich --version         # package.json version (published package and this tree: 
 - **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr.
 - **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer.
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
+- **Serve** starts a loopback-only WebSocket JSON-RPC server with the same Agent/config resolution as TUI/chat. On listen it prints one JSON line `{"port":…,"token":…}` to stdout for clients (e.g. ossuary) to parse. `--host` defaults to `127.0.0.1` and must be loopback; `--port` defaults to `0` (ephemeral). See the [serve architecture note](../architecture/serve.md).
+- **Ossuary** opens the Electron desktop shell when `apps/ossuary` is present (git clone). It does not require a model flag at the CLI entry — the window spawns `lich serve` using `--work-dir` / `LICH_WORK_DIR` (default cwd). Missing `apps/ossuary` fails with a clone hint. See the [Ossuary guide](ossuary.md).
 - **Gateway** runs platform adapters (defaults to `webhook` when no platform is given). See the [Gateway guide](gateway.md). Unknown platform names are skipped with a warning; if none remain, the CLI exits `1`.
 - **Update** compares the installed version to the npm registry and, when a newer release exists, runs `npm install -g @moikapy/lich@latest`. Exit any running TUI or gateway first; npm cannot replace the package while those processes are running. A git clone is told to `git pull`. See [Updating](../getting-started.md#updating).
 - **MCP** (`lich mcp`) edits only `mcp_servers` in `<work-dir>/.lich/config.json` through the same writer as `lich init` (`update` mode, so other keys stay). A missing file lists as empty; `add` creates the file if needed. New entries stay disabled until `enable`. Names must match `^[a-z][a-z0-9_]*$`. Catalog names use `optional-mcps/`; otherwise pass `--command` and repeatable `--arg`, or `--url` (loopback only), not both. Redot still needs `--project-path` for the catalog args, and the command basename must be `redot`. No prompts. See the [Redot guide](redot.md).
@@ -51,12 +55,14 @@ Flags work before or after the subcommand. Every value flag can also be set via 
 | `--resume <id\|latest>` | TUI only: load an existing session transcript into history. Exact id, unique filename prefix, or `latest` (newest by mtime). | – |
 | `--log-level <level>` | `debug` \| `info` \| `warn` \| `error`. | `info` |
 | `--theme <name>` | Display theme loaded once at startup. `lich` is built-in; other names read `~/.lich/themes/<name>.json`. | `lich` |
+| `--host <addr>` | `lich serve` only: bind address (loopback only for v1). | `127.0.0.1` |
+| `--port <n>` | `lich serve` only: TCP port (`0` = ephemeral). | `0` |
 | `--command <bin>` | `lich mcp add` only: local stdio binary. | – |
 | `--arg <value>` | `lich mcp add` only: repeatable stdio arg. May start with `--`. | – |
 | `--url <url>` | `lich mcp add` only: loopback HTTP MCP URL. | – |
 | `--project-path <path>` | `lich mcp add` only: catalog `${project_path}` substitute. | – |
 
-Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a positive integer`. Unknown flags fail with `unknown flag: --foo`. A flag missing its value fails with `<flag> requires a value`. `--resume` outside the TUI (one-shot, `chat`, `gateway`) fails with `--resume is only supported in TUI mode (not <mode>)`.
+Passing `--max-turns 0` or a non-integer fails with `--max-turns must be a positive integer`. Unknown flags fail with `unknown flag: --foo`. A flag missing its value fails with `<flag> requires a value`. `--resume` outside the TUI (one-shot, `chat`, `gateway`, `serve`, `ossuary`) fails with `--resume is only supported in TUI mode (not <mode>)`. `--host` / `--port` outside `serve` are unknown flags. Non-loopback `--host` is refused.
 
 ## Provider resolution
 
@@ -73,7 +79,7 @@ Per-kind defaults:
 | --- | --- | --- | --- |
 | `openai_compat` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | Works with any OpenAI-shaped `/chat/completions` API. |
 | `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | |
-| `ollama` | `http://localhost:11434` | none | No key needed; `api_key`/`api_key_env` are sent as a Bearer header for cloud proxies when set. |
+| `ollama` | `http://localhost:11434` | none | No key needed locally; `api_key`/`api_key_env` are sent as a Bearer header when set, which Ollama cloud (`https://ollama.com`, `OLLAMA_API_KEY`) requires. |
 
 ## Config file reference
 
@@ -92,7 +98,7 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
     {
       "kind": "ollama",
       "name": "local",
-      "model": "llama3.2:latest",
+      "model": "qwen3:8b",
       "base_url": "http://localhost:11434",
       "keep_alive": "10m"
     }
@@ -124,10 +130,11 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `providers[].timeout_ms` | positive int | none | Per-request abort deadline. |
 | `providers[].think` | boolean | – | Ollama only: request thinking mode. |
 | `providers[].keep_alive` | string | – | Ollama only: model residency (e.g. `"10m"`). |
+| `models` | object | omitted | Optional per-role provider chains by name. `chat` is the main loop's failover order; `compress` is the context-compression chain and falls back to the `chat` chain when it fails. Without `chat`, the main loop uses `providers` order; without `compress`, compression uses the chat chain. Names must exist in `providers` and appear once per role. Example: `"models": { "chat": ["claude", "local"], "compress": ["local"] }`. |
 | `agent_name` | string | `lich` | Wizard label. The TUI banner uses the active theme welcome string, not this field. |
 | `theme` | string | `lich` | Display theme name. See [Themes](https://github.com/Moikapy/lich/blob/main/README.md#themes). |
 | `gateway` | object | omitted | Optional. `platforms` (`webhook` \| `telegram` \| `discord` \| `twitch`) and `token_envs` (platform → env-var name). Secrets stay in the environment. |
-| `plugins` | string array | `[]` | Module paths relative to `work_dir` or absolute. Bare `lich`, one-shot, chat, tui, and gateway load them through `create_agent_with_plugins`. `run_agent` does too. `create_agent` does not. See the [plugins guide](plugins.md). |
+| `plugins` | array | `[]` | Module paths relative to `work_dir` or absolute, or `{path, settings?, models?}` objects (free-form `settings`; granted model roles, default none). Bare `lich`, one-shot, chat, tui, and gateway load them through `create_agent_with_plugins`. `run_agent` does too. `create_agent` does not. See the [plugins guide](plugins.md). |
 | `mcp_servers` | object | omitted | Optional. Closed record of named servers. Each entry is stdio `{command, args, env?}` or loopback http `{url}`. `enabled` defaults to false. Unknown keys are rejected. See the [Redot guide](redot.md). |
 | `system_prompt` | string | built-in | Replaces the default system prompt. |
 | `max_turns` | int >= 1 | `25` | Turn budget per run. |
@@ -144,7 +151,11 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 Minimal per-provider examples:
 
 ```json
-{ "providers": [{ "kind": "ollama", "name": "local", "model": "llama3.2" }] }
+{ "providers": [{ "kind": "ollama", "name": "local", "model": "qwen3:8b" }] }
+```
+
+```json
+{ "providers": [{ "kind": "ollama", "name": "cloud", "model": "<cloud-model>", "base_url": "https://ollama.com", "api_key_env": "OLLAMA_API_KEY" }] }
 ```
 
 ```json
@@ -223,6 +234,6 @@ Batch one-shots from a script, checking each exit code:
 set -u
 for task in "summarize README.md" "list the largest files with disk_usage" "grep for TODO comments"; do
   echo "== $task"
-  LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich --max-turns 10 "$task" || echo "FAILED ($?)"
+  LICH_PROVIDER_KIND=ollama LICH_MODEL=qwen3:8b lich --max-turns 10 "$task" || echo "FAILED ($?)"
 done
 ```

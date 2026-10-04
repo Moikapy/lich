@@ -22,6 +22,7 @@ import {
   help_block,
   HISTORY_CAP,
   INITIAL_UI_STATE,
+  chat_provider,
   model_label_block,
   parse_command,
   tui_banner_text,
@@ -68,7 +69,7 @@ function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBloc
     return [compress_notice_block(event.summary_chars, theme)];
   }
   if (event.type === "error") {
-    return [error_notice_block(event.error instanceof Error ? event.error.message : String(event.error))];
+    return [error_notice_block(event.error.message)];
   }
   return [];
 }
@@ -321,7 +322,7 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
     [handle_slash, start_message_run],
   );
 
-  const provider = agent.config.providers[0];
+  const provider = chat_provider(agent.config);
   const banner = tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown");
   return (
     <Box flexDirection="column" minHeight={8}>

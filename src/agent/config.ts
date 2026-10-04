@@ -6,7 +6,9 @@ import { z } from "zod";
 import { DEFAULT_GATEWAY_TOOLS_ENABLED } from "../gateway/access.js";
 import { ENV_VAR_NAME } from "../gateway/token_env.js";
 import { refuse_mcp_entry } from "../mcp/mcp_pin.js";
+import { MODEL_ROLES } from "../plugins/types.js";
 import type { ProviderConfig } from "../providers/types.js";
+import { deep_freeze } from "../util/freeze.js";
 import { set_log_level } from "../util/log.js";
 
 const gateway_allowlist = z.record(z.string(), z.array(z.string())).default({});
@@ -96,6 +98,32 @@ const providers_schema = z
     }
   });
 
+const role_schema = z.array(z.string().min(1)).min(1).optional();
+
+/** Per-role provider chains by name. Omitted `chat` uses `providers` order; omitted `compress` uses the chat chain. */
+const models_schema = z
+  .object({
+    /** Main loop failover order. */
+    chat: role_schema,
+    /** Context-compression chain; falls back to `chat` when it fails. */
+    compress: role_schema,
+  })
+  .strict()
+  .optional();
+
+/** Bare module path, or `{ path, settings?, models? }` with free-form settings and granted roles. */
+const plugin_entry_schema = z.union([
+  z.string(),
+  z
+    .object({
+      path: z.string().min(1),
+      settings: z.record(z.unknown()).optional(),
+      /** Model roles this plugin may call; default none (fail closed). */
+      models: z.array(z.enum(MODEL_ROLES)).optional(),
+    })
+    .strict(),
+]);
+
 const agent_config_schema = z
   .object({
     /** Wizard label. The TUI banner uses the active theme welcome string. */
@@ -103,6 +131,7 @@ const agent_config_schema = z
     system_prompt: z.string().optional(),
     max_turns: z.number().int().min(1).default(25),
     providers: providers_schema,
+    models: models_schema,
     work_dir: z.string().optional(),
     tools_enabled: z.union([z.literal("all"), z.array(z.string())]).default("all"),
     temperature: z.number().min(0).max(2).optional(),
@@ -111,13 +140,35 @@ const agent_config_schema = z
     compress_threshold: z.number().min(0.1).max(0.95).default(0.8),
     session_dir: z.string().optional(),
     terminal_timeout_ms: z.number().int().positive().default(60000),
-    /** Plugin entry module specifiers, relative to work_dir or absolute. */
-    plugins: z.array(z.string()).default([]),
+    /** Plugin entries: module paths relative to work_dir or absolute, optionally with settings and roles. */
+    plugins: z.array(plugin_entry_schema).default([]),
     gateway: gateway_schema,
     log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
     theme: z.string().min(1).default("lich"),
     /** Named MCP servers. Each entry is stdio or loopback http. Default off. */
     mcp_servers: mcp_servers_schema,
+  })
+  .superRefine((config, ctx) => {
+    const known = new Set(config.providers.map((provider) => provider.name));
+    for (const [role, names] of Object.entries(config.models ?? {})) {
+      const seen = new Set<string>();
+      for (const [index, name] of (names ?? []).entries()) {
+        if (known.has(name) === false) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["models", role, index],
+            message: `unknown provider "${name}"`,
+          });
+        } else if (seen.has(name) === true) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["models", role, index],
+            message: `provider "${name}" listed twice`,
+          });
+        }
+        seen.add(name);
+      }
+    }
   })
   .transform((config) => {
     const work_dir = config.work_dir ?? process.cwd();
@@ -137,9 +188,14 @@ function freeze_config(config: AgentConfig): AgentConfig {
   for (const provider of config.providers) {
     Object.freeze(provider);
   }
+  if (config.models !== undefined) {
+    Object.freeze(config.models.chat);
+    Object.freeze(config.models.compress);
+    Object.freeze(config.models);
+  }
   Object.freeze(config.plugins);
   for (const plugin of config.plugins) {
-    Object.freeze(plugin);
+    deep_freeze(plugin);
   }
   if (Array.isArray(config.tools_enabled) === true) {
     Object.freeze(config.tools_enabled);

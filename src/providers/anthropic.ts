@@ -218,13 +218,32 @@ function to_anthropic_turns(messages: readonly Message[]): AnthropicTurnDto[] {
     }
     flush_tool_results(turns, pending_tool_results);
     if (message.role === "user") {
-      turns.push({ role: "user", content: [text_block(message.content)] });
+      append_user_blocks(turns, [text_block(message.content)]);
     } else {
       turns.push({ role: "assistant", content: assistant_to_blocks(message) });
     }
   }
   flush_tool_results(turns, pending_tool_results);
   return turns;
+}
+
+/**
+ * Messages API turns must alternate. Compression summaries and a user
+ * message after tool results are both `user` in our model; fold them into
+ * the open user turn instead of emitting a second one.
+ */
+function append_user_blocks(
+  turns: AnthropicTurnDto[],
+  blocks: readonly AnthropicContentBlockDto[],
+): void {
+  const last = turns.at(-1);
+  if (last !== undefined && last.role === "user") {
+    for (const block of blocks) {
+      last.content.push(block);
+    }
+    return;
+  }
+  turns.push({ role: "user", content: [...blocks] });
 }
 
 function flush_tool_results(
@@ -234,7 +253,7 @@ function flush_tool_results(
   if (pending_tool_results.length === 0) {
     return;
   }
-  turns.push({ role: "user", content: pending_tool_results.splice(0, pending_tool_results.length) });
+  append_user_blocks(turns, pending_tool_results.splice(0, pending_tool_results.length));
 }
 
 function text_block(text: string): { type: "text"; text: string } {

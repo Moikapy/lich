@@ -21,7 +21,7 @@ Lich needs exactly one thing before it runs: a model. You can provide it three w
 
 ```sh
 # ollama — no api key needed
-LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich "Reply with ok"
+LICH_PROVIDER_KIND=ollama LICH_MODEL=qwen3:8b lich "Reply with ok"
 
 # openai-compatible (api.openai.com/v1 by default; use a model id your provider accepts)
 LICH_PROVIDER_KIND=openai_compat LICH_MODEL=gpt-4o-mini lich "Reply with ok"
@@ -30,7 +30,7 @@ LICH_PROVIDER_KIND=openai_compat LICH_MODEL=gpt-4o-mini lich "Reply with ok"
 LICH_PROVIDER_KIND=anthropic LICH_MODEL=claude-sonnet-4-20250514 lich "Reply with ok"
 ```
 
-Defaults per kind when `LICH_BASE_URL`/`LICH_API_KEY_ENV` are unset: `openai_compat` uses `https://api.openai.com/v1` and reads `OPENAI_API_KEY`; `anthropic` uses `https://api.anthropic.com` and reads `ANTHROPIC_API_KEY`; `ollama` uses `http://localhost:11434` and needs no key.
+Defaults per kind when `LICH_BASE_URL`/`LICH_API_KEY_ENV` are unset: `openai_compat` uses `https://api.openai.com/v1` and reads `OPENAI_API_KEY`; `anthropic` uses `https://api.anthropic.com` and reads `ANTHROPIC_API_KEY`; `ollama` uses `http://localhost:11434` and needs no key. For Ollama's hosted models, set `LICH_BASE_URL=https://ollama.com` and `LICH_API_KEY_ENV=OLLAMA_API_KEY` (create the key at ollama.com).
 
 ### Path B: the `config` template (recommended)
 
@@ -162,6 +162,7 @@ bun src/cli.ts --version   # -> 0.8.0 (package.json)
 
 - All four CLI modes, flags, and provider resolution: [CLI reference](user-guide/cli.md).
 - Slash commands and the status bar: [TUI guide](user-guide/tui.md).
+- Electron desktop shell from a clone: [Ossuary guide](user-guide/ossuary.md).
 - Telegram, Discord, Twitch, and webhook setup: [Gateway guide](user-guide/gateway.md).
 - Embedding the agent in your own TypeScript: [Library guide](user-guide/library.md).
 - Session JSONL as a combat log: [Games guide](user-guide/games.md).

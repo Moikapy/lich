@@ -12,6 +12,7 @@ export const SERVE_METHODS = [
   "session.create",
   "session.list",
   "session.clear",
+  "session.resume",
   "prompt.submit",
   "prompt.abort",
 ] as const;
@@ -107,6 +108,21 @@ export interface SessionClearResult {
   session_id: string;
 }
 
+export interface SessionResumeParams {
+  /** Transcript id, unique prefix, or `latest` (same as CLI `--resume`). */
+  id: string;
+  /** Origin tag for the new bag; defaults to `resume`. */
+  source?: string;
+}
+
+export interface SessionResumeResult {
+  /** Fresh handle id; use this for `prompt.submit` once #83 lands. */
+  session_id: string;
+  /** Which transcript was resolved (exact id, even when resuming `latest`/prefix). */
+  resumed_id: string;
+  message_count: number;
+}
+
 export interface PromptSubmitParams {
   session_id: string;
   text: string;
@@ -147,6 +163,7 @@ export interface ServeMethodMap {
   "session.create": { params: SessionCreateParams; result: SessionCreateResult };
   "session.list": { params: SessionListParams; result: SessionListResult };
   "session.clear": { params: SessionClearParams; result: SessionClearResult };
+  "session.resume": { params: SessionResumeParams; result: SessionResumeResult };
   "prompt.submit": { params: PromptSubmitParams; result: PromptSubmitResult };
   "prompt.abort": { params: PromptAbortParams; result: PromptAbortResult };
 }
