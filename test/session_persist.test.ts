@@ -294,6 +294,34 @@ describe("read_session_messages resume hygiene", () => {
     expect(messages[2]).toMatchObject({ role: "tool", tool_call_id: "c1", content: "a" });
   });
 
+  it("fills every missing tool result after a kill with no tool rows and drops trailing users", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "killed");
+    await handle.append({
+      ts: "2026-01-01T00:00:00.000Z",
+      kind: "message",
+      message: {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { id: "c1", name: "terminal", args: { command: "sleep 99" } },
+          { id: "c2", name: "read_file", args: { path: "a.txt" } },
+        ],
+      },
+    });
+    for (const [index, content] of ["retry", "retry again"].entries()) {
+      await handle.append({
+        ts: `2026-01-01T00:00:0${index + 1}.000Z`,
+        kind: "message",
+        message: { role: "user", content },
+      });
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages.map((message) => message.role)).toEqual(["assistant", "tool", "tool"]);
+    expect(messages.slice(1).map((message) => (message.role === "tool" ? message.tool_call_id : ""))).toEqual(["c1", "c2"]);
+    expect(messages[1]).toMatchObject({ is_error: true, content: JSON.stringify({ ok: false, output: "", error: "cancelled" }) });
+  });
+
   it("leaves a complete tool exchange unchanged", async () => {
     const work_dir = await make_temp_dir();
     const handle = await open_session(path.join(work_dir, "sessions"), "complete");
