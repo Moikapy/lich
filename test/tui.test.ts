@@ -418,6 +418,16 @@ describe("notice blocks", () => {
     expect(blocks[1]?.lines[0]).toBe(`${LICH_THEME.response_label} › partial`);
   });
 
+  it("shows a cancelled notice for an aborted run", () => {
+    const blocks = run_notice_blocks({
+      outcome: { messages: [], final: undefined, result: undefined, turns_used: 1, stopped_reason: "aborted" },
+      messages: [],
+      usage_total: usage(0),
+      session_path: undefined,
+    }, LICH_THEME);
+    expect(blocks).toEqual([{ role: "error", lines: ["\u00b7 run cancelled"] }]);
+  });
+
   it("omits the final block when content is empty", () => {
     const blocks = run_notice_blocks({
       outcome: { messages: [], final: { role: "assistant", content: "" }, result: undefined, turns_used: 1, stopped_reason: "final" },

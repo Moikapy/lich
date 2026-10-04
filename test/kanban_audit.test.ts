@@ -6,9 +6,9 @@
  * "audit complete". Also covers the item-list page-cap guard.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -91,6 +91,10 @@ beforeEach(() => {
   make_gh_stub(dir);
   write_board(dir, BOARD, BOARD.length);
   write_issues(dir, OPEN_ISSUES);
+});
+
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe("kanban.sh audit", () => {

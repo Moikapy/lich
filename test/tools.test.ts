@@ -98,8 +98,14 @@ beforeAll(async () => {
   tmp_root = await mkdtemp(path.join(TMP_BASE, "tools-"));
 });
 
+/** Dirs created outside tmp_root by the symlink tests. */
+const outside_dirs: string[] = [];
+
 afterAll(async () => {
   await iter_rm(tmp_root);
+  for (const dir of outside_dirs) {
+    await iter_rm(dir);
+  }
 });
 
 describe("guard", () => {
@@ -402,6 +408,7 @@ describe("terminal", () => {
 describe("symlink confinement", () => {
   it("rejects file-tool paths that symlink outside work_dir", async () => {
     const outside = await mkdtemp(path.join(TMP_BASE, "outside-"));
+    outside_dirs.push(outside);
     await writeFile(path.join(outside, "secret.txt"), "leak\n", "utf8");
     symlinkSync(outside, path.join(tmp_root, "escape_link"));
     const registry = new ToolRegistry();
@@ -420,6 +427,7 @@ describe("symlink confinement", () => {
 
   it("rejects writing through a symlink leaf that points outside", async () => {
     const outside = await mkdtemp(path.join(TMP_BASE, "outside-leaf-"));
+    outside_dirs.push(outside);
     const outside_file = path.join(outside, "target.txt");
     await writeFile(outside_file, "before\n", "utf8");
     symlinkSync(outside_file, path.join(tmp_root, "leaf_link.txt"));

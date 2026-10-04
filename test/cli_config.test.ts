@@ -2,11 +2,19 @@
  * Unit tests for CLI config-file discovery: search chain, explicit paths,
  * safe JSON loading, and the starter template printed by `lich config`.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { config_search_paths, config_template, ensure_lich_config_dir, find_config_file, load_config } from "../src/cli_config.js";
+import {
+  config_search_paths,
+  config_template,
+  ensure_lich_config_dir,
+  find_config_file,
+  load_config,
+  project_config_path,
+  write_lich_config,
+} from "../src/cli_config.js";
 
 const TEST_TMP_ROOT = path.resolve("test/.tmp/cli-config");
 const created: string[] = [];
@@ -174,6 +182,24 @@ describe("ensure_lich_config_dir", () => {
     expect(lich_dir).toBe(path.join(dir, ".lich"));
     expect(existsSync(lich_dir)).toBe(true);
     expect(() => ensure_lich_config_dir(dir)).not.toThrow();
+  });
+});
+
+describe("write_lich_config update", () => {
+  it("replaces the file by rename instead of rewriting it in place, keeping its mode", () => {
+    const dir = make_temp_dir("atomic");
+    write_lich_config(dir, { version: 1 });
+    const file = project_config_path(dir);
+    chmodSync(file, 0o600);
+    // A hard link shares the old inode: an in-place write would change it too.
+    const old_inode = path.join(dir, "old-inode.json");
+    linkSync(file, old_inode);
+    const result = write_lich_config(dir, { version: 2 }, true);
+    expect(result.written).toBe(true);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ version: 2 });
+    expect(JSON.parse(readFileSync(old_inode, "utf8"))).toEqual({ version: 1 });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readdirSync(path.dirname(file))).toEqual(["config.json"]);
   });
 });
 

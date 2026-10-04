@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gatekeeper_plugin } from "../src/plugins/builtin/gatekeeper.plugin.js";
 import type { AfterToolCallInfo, BeforeToolCallInfo, HookContext, Plugin } from "../src/plugins/types.js";
@@ -11,6 +11,15 @@ import { ToolRegistry } from "../src/tools/registry.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 let tmp_root: string;
+const fixture_dirs: string[] = [];
+
+/** A fresh dir under test/.tmp, removed after the test. */
+async function fixture_dir(prefix: string): Promise<string> {
+  await mkdir(TMP_BASE, { recursive: true });
+  const dir = await mkdtemp(path.join(TMP_BASE, prefix));
+  fixture_dirs.push(dir);
+  return dir;
+}
 
 /** Run git in `dir`; resolve exit code + combined output. */
 function git(dir: string, args: readonly string[]): Promise<{ code: number; out: string }> {
@@ -49,8 +58,7 @@ async function wait_for_text(file: string): Promise<string> {
 
 /** Seed a fresh repo with a root commit (A3) and return its dir. */
 async function seeded_repo(): Promise<string> {
-  await mkdir(TMP_BASE, { recursive: true });
-  const dir = await mkdtemp(path.join(TMP_BASE, "gatekeeper-"));
+  const dir = await fixture_dir("gatekeeper-");
   await git(dir, ["init"]);
   await git(dir, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "seed"]);
   return dir;
@@ -199,7 +207,7 @@ describe("gatekeeper plugin", () => {
   });
 
   it("keeps probe plugins from reading the gatekeeper's state (sub-map isolation)", async () => {
-    const probe_dir = await mkdtemp(path.join(TMP_BASE, "probe-"));
+    const probe_dir = await fixture_dir("probe-");
     const probe_source = `
       export default {
         name: "probe",
@@ -225,7 +233,7 @@ describe("gatekeeper plugin", () => {
   });
 
   it("registers before config plugins so first-wins shadows a colliding tool", async () => {
-    const shadow_dir = await mkdtemp(path.join(TMP_BASE, "shadow-"));
+    const shadow_dir = await fixture_dir("shadow-");
     const shadow_source = `
       export default {
         name: "shadow",
@@ -289,7 +297,7 @@ describe("gatekeeper plugin", () => {
   });
 
   it("refuses to commit when HEAD is unreachable (unborn branch, A3)", async () => {
-    const fresh = await mkdtemp(path.join(TMP_BASE, "unborn-"));
+    const fresh = await fixture_dir("unborn-");
     await git(fresh, ["init"]);
     const registry = new ToolRegistry();
     const gatekeeper_loaded = { plugin: gatekeeper_plugin(true), entry: "builtin:gatekeeper" };
@@ -370,7 +378,7 @@ describe("gatekeeper plugin", () => {
   });
 
   it("loader hard-rejects builtin-colliding plugin names (A5)", async () => {
-    const collide_dir = await mkdtemp(path.join(TMP_BASE, "collide-"));
+    const collide_dir = await fixture_dir("collide-");
     const collide_source = `
       export default {
         name: "gatekeeper",
@@ -390,6 +398,8 @@ describe("gatekeeper plugin", () => {
   });
 });
 
-afterEach(() => {
-  // fixture repos live under test/.tmp (gitignored); no manual cleanup needed
+afterEach(async () => {
+  for (const dir of fixture_dirs.splice(0)) {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

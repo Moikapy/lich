@@ -235,6 +235,9 @@ export function run_notice_blocks(result: AgentRunResult, theme: ThemeSpec): His
   if (result.outcome.stopped_reason === "budget") {
     blocks.push({ role: "error", lines: [`\u00b7 ${fill_template(theme.notices.budget_exhausted, {})}`] });
   }
+  if (result.outcome.stopped_reason === "aborted") {
+    blocks.push({ role: "error", lines: ["\u00b7 run cancelled"] });
+  }
   const final_block = result.outcome.final === undefined ? undefined : assistant_result_block(result.outcome.final, theme);
   if (final_block !== undefined) {
     blocks.push(final_block);
@@ -346,5 +349,5 @@ export const SLASH_COMMAND_NAMES: readonly string[] = [
 
 export const HELP_LINES: readonly string[] = [
   "commands: /help /model /usage /clear /sessions /resume /exit (aliases: /quit /q)",
-  "enter submits \u00b7 backspace deletes \u00b7 up/down recalls history \u00b7 pasted newlines become spaces",
+  "enter submits \u00b7 backspace deletes \u00b7 up/down recalls history \u00b7 pasted newlines become spaces \u00b7 esc cancels a running turn",
 ];

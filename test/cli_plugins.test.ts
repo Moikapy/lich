@@ -21,6 +21,7 @@ vi.mock("node:readline", () => {
   const createInterface = (): {
     question: (prompt: string, callback: (line: string) => void) => void;
     once: () => void;
+    on: () => void;
     removeListener: () => void;
     close: () => void;
     [Symbol.asyncIterator]: () => AsyncIterator<string>;
@@ -29,6 +30,7 @@ vi.mock("node:readline", () => {
       callback("");
     },
     once: () => undefined,
+    on: () => undefined,
     removeListener: () => undefined,
     close: () => undefined,
     async *[Symbol.asyncIterator]() {

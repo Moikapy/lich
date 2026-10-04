@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Ctrl+C in a one-shot run or in `lich chat` cancels the run or turn
+  through its abort signal; chat keeps the session and returns to the prompt.
+  A second Ctrl+C quits at once (exit `130`). In the TUI, Esc cancels a running
+  turn (#133).
+- Updating `.lich/config.json` (`lich mcp ...`) writes a temp file and renames
+  it into place, keeping the file's mode, so a crash or concurrent reader
+  never sees a half-written config (#133).
 - `http_request` reports a non-2xx status as `ok: false` (`error: http_<status>`)
   and still returns the status and body in `output`.
 - `terminal` uses config `terminal_timeout_ms` as its default command timeout

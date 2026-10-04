@@ -9,7 +9,7 @@ lich         # front door: TUI, plus a first-run setup wizard when no config exi
 lich tui     # same TUI, no wizard. From a clone: bun src/cli.ts tui
 ```
 
-The TUI needs a TTY and a resolvable provider (same resolution as every mode). On startup it prints a dim header from the active theme welcome string, e.g. `⚱ lich v0.8.0 — the agent that will not stay dead · qwen3:8b (ollama)`. `{version}` is `LICH_VERSION` from `package.json`. That banner is the only tagline placement. Quit with `/exit`, `/quit`, `/q`, or Ctrl+C.
+The TUI needs a TTY and a resolvable provider (same resolution as every mode). On startup it prints a dim header from the active theme welcome string, e.g. `⚱ lich v0.8.0 — the agent that will not stay dead · qwen3:8b (ollama)`. `{version}` is `LICH_VERSION` from `package.json`. That banner is the only tagline placement. Quit with `/exit`, `/quit`, `/q`, or Ctrl+C. Esc cancels a running turn.
 
 ## Anatomy
 
@@ -25,7 +25,7 @@ model qwen3:8b · turns 2 · tokens 1,204 · [dormant] · /path/.lich/sessions/.
 
 - **Header** — theme welcome string (version, model, provider kind). The tagline appears only here.
 - **Transcript** — user lines (`mortal ›` by default), replies (`lich ›`, or the theme `response_label`), tool rows (`⏺ name(args)` with a result line), and meta notices (`· context compressed — memories distilled ...`, `· error: ...`). The view keeps the newest 50 blocks; older lines scroll out of the transcript (session JSONLs still hold everything — see [limitations](#known-limitations)).
-- **Input row** — `› ` when idle, `… ` while the agent works; Enter submits, Backspace edits, pasted newlines collapse to spaces.
+- **Input row** — `› ` when idle, `… ` while the agent works; Enter submits, Backspace edits, pasted newlines collapse to spaces, and Esc cancels a running turn (a `· run cancelled` notice follows).
 - **Status bar** — see below.
 
 ## Slash commands

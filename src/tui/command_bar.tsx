@@ -1,7 +1,8 @@
 /**
  * Input row: printable characters accumulate in a buffer, Enter submits,
  * Backspace/Delete edits, Up/Down walk a 20-entry recall ring, and pasted
- * newlines collapse to spaces. Ctrl+C is left to ink's default handling.
+ * newlines collapse to spaces. Esc cancels a running turn. Ctrl+C is left to
+ * ink's default handling.
  */
 import { useState } from "react";
 import { Box, Text, useInput } from "ink";
@@ -11,6 +12,7 @@ const INPUT_HISTORY_CAP = 20;
 interface CommandBarProps {
   readonly busy: boolean;
   readonly on_submit: (text: string) => void;
+  readonly on_cancel?: () => void;
 }
 
 /** Push onto a capped ring (newest first) without mutating the source. */
@@ -18,7 +20,7 @@ function push_history(ring: readonly string[], entry: string): readonly string[]
   return [entry, ...ring.filter((item) => item !== entry)].slice(0, INPUT_HISTORY_CAP);
 }
 
-export function CommandBar({ busy, on_submit }: CommandBarProps): React.JSX.Element {
+export function CommandBar({ busy, on_submit, on_cancel }: CommandBarProps): React.JSX.Element {
   const [buffer, set_buffer] = useState("");
   const [recall_ring, set_recall_ring] = useState<readonly string[]>([]);
   const [recall_index, set_recall_index] = useState<number | undefined>(undefined);
@@ -70,6 +72,10 @@ export function CommandBar({ busy, on_submit }: CommandBarProps): React.JSX.Elem
     }
     if (key.backspace === true || key.delete === true) {
       set_buffer((current) => current.slice(0, -1));
+      return;
+    }
+    if (key.escape === true && busy === true) {
+      on_cancel?.();
       return;
     }
     if (key.ctrl === true || key.escape === true || key.tab === true || key.meta === true) {
