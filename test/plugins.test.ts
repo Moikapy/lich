@@ -172,7 +172,7 @@ describe("HookedToolRunner", () => {
     expect(log).toEqual(["before:read_file", "after:read_file:tool output"]);
   });
 
-  it("continues when a hook throws", async () => {
+  it("blocks the call when before_tool_call throws, and survives a throwing after hook", async () => {
     const { runner, calls } = spy_runner("still works");
     const throwing: PluginHooks = {
       before_tool_call: async () => {
@@ -184,8 +184,13 @@ describe("HookedToolRunner", () => {
     };
     const hooked = new HookedToolRunner(runner, [plugin_with(throwing)]);
     const result = await hooked.execute("read_file", {});
-    expect(result.ok).toBe(true);
-    expect(result.output).toBe("still works");
+    expect(result).toEqual({ ok: false, output: "", error: "blocked_by_plugin: hook_error" });
+    expect(calls).toEqual([]);
+
+    const after_only = new HookedToolRunner(runner, [plugin_with({ after_tool_call: throwing.after_tool_call })]);
+    const passed = await after_only.execute("read_file", {});
+    expect(passed.ok).toBe(true);
+    expect(passed.output).toBe("still works");
     expect(calls).toEqual([{ name: "read_file", args: {} }]);
   });
 
@@ -338,6 +343,31 @@ describe("HookedToolRunner", () => {
 });
 
 describe("Agent with plugins", () => {
+  it("applies a tools_enabled list to plugin tools and git_commit", async () => {
+    const work_dir = await make_temp_dir();
+    const seen: string[][] = [];
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { tools?: Array<{ function: { name: string } }> };
+      seen.push((body.tools ?? []).map((tool) => tool.function.name));
+      return new Response(JSON.stringify(completion_body({ role: "assistant", content: "ok" }, "stop")), { status: 200 });
+    };
+    const listed = await create_agent_with_plugins({
+      ...base_config(work_dir, fetch_fn),
+      tools_enabled: ["read_file", "plugin_echo"],
+      plugins: [path.join(FIXTURES, "good.plugin.ts")],
+    });
+    await listed.run({ input: "go" });
+    expect([...(seen[0] ?? [])].sort()).toEqual(["plugin_echo", "read_file"]);
+
+    const unlisted = await create_agent_with_plugins({
+      ...base_config(work_dir, fetch_fn),
+      tools_enabled: ["read_file"],
+      plugins: [path.join(FIXTURES, "good.plugin.ts")],
+    });
+    await unlisted.run({ input: "go" });
+    expect(seen[1]).toEqual(["read_file"]);
+  });
+
   it("registers a plugin tool and the loop can call it end to end", async () => {
     const work_dir = await make_temp_dir();
     const fetch_script = scripted_fetch((call_count) => {

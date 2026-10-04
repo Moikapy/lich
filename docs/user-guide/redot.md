@@ -26,7 +26,7 @@ stdio is a local binary you named, plus `args`, plus optional `env`. The process
 
 HTTP is `{ "url": "http://127.0.0.1:9/mcp" }`. The host must be `127.0.0.1` or `localhost`. `0.0.0.0` and any other host are refused. There is no remote MCP in v1.
 
-On connect the client sends `initialize`, then `notifications/initialized`, then `tools/list`. `tools/call` runs only when the model invokes a registered tool. Registered names are `mcp_<server>_<tool>`, so two servers cannot collide. They appear only when that server is `enabled` and `tools_enabled` is `"all"` or lists the prefixed name. `tools_enabled: []` drops them even when the server is enabled, and does not connect. Plugin tools still register, including the gatekeeper's `git_commit`. The commander persona keeps `tools_enabled: []` and the `game_bridge` plugin only — `persona_config` does not copy `mcp_servers`.
+On connect the client sends `initialize`, then `notifications/initialized`, then `tools/list`. `tools/call` runs only when the model invokes a registered tool. Registered names are `mcp_<server>_<tool>`, so two servers cannot collide. They appear only when that server is `enabled` and `tools_enabled` is `"all"` or lists the prefixed name. `tools_enabled: []` drops them even when the server is enabled, and does not connect. A list applies to plugin tools too, so list each plugin tool you want exposed. The commander persona lists only its three `game_bridge` tools — `persona_config` does not copy `mcp_servers`.
 
 This client has shipped since 0.7.0 (`lich mcp`, `mcp_servers`; current package 0.8.0). From a clone, use `bun src/cli.ts mcp ...`.
 

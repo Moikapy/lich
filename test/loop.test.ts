@@ -124,6 +124,24 @@ describe("run_conversation", () => {
     expect(events.at(-1)?.type).toBe("turn_end");
   });
 
+  it("does not run tools requested on the max_turns turn and closes them as not run", async () => {
+    const emitter = new AgentEmitter();
+    const events: AgentEventBody[] = [];
+    emitter.on((event) => events.push(event));
+    const chat: ChatFn = async () => result("", [{ id: "late", name: "noop", args: {} }]);
+    const { runner, calls } = make_tool_runner("noop output");
+    const deps: LoopDeps = { chat, tools: runner, definitions: () => [], emitter };
+
+    const outcome = await run_conversation(deps, [{ role: "user", content: "go" }], { max_turns: 2 });
+
+    expect(outcome.stopped_reason).toBe("budget");
+    expect(calls).toHaveLength(1);
+    expect(event_types(events).filter((type) => type === "tool_call_start")).toHaveLength(1);
+    const last = outcome.messages.at(-1);
+    expect(last).toMatchObject({ role: "tool", tool_call_id: "late", is_error: true });
+    expect(last?.content).toContain("turn_budget_exhausted");
+  });
+
   it("scenario C: abort signal stops the loop before the next LLM call", async () => {
     const controller = new AbortController();
     const emitter = new AgentEmitter();

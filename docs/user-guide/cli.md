@@ -139,7 +139,7 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `system_prompt` | string | built-in | Replaces the default system prompt. |
 | `max_turns` | int >= 1 | `25` | Turn budget per run. |
 | `work_dir` | string | cwd | Root for all file tools; paths outside are rejected. |
-| `tools_enabled` | `"all"` or name array | `"all"` | Restrict the builtin registry to these names. `[]` drops builtins and MCP tools and does not connect to MCP servers. Plugin tools still register afterward, including the gatekeeper's `git_commit`. |
+| `tools_enabled` | `"all"` or name array | `"all"` | Restrict every tool to these names: builtins, MCP tools and plugin tools, including the gatekeeper's `git_commit`. `[]` exposes no tools and does not connect to MCP servers. |
 | `temperature` | 0–2 | – | Sampling temperature. |
 | `max_tokens` | positive int | – | Completion cap. |
 | `context_budget_tokens` | positive int | `100000` | Estimated budget before compression triggers. |

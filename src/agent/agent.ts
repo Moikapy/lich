@@ -86,7 +86,6 @@ function collect_usage(total: Usage): (event: AgentEventBody) => void {
   };
 }
 
-/** Register plugin tools onto the final registry; duplicates warn and skip. */
 /** Plugin tool whose context also carries the owning plugin's settings and model access. */
 function with_plugin_access(tool: Tool, access: PluginAccess): Tool {
   return {
@@ -95,14 +94,24 @@ function with_plugin_access(tool: Tool, access: PluginAccess): Tool {
   };
 }
 
+/**
+ * Register plugin tools onto the final registry; duplicates warn and skip.
+ * A tools_enabled list applies here too, so a plugin tool (gatekeeper's
+ * git_commit included) is exposed only when listed.
+ */
 function register_plugin_tools(
   registry: ToolRegistry,
   plugins: readonly LoadedPlugin[],
   access: ReadonlyMap<Plugin, PluginAccess>,
+  enabled: "all" | readonly string[],
 ): void {
   for (const loaded of plugins) {
     const plugin_access = access.get(loaded.plugin);
     for (const tool of loaded.plugin.tools ?? []) {
+      if (enabled !== "all" && enabled.includes(tool.name) === false) {
+        logger.info(`plugin ${loaded.plugin.name} tool ${tool.name} not in tools_enabled; skipping`);
+        continue;
+      }
       if (registry.has(tool.name) === true) {
         logger.warn(`plugin ${loaded.plugin.name} tool ${tool.name} already registered; skipping`);
         continue;
@@ -178,7 +187,7 @@ export class Agent {
         models: this.plugin_models(loaded.plugin.name, loaded.models ?? []),
       });
     }
-    register_plugin_tools(this.registry, [gatekeeper_loaded, ...plugins], access);
+    register_plugin_tools(this.registry, [gatekeeper_loaded, ...plugins], access, config.tools_enabled);
     const base_executor = new ToolExecutor(this.registry, {
       work_dir: config.work_dir,
       env: tool_env(config),

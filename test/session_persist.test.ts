@@ -155,7 +155,7 @@ describe("session run_end", () => {
       ],
       work_dir,
       session_dir: path.join(work_dir, "sessions"),
-      max_turns: 1,
+      max_turns: 2,
       log_level: "error",
     });
     const stop = agent.events.on((event) => {

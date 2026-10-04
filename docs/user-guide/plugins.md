@@ -53,7 +53,7 @@ An entry can also be an object with free-form `settings` and the model roles the
 
 ## Hook reference
 
-All hooks are awaited. Hook errors are logged as warnings and skipped — a broken hook never breaks the run.
+All hooks are awaited. A `before_tool_call` hook that throws blocks that call (`blocked_by_plugin: hook_error`) so a broken guard never silently allows it; other hook errors are logged as warnings and skipped. Neither ends the run.
 
 | Hook | Signature | Purpose |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ Failures are contained at every layer:
 
 - **Broken import** (missing file, syntax error, missing export): the loader records the entry as an error, logs one warning with `plugin_errors_summary`, and starts the agent without that plugin.
 - **Duplicate plugin names**: later duplicates become error entries; the first registration wins.
-- **Throwing hook**: logged as a warning; the run continues as if the hook did not exist.
+- **Throwing hook**: a throwing `before_tool_call` blocks that call with `blocked_by_plugin: hook_error`; other hooks are logged as warnings and skipped. The run continues either way.
 - **Throwing tool**: the executor captures it and returns `{ok: false, error}` to the loop.
 
 ## Naming rules

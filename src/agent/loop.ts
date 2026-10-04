@@ -178,6 +178,13 @@ async function call_chat(
   }
 }
 
+/** Close final-turn tool calls with not-run results so the history stays valid for resume. */
+function skip_tool_calls(history: Message[], calls: readonly ToolCall[]): void {
+  for (const call of calls) {
+    history.push(tool_message_from_result(call, { ok: false, output: "", error: "turn_budget_exhausted" }));
+  }
+}
+
 function replace_history(history: Message[], next: readonly Message[]): void {
   history.length = 0;
   for (const message of next) {
@@ -379,13 +386,16 @@ export async function run_conversation(
       emitter?.emit({ type: "turn_end", turn });
       return { messages: history, final: result.message, result, turns_used: turn, stopped_reason: "final" };
     }
+    if (turn === params.max_turns) {
+      // The model gets no turn to read results, so do not run side effects it cannot see.
+      skip_tool_calls(history, calls);
+      break;
+    }
     const tool_status = await run_tool_calls(deps, history, turn, calls, emitter, params.signal);
     if (tool_status === "aborted") {
       return aborted_outcome(history, turn);
     }
-    if (turn < params.max_turns) {
-      emitter?.emit({ type: "turn_end", turn });
-    }
+    emitter?.emit({ type: "turn_end", turn });
   }
   emitter?.emit({ type: "budget_exhausted", turns_used: params.max_turns });
   emitter?.emit({ type: "turn_end", turn: params.max_turns });
