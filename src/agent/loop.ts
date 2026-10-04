@@ -10,6 +10,7 @@ import { compress_messages, should_compress, split_keep_recent, type ChatFn } fr
 import { estimate_messages_tokens } from "../context/tokens.js";
 import type {
   AssistantMessage,
+  ChatOptions,
   ChatResult,
   Message,
   ToolCall,
@@ -17,10 +18,12 @@ import type {
   ToolMessage,
   Usage,
 } from "../providers/types.js";
+import type { BeforeLlmCallInfo, HookContext } from "../plugins/types.js";
 import { ProviderError } from "../providers/types.js";
 import type { ToolContext, ToolResult } from "../tools/types.js";
 import { logger } from "../util/log.js";
 import type { AgentEmitter } from "./events.js";
+import { to_agent_error_payload } from "./events.js";
 
 const DEFAULT_COMPRESS_THRESHOLD = 0.8;
 const KEEP_RECENT_TURNS = 8;
@@ -33,6 +36,10 @@ export interface ToolRunner {
 
 export interface LoopDeps {
   chat: ChatFn;
+  /** Context-compression chat; falls back to `chat` when unset or failing. */
+  compress_chat?: ChatFn;
+  /** Plugin before_llm_call fan-out; returned notes apply to that one main-loop call. */
+  before_llm_call?: (info: BeforeLlmCallInfo, ctx: HookContext) => Promise<string[]>;
   tools: ToolRunner;
   definitions: () => ToolDefinition[];
   emitter?: AgentEmitter;
@@ -129,14 +136,30 @@ async function run_tool_calls(
   return signal_aborted(signal) === true ? "aborted" : "continued";
 }
 
+/** History plus any before_llm_call notes as one trailing system message; history itself is untouched. */
+async function messages_for_call(deps: LoopDeps, history: readonly Message[], turn: number): Promise<readonly Message[]> {
+  if (deps.before_llm_call === undefined) {
+    return history;
+  }
+  const ctx: HookContext = { work_dir: deps.tool_context?.work_dir ?? process.cwd() };
+  // Deep copy: hooks must not reach live history objects or the session transcript.
+  const notes = await deps.before_llm_call({ turn, messages: structuredClone(history) }, ctx);
+  if (notes.length === 0) {
+    return history;
+  }
+  return [...history, { role: "system", content: notes.join("\n\n") }];
+}
+
 async function call_chat(
   deps: LoopDeps,
   history: readonly Message[],
   params: LoopParams,
   emitter: AgentEmitter | undefined,
+  turn: number,
 ): Promise<ChatResult> {
   try {
-    return await deps.chat(history, deps.definitions(), {
+    const messages = await messages_for_call(deps, history, turn);
+    return await deps.chat(messages, deps.definitions(), {
       temperature: params.temperature,
       max_tokens: params.max_tokens,
       signal: params.signal,
@@ -150,7 +173,7 @@ async function call_chat(
     } else {
       logger.error("agent chat call failed", error);
     }
-    emitter?.emit({ type: "error", error });
+    emitter?.emit({ type: "error", error: to_agent_error_payload(error) });
     throw error;
   }
 }
@@ -177,6 +200,28 @@ function kept_tail_over_budget(
 function schedule_compress_backoff(backoff: CompressBackoff, turn: number): void {
   // turn < skip_until_turn skips COMPRESS_BACKOFF_TURNS subsequent turns.
   backoff.skip_until_turn = turn + COMPRESS_BACKOFF_TURNS + 1;
+}
+
+/** Compression role first; on a non-abort failure, retry on the main chat chain. */
+async function compress_chat(
+  deps: LoopDeps,
+  messages: readonly Message[],
+  tools: readonly ToolDefinition[],
+  options?: ChatOptions,
+): Promise<ChatResult> {
+  if (deps.compress_chat === undefined) {
+    return await deps.chat(messages, tools, options);
+  }
+  try {
+    return await deps.compress_chat(messages, tools, options);
+  } catch (error) {
+    if (options?.signal?.aborted === true) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`compress chain failed (${message}); falling back to chat chain`);
+    return await deps.chat(messages, tools, options);
+  }
 }
 
 async function compress_if_needed(
@@ -206,7 +251,7 @@ async function compress_if_needed(
   emitter?.emit({ type: "compress_start", estimated_tokens: estimate_messages_tokens(history) });
   let summarizer_usage: Usage | undefined;
   const counting_chat: ChatFn = async (messages, tools, options) => {
-    const result = await deps.chat(messages, tools, options);
+    const result = await compress_chat(deps, messages, tools, options);
     summarizer_usage = result.usage;
     return result;
   };
@@ -241,12 +286,58 @@ function find_last_assistant(messages: readonly Message[]): AssistantMessage | u
   return [...messages].reverse().find((message) => message.role === "assistant");
 }
 
+const PARTIAL_MESSAGES = Symbol("lich.partial_messages");
+/** Copied examples read this non-enumerable field; they do not import the symbol. */
+const PARTIAL_MESSAGES_KEY = "lich_partial_messages";
+
 function signal_aborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
 
-function aborted_outcome(history: Message[], turns_used: number, emitter: AgentEmitter | undefined): LoopOutcome {
-  emitter?.emit({ type: "error", error: new DOMException("agent loop aborted", "AbortError") });
+/** Attach in-memory history so a caller can keep turns that finished before chat threw. */
+export function note_partial_messages(error: unknown, messages: readonly Message[]): unknown {
+  if (typeof error === "object" && error !== null) {
+    const copy = [...messages];
+    Object.defineProperty(error, PARTIAL_MESSAGES, { value: copy, enumerable: false });
+    Object.defineProperty(error, PARTIAL_MESSAGES_KEY, { value: copy, enumerable: false });
+  }
+  return error;
+}
+
+/** History captured when chat threw, if the loop annotated this error. */
+export function partial_messages_of(error: unknown): Message[] | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const record = error as { [PARTIAL_MESSAGES]?: unknown; lich_partial_messages?: unknown };
+  const value = record[PARTIAL_MESSAGES] ?? record.lich_partial_messages;
+  return Array.isArray(value) ? (value as Message[]) : undefined;
+}
+
+/**
+ * Messages to keep when a run throws after earlier turns finished.
+ * Undefined when the error has no completed assistant or tool turn.
+ */
+export function history_after_run_error(error: unknown): Message[] | undefined {
+  const partial = partial_messages_of(error);
+  if (partial === undefined) {
+    return undefined;
+  }
+  const kept = drop_trailing_users(partial);
+  const progressed = kept.some((message) => message.role === "assistant" || message.role === "tool");
+  return progressed ? kept : undefined;
+}
+
+function drop_trailing_users(messages: readonly Message[]): Message[] {
+  const kept = [...messages];
+  while (kept.at(-1)?.role === "user") {
+    kept.pop();
+  }
+  return kept;
+}
+
+function aborted_outcome(history: Message[], turns_used: number): LoopOutcome {
+  // Aborts are reported as run_end by Agent.run, not as type:"error".
   return {
     messages: history,
     final: find_last_assistant(history),
@@ -266,19 +357,19 @@ export async function run_conversation(
   const compress_backoff: CompressBackoff = { skip_until_turn: 0 };
   for (const turn of turn_range(params.max_turns)) {
     if (signal_aborted(params.signal) === true) {
-      return aborted_outcome(history, turn - 1, emitter);
+      return aborted_outcome(history, turn - 1);
     }
     emitter?.emit({ type: "turn_start", turn });
     await compress_if_needed(deps, history, params, emitter, turn, compress_backoff);
     emitter?.emit({ type: "llm_start", turn });
     let result: ChatResult;
     try {
-      result = await call_chat(deps, history, params, emitter);
+      result = await call_chat(deps, history, params, emitter, turn);
     } catch (error) {
       if (signal_aborted(params.signal) === true) {
-        return aborted_outcome(history, turn - 1, emitter);
+        return aborted_outcome(history, turn - 1);
       }
-      throw error;
+      throw note_partial_messages(error, history);
     }
     emitter?.emit({ type: "llm_end", turn, result });
     history.push(result.message);
@@ -290,7 +381,7 @@ export async function run_conversation(
     }
     const tool_status = await run_tool_calls(deps, history, turn, calls, emitter, params.signal);
     if (tool_status === "aborted") {
-      return aborted_outcome(history, turn, emitter);
+      return aborted_outcome(history, turn);
     }
     if (turn < params.max_turns) {
       emitter?.emit({ type: "turn_end", turn });

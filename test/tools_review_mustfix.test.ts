@@ -78,6 +78,44 @@ describe("S-2 SSRF helpers", () => {
     expect(is_blocked_ip("8.8.8.8")).toBe(false);
   });
 
+  it("blocks CGNAT, shared-space, multicast, and IPv4-mapped loopback", () => {
+    const blocked = [
+      "0.0.0.0",
+      "172.16.0.1",
+      "172.31.255.255",
+      "100.64.0.1",
+      "100.127.255.255",
+      "224.0.0.1",
+      "255.255.255.255",
+      "::",
+      "::1",
+      "::ffff:127.0.0.1",
+      "::ffff:10.1.2.3",
+      "::ffff:169.254.169.254",
+      "fe80::1",
+      "fc00::1",
+      "fd12:3456::1",
+      "not-an-ip",
+    ];
+    for (const address of blocked) {
+      expect(is_blocked_ip(address), address).toBe(true);
+    }
+    const public_addrs = ["172.15.255.255", "172.32.0.1", "100.63.0.1", "100.128.0.1", "223.0.0.1", "::ffff:8.8.8.8", "2001:4860:4860::8888"];
+    for (const address of public_addrs) {
+      expect(is_blocked_ip(address), address).toBe(false);
+    }
+  });
+
+  it("rejects mapped loopback and CGNAT literals before DNS", async () => {
+    if (private_urls_allowed() === true) {
+      return;
+    }
+    await expect(resolve_public_ip("::ffff:127.0.0.1")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("100.64.0.1")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("172.16.0.1")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("8.8.8.8")).resolves.toBe("8.8.8.8");
+  });
+
   it("rejects localhost resolution when private URLs are disallowed", async () => {
     if (private_urls_allowed() === true) {
       return;

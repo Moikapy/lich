@@ -14,7 +14,7 @@ import { TMP_BASE } from "./helpers/tmp_base.js";
  * serve read-path branch (transcript vanishing between resolve and read)
  * without racing real filesystem interleaving. Off → real reader.
  */
-const read_spy = vi.hoisted(() => ({ fail_read_enoent: false }));
+const read_spy = vi.hoisted(() => ({ fail_read_enoent: false, fail_read_other: false }));
 
 vi.mock("../src/session/store.js", async (import_original) => {
   const actual = await import_original<typeof import("../src/session/store.js")>();
@@ -24,6 +24,11 @@ vi.mock("../src/session/store.js", async (import_original) => {
       if (read_spy.fail_read_enoent === true) {
         return Promise.reject(
           Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+        );
+      }
+      if (read_spy.fail_read_other === true) {
+        return Promise.reject(
+          Object.assign(new Error(`EACCES: permission denied, open '${file_path}'`), { code: "EACCES" }),
         );
       }
       return actual.read_session_messages(file_path);
@@ -41,6 +46,8 @@ async function make_temp_dir(prefix: string): Promise<string> {
 }
 
 afterEach(async () => {
+  read_spy.fail_read_enoent = false;
+  read_spy.fail_read_other = false;
   for (const dir of created.splice(0)) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -205,6 +212,41 @@ describe("serve session rpc", () => {
 
     const response = await rpc(context, "session.resume", { id: session_id });
     expect(response.error).toMatchObject({ code: -32000, message: "session not found" });
+  });
+
+  it("maps a non-ENOENT transcript read to a stable unreadable error", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-resume-unreadable"), "sessions");
+    const file_path = await write_transcript(session_dir, "locked-1", [
+      { role: "user", content: "secret-body" },
+      { role: "assistant", content: "ok" },
+    ]);
+    const context = rpc_context(session_dir);
+    read_spy.fail_read_other = true;
+    try {
+      const response = await rpc(context, "session.resume", { id: "locked-1" });
+      expect(response.error).toMatchObject({
+        code: -32000,
+        message: "session transcript unreadable",
+      });
+      const message = (response.error as { message: string }).message;
+      expect(message).not.toContain(file_path);
+      expect(message).not.toContain("EACCES");
+      expect(message).not.toContain("secret-body");
+    } finally {
+      read_spy.fail_read_other = false;
+    }
+  });
+
+  it("maps a non-directory session_dir to a stable list error without a path", async () => {
+    const root = await make_temp_dir("serve-list-not-dir");
+    const session_dir = path.join(root, "sessions");
+    await writeFile(session_dir, "not-a-directory\n");
+    const context = rpc_context(session_dir);
+    const response = await rpc(context, "session.list", {});
+    expect(response.error).toMatchObject({ code: -32000, message: "session operation failed" });
+    const message = (response.error as { message: string }).message;
+    expect(message).not.toContain(session_dir);
+    expect(message).not.toContain("ENOTDIR");
   });
 
   it("maps a transcript vanishing between resolve and read to not_found (read-path ENOENT)", async () => {

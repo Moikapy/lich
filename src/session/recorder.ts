@@ -2,7 +2,7 @@
  * Event-driven session transcript writer. Appends messages as the loop emits
  * them so a mid-run kill keeps every completed LLM/tool exchange on disk.
  */
-import type { AgentEvent } from "../agent/events.js";
+import type { AgentEventBody } from "../agent/events.js";
 import { tool_message_from_result } from "../agent/loop.js";
 import type { Message, Usage } from "../providers/types.js";
 import { logger } from "../util/log.js";
@@ -30,7 +30,7 @@ export interface RecorderSeed {
 
 export interface SessionRecorder {
   readonly path: string;
-  on_event(event: AgentEvent): void;
+  on_event(event: AgentEventBody): void;
   seed(seed: RecorderSeed): Promise<void>;
   finish(stopped_reason: string, usage_total: Usage): Promise<void>;
   flush(): Promise<void>;
@@ -59,7 +59,7 @@ export function create_session_recorder(handle: SessionHandle): SessionRecorder 
   const append_meta = (meta: Record<string, unknown>): Promise<void> =>
     append({ ts: record_ts(), kind: "meta", meta });
 
-  const on_event = (event: AgentEvent): void => {
+  const on_event = (event: AgentEventBody): void => {
     if (event.type === "llm_end") {
       enqueue(() => append_message(event.result.message));
       return;

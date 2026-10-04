@@ -1,10 +1,10 @@
 ---
 title: Hermes Agent (Nous Research)
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-02
 type: entity
 tags: [hermes, research, ecosystem]
-sources: [raw/audits/2026-09-23-hermes-vs-lich.md]
+sources: [raw/audits/2026-09-23-hermes-vs-lich.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#149"]
 confidence: high
 ---
 
@@ -35,6 +35,15 @@ Details and file paths are in ^[raw/audits/2026-09-23-hermes-vs-lich.md].
 - **Interrupts per thread,** plus steer and redirect.
 - **The gateway owns sessions and cron ticks.** This is the model for [[0001-gateway-as-hub]].
 - **Trajectory output** (ShareGPT JSONL), `batch_runner.py`, **computer use** and **vision**.
+
+## Models, memory and decision plugins (read at `bed0d535`, 2026-10-02)
+
+A fresh clone of upstream was read for #148 and #149. Paths are in the Hermes repo. ^[raw/audits/2026-10-02-hermes-models-memory-decisions.md]
+
+- **Model roles.** The main model has a `fallback_model` chain (`hermes_cli/config.py:1003`). Each side task (compression, vision, web extract, titles, session search, background review) has its own `auxiliary.<task>` provider and model, defaulting to "auto" (main model first) and resolved in `_resolve_task_provider_model` (`agent/auxiliary_client.py:6077`). That file is 8,256 lines, and overrides are still labelled experimental.
+- **Embeddings live in memory plugins, not core.** One `MemoryProvider` at a time (`agent/memory_provider.py:84`); mem0 brings its own embedder, defaulting to Ollama `nomic-embed-text`.
+- **Decision models are plugins only.** 15 dedicated community Jev plugins in `plugin-catalog/` (plus 4 broader plugins with Jev backends) route skills, gate tools, review approvals, pick per-turn model and effort, and skip idle cron runs. Shared rules: shadow mode first, one log line per decision, thresholds in code, capped payloads, egress disclosure, fail open for routing and fail closed for approvals. See [[decision-models]].
+- **What those plugins stand on:** per-plugin `settings` (`ctx.get_config`, `hermes_cli/plugins.py:270`), host-owned model access (`ctx.llm`, keys never exposed, overrides fail closed) and hooks such as `pre_llm_call` (`hermes_cli/plugins.py:109`). Lich plans the same three in #149; see [[lich-plugins-and-hooks]].
 
 ## History note
 

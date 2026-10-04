@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Box, Text } from "ink";
 import type { Agent, AgentRunResult } from "../agent/agent.js";
+import { history_after_run_error } from "../agent/loop.js";
 import type { AgentEvent } from "../agent/events.js";
 import type { AgentConfig } from "../agent/config.js";
 import type { Message } from "../providers/types.js";
@@ -22,6 +23,7 @@ import {
   help_block,
   HISTORY_CAP,
   INITIAL_UI_STATE,
+  chat_provider,
   model_label_block,
   parse_command,
   tui_banner_text,
@@ -68,7 +70,7 @@ function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBloc
     return [compress_notice_block(event.summary_chars, theme)];
   }
   if (event.type === "error") {
-    return [error_notice_block(event.error instanceof Error ? event.error.message : String(event.error))];
+    return [error_notice_block(event.error.message)];
   }
   return [];
 }
@@ -149,6 +151,10 @@ function use_agent_run(
       };
       void run_agent_turn(agent, history_ref.current, text, on_event, finish_run, controller.signal, session)
         .catch((error: unknown) => {
+          const kept = history_after_run_error(error);
+          if (kept !== undefined) {
+            history_ref.current = kept;
+          }
           add_blocks([error_notice_block(run_error_text(error))]);
           set_state((current) => ({ ...current, phase: "idle" }));
         })
@@ -321,7 +327,7 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
     [handle_slash, start_message_run],
   );
 
-  const provider = agent.config.providers[0];
+  const provider = chat_provider(agent.config);
   const banner = tui_banner_text(theme, LICH_VERSION, provider?.model ?? "unknown", provider?.kind ?? "unknown");
   return (
     <Box flexDirection="column" minHeight={8}>

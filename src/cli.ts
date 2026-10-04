@@ -8,8 +8,9 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { create_agent_with_plugins, type Agent, type AgentRunResult } from "./agent/agent.js";
+import { history_after_run_error } from "./agent/loop.js";
 import { parse_agent_config, type AgentConfig } from "./agent/config.js";
-import { AgentEmitter } from "./agent/events.js";
+import type { EnvelopedAgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
 import {
   load_config,
@@ -86,7 +87,7 @@ function usage_text(): string {
     "  --model <m>            model name (default from LICH_MODEL)",
     "  --provider-kind <k>    openai_compat | anthropic | ollama (default LICH_PROVIDER_KIND)",
     "  --base-url <u>         provider base url (default LICH_BASE_URL)",
-    "  --api-key-env <NAME>   env var holding the api key (default LICH_API_KEY_ENV; unused by ollama)",
+    "  --api-key-env <NAME>   env var holding the api key (default LICH_API_KEY_ENV; optional for ollama)",
     "  --system-prompt <s>    system prompt override",
     "  --session-dir <path>   session transcript directory",
     "  --resume <id|latest>   TUI only: load an existing session transcript",
@@ -414,7 +415,7 @@ function build_config_for(options: CliOptions, mode: string): AgentConfig {
   }
 }
 
-function attach_progress(emitter: AgentEmitter): () => void {
+function attach_progress(emitter: EnvelopedAgentEmitter): () => void {
   return emitter.on((event) => {
     if (event.type === "turn_start") {
       process.stderr.write(`\n[lich] turn ${event.turn}`);
@@ -469,7 +470,7 @@ async function run_chat_turn(agent: Agent, input: string, history: readonly Mess
     return result.messages;
   } catch (error) {
     process.stderr.write(`[lich] ${error_message(error)}\n`);
-    return [...history];
+    return history_after_run_error(error) ?? [...history];
   } finally {
     stop_progress();
   }

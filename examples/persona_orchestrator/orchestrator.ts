@@ -2,7 +2,14 @@
  * One lich Agent per persona. This routes conversations; it does not run
  * a second Think-Act-Observe loop. Plugin tools stay inside the agent.
  */
-import { cap_history, DEFAULT_HISTORY_CAP, DEFAULT_MAX_CONVERSATIONS, enqueue, recall_history } from "./history_queue.js";
+import {
+  cap_history,
+  DEFAULT_HISTORY_CAP,
+  DEFAULT_MAX_CONVERSATIONS,
+  enqueue,
+  history_after_run_error,
+  recall_history,
+} from "./history_queue.js";
 import { parse_persona_chat_id, persona_by_id, persona_config } from "./personas.js";
 import { reply_text, round_fate, sanitize_agent_error } from "./reply.js";
 import type { AgentFactory, AgentLike, HandleResult, PersonaEntry, SharedAgentDefaults, UsageShape } from "./types.js";
@@ -48,13 +55,17 @@ async function run_post(
   if (persona === undefined) {
     return { reply: sanitize_agent_error(new Error("unknown persona")), usage: null };
   }
+  const history = recall_history(histories, chat_id, max_conversations) ?? [];
   try {
     const agent = await agent_for(params.factory, params.shared, agents, persona);
-    const history = recall_history(histories, chat_id, max_conversations) ?? [];
     const result = await agent.run({ input: text, history, label: `gw:${platform}:${chat_id}` });
     histories.set(chat_id, cap_history(result.messages, history_cap));
     return payload_for(result.outcome.stopped_reason, result.outcome.final?.content, result.usage_total);
   } catch (error) {
+    const kept = history_after_run_error(error);
+    if (kept !== undefined) {
+      histories.set(chat_id, cap_history(kept, history_cap));
+    }
     return { reply: sanitize_agent_error(error), usage: null };
   }
 }

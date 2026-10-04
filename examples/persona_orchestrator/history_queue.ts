@@ -7,19 +7,63 @@ export const DEFAULT_HISTORY_CAP = 40;
 export const DEFAULT_MAX_CONVERSATIONS = 200;
 
 /**
- * Newest `cap` messages. After slicing, drop leading non-user turns so a
- * truncated assistant tool_calls is never left without its tool results.
+ * Newest `cap` messages, starting at the first user message in the window.
+ * When the window has no user message, drop a leading tool-result fragment so
+ * it does not start mid-batch and keep the assistant/tool turns — skipping
+ * every non-user role emptied a tool-heavy turn.
+ * If the window is only that batch's results, include its assistant. The
+ * slice can then exceed `cap` by the rest of that one batch. A window with no
+ * user opens with a stub user turn, since providers reject assistant-first
+ * history.
  */
 export function cap_history<T>(messages: readonly T[], cap: number): T[] {
   const overflow = messages.length - cap;
   if (overflow <= 0) {
     return [...messages];
   }
-  let start = overflow;
-  while (start < messages.length && role_of(messages[start]) !== "user") {
-    start += 1;
+  const user = messages.findIndex((message, index) => index >= overflow && role_of(message) === "user");
+  if (user !== -1) {
+    return messages.slice(user);
   }
-  return messages.slice(start);
+  const body = skip_leading_tools(messages, overflow);
+  if (body < messages.length) {
+    return with_user_head(messages.slice(body));
+  }
+  const parent = assistant_owning_tools(messages, overflow);
+  return parent === undefined ? [] : with_user_head(messages.slice(parent));
+}
+
+const TRIMMED_HISTORY_NOTE = "(earlier conversation trimmed)";
+
+function with_user_head<T>(window: T[]): T[] {
+  return [{ role: "user", content: TRIMMED_HISTORY_NOTE } as T, ...window];
+}
+
+function skip_leading_tools<T>(messages: readonly T[], start: number): number {
+  let index = start;
+  while (index < messages.length && role_of(messages[index]) === "tool") {
+    index += 1;
+  }
+  return index;
+}
+
+function assistant_owning_tools<T>(messages: readonly T[], start: number): number | undefined {
+  let index = start;
+  while (index > 0 && role_of(messages[index]) === "tool") {
+    index -= 1;
+  }
+  if (index >= start || has_tool_calls(messages[index]) === false) {
+    return undefined;
+  }
+  return index;
+}
+
+function has_tool_calls(message: unknown): boolean {
+  if (role_of(message) !== "assistant") {
+    return false;
+  }
+  const calls = (message as { tool_calls?: unknown }).tool_calls;
+  return Array.isArray(calls) && calls.length > 0;
 }
 
 function role_of(message: unknown): string | undefined {
@@ -45,6 +89,30 @@ export function recall_history<T>(map: Map<string, T>, key: string, max_entries:
     dropped += 1;
   }
   return map.get(key);
+}
+
+/**
+ * Turns that finished before the agent threw, read from the non-enumerable
+ * `lich_partial_messages` field the loop attaches. Undefined when there is
+ * no completed assistant or tool turn to keep.
+ */
+export function history_after_run_error(error: unknown): unknown[] | undefined {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const value = (error as { lich_partial_messages?: unknown }).lich_partial_messages;
+  if (Array.isArray(value) === false) {
+    return undefined;
+  }
+  const kept = [...value];
+  while (kept.length > 0 && role_of(kept[kept.length - 1]) === "user") {
+    kept.pop();
+  }
+  const progressed = kept.some((message) => {
+    const role = role_of(message);
+    return role === "assistant" || role === "tool";
+  });
+  return progressed ? kept : undefined;
 }
 
 /** Serializes tasks for one key. A rejected task does not stall the next. Idle keys are evicted. */

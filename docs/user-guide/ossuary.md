@@ -14,7 +14,7 @@ bun install
 bun install --cwd apps/ossuary
 
 # write a local config once (or use the bare-lich wizard in a TTY)
-bun src/cli.ts init --provider-kind ollama --model llama3.2
+bun src/cli.ts init --provider-kind ollama --model qwen3:8b
 
 # open ossuary (builds the Electron app on first run, then opens a window)
 bun src/cli.ts ossuary

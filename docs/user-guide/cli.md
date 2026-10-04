@@ -79,7 +79,7 @@ Per-kind defaults:
 | --- | --- | --- | --- |
 | `openai_compat` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | Works with any OpenAI-shaped `/chat/completions` API. |
 | `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | |
-| `ollama` | `http://localhost:11434` | none | No key needed; `api_key`/`api_key_env` are sent as a Bearer header for cloud proxies when set. |
+| `ollama` | `http://localhost:11434` | none | No key needed locally; `api_key`/`api_key_env` are sent as a Bearer header when set, which Ollama cloud (`https://ollama.com`, `OLLAMA_API_KEY`) requires. |
 
 ## Config file reference
 
@@ -98,7 +98,7 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
     {
       "kind": "ollama",
       "name": "local",
-      "model": "llama3.2:latest",
+      "model": "qwen3:8b",
       "base_url": "http://localhost:11434",
       "keep_alive": "10m"
     }
@@ -130,10 +130,11 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 | `providers[].timeout_ms` | positive int | none | Per-request abort deadline. |
 | `providers[].think` | boolean | – | Ollama only: request thinking mode. |
 | `providers[].keep_alive` | string | – | Ollama only: model residency (e.g. `"10m"`). |
+| `models` | object | omitted | Optional per-role provider chains by name. `chat` is the main loop's failover order; `compress` is the context-compression chain and falls back to the `chat` chain when it fails. Without `chat`, the main loop uses `providers` order; without `compress`, compression uses the chat chain. Names must exist in `providers` and appear once per role. Example: `"models": { "chat": ["claude", "local"], "compress": ["local"] }`. |
 | `agent_name` | string | `lich` | Wizard label. The TUI banner uses the active theme welcome string, not this field. |
 | `theme` | string | `lich` | Display theme name. See [Themes](https://github.com/Moikapy/lich/blob/main/README.md#themes). |
 | `gateway` | object | omitted | Optional. `platforms` (`webhook` \| `telegram` \| `discord` \| `twitch`) and `token_envs` (platform → env-var name). Secrets stay in the environment. |
-| `plugins` | string array | `[]` | Module paths relative to `work_dir` or absolute. Bare `lich`, one-shot, chat, tui, and gateway load them through `create_agent_with_plugins`. `run_agent` does too. `create_agent` does not. See the [plugins guide](plugins.md). |
+| `plugins` | array | `[]` | Module paths relative to `work_dir` or absolute, or `{path, settings?, models?}` objects (free-form `settings`; granted model roles, default none). Bare `lich`, one-shot, chat, tui, and gateway load them through `create_agent_with_plugins`. `run_agent` does too. `create_agent` does not. See the [plugins guide](plugins.md). |
 | `mcp_servers` | object | omitted | Optional. Closed record of named servers. Each entry is stdio `{command, args, env?}` or loopback http `{url}`. `enabled` defaults to false. Unknown keys are rejected. See the [Redot guide](redot.md). |
 | `system_prompt` | string | built-in | Replaces the default system prompt. |
 | `max_turns` | int >= 1 | `25` | Turn budget per run. |
@@ -150,7 +151,11 @@ Validated by zod (top-level unknown keys are silently stripped; extra keys insid
 Minimal per-provider examples:
 
 ```json
-{ "providers": [{ "kind": "ollama", "name": "local", "model": "llama3.2" }] }
+{ "providers": [{ "kind": "ollama", "name": "local", "model": "qwen3:8b" }] }
+```
+
+```json
+{ "providers": [{ "kind": "ollama", "name": "cloud", "model": "<cloud-model>", "base_url": "https://ollama.com", "api_key_env": "OLLAMA_API_KEY" }] }
 ```
 
 ```json
@@ -229,6 +234,6 @@ Batch one-shots from a script, checking each exit code:
 set -u
 for task in "summarize README.md" "list the largest files with disk_usage" "grep for TODO comments"; do
   echo "== $task"
-  LICH_PROVIDER_KIND=ollama LICH_MODEL=llama3.2 lich --max-turns 10 "$task" || echo "FAILED ($?)"
+  LICH_PROVIDER_KIND=ollama LICH_MODEL=qwen3:8b lich --max-turns 10 "$task" || echo "FAILED ($?)"
 done
 ```

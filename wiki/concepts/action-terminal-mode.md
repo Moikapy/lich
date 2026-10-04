@@ -1,7 +1,7 @@
 ---
 title: Action-terminal mode (one LLM call per decision)
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-02
 type: concept
 tags: [games, npc, core, performance]
 sources: [raw/audits/2026-09-23-game-surface-audit.md, "#113"]
@@ -27,5 +27,7 @@ status_note: proposed, not implemented
 | OpenAI | `tool_choice: {"type":"function","function":{"name":…}}` or `"required"` |
 | Anthropic | `tool_choice: {"type":"tool","name":…}` or `{"type":"any"}` |
 | Ollama | `format: <json schema>` (the tool-choice support depends on the model) |
+
+**Alternative fast lane (#148):** for a pure "pick one action" step, a [[decision-models]] `choice` call (tens of milliseconds, with a confidence value) can replace the LLM call entirely, falling back to the LLM or the scripted action when confidence is low.
 
 Related: [[client-executed-tools]], [[lich-providers]], [[game-bridge-example]].

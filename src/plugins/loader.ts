@@ -5,12 +5,17 @@
  */
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import type { Plugin } from "./types.js";
+import { deep_freeze } from "../util/freeze.js";
+import type { ModelRole, Plugin, PluginEntry } from "./types.js";
 
 /** A successfully loaded plugin plus the entry path it came from. */
 export interface LoadedPlugin {
   plugin: Plugin;
   entry: string;
+  /** Frozen `settings` from the config entry; absent for bare-path entries. */
+  settings?: Readonly<Record<string, unknown>>;
+  /** Model roles granted in the config entry; absent means none. */
+  models?: readonly ModelRole[];
 }
 
 /** One failed entry: the specifier and why it failed. */
@@ -85,18 +90,25 @@ async function load_one_entry(entry: string, base_dir: string): Promise<LoadedPl
  * nothing is thrown for a bad plugin.
  */
 export async function load_plugins(
-  entries: readonly string[],
+  entries: readonly PluginEntry[],
   base_dir: string,
 ): Promise<{ plugins: LoadedPlugin[]; errors: PluginLoadError[] }> {
   const plugins: LoadedPlugin[] = [];
   const errors: PluginLoadError[] = [];
   const seen = new Set<string>();
-  for (const entry of entries) {
+  for (const raw of entries) {
+    const entry = typeof raw === "string" ? raw : raw.path;
     if (entry.length === 0) {
       continue;
     }
     try {
       const loaded = await load_one_entry(entry, base_dir);
+      if (typeof raw !== "string") {
+        const settings = structuredClone({ ...raw.settings });
+        deep_freeze(settings);
+        loaded.settings = settings;
+        loaded.models = Object.freeze([...(raw.models ?? [])]);
+      }
       if (is_builtin_collision(loaded.plugin.name) === true) {
         errors.push({ entry, error_message: `builtin_plugin_name_collision: ${loaded.plugin.name}` });
         continue;
