@@ -23,9 +23,20 @@ export interface ReplySink {
   send(text: string): Promise<void>;
 }
 
+/**
+ * What an adapter can deliver (decision 0001: adapters declare capabilities).
+ * Every platform adapter today is "text": a plain reply per message, split
+ * into chunks of at most `max_reply_chars` when the platform caps length.
+ */
+export interface AdapterCapabilities {
+  readonly kind: "text";
+  readonly max_reply_chars?: number;
+}
+
 /** Lifecycle contract implemented by every platform adapter. */
 export interface PlatformAdapter {
   readonly name: string;
+  readonly capabilities: AdapterCapabilities;
   start(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -81,10 +92,11 @@ export function sanitize_agent_error(error: unknown): string {
 }
 
 /** Adapter that logs why it is idle once and otherwise does nothing. */
-export function create_idle_adapter(name: string, reason: string): PlatformAdapter {
+export function create_idle_adapter(name: string, reason: string, capabilities: AdapterCapabilities): PlatformAdapter {
   logger.warn(`gateway ${name} adapter idle: ${reason}`);
   return {
     name,
+    capabilities,
     start: async () => undefined,
     stop: async () => undefined,
   };

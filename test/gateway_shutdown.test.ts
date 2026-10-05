@@ -22,11 +22,13 @@ describe("shutdown_gateway", () => {
     const { agent, bus } = tracked(order);
     const slow: PlatformAdapter = {
       name: "slow",
+      capabilities: { kind: "text" },
       start: async () => undefined,
       stop: () => new Promise((resolve) => setTimeout(() => resolve(order.push("slow.stop") as unknown as void), 20)),
     };
     const broken: PlatformAdapter = {
       name: "broken",
+      capabilities: { kind: "text" },
       start: async () => undefined,
       stop: async () => {
         throw new Error("socket gone");
@@ -41,7 +43,7 @@ describe("shutdown_gateway", () => {
   it("stops waiting after the timeout when an adapter hangs", async () => {
     const order: string[] = [];
     const { agent, bus } = tracked(order);
-    const hung: PlatformAdapter = { name: "hung", start: async () => undefined, stop: () => new Promise(() => undefined) };
+    const hung: PlatformAdapter = { name: "hung", capabilities: { kind: "text" }, start: async () => undefined, stop: () => new Promise(() => undefined) };
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     await shutdown_gateway(agent, bus, [hung], 20);
     expect(order).toEqual(["bus.stop", "agent.close"]);

@@ -4,15 +4,20 @@
  * No real network to telegram/discord/twitch — webhook binds an ephemeral
  * port (0) on loopback only.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parse_agent_config } from "../src/agent/config.js";
 import {
+  create_gateway_policy,
   DEFAULT_GATEWAY_TOOLS_ENABLED,
   gateway_tools_enabled,
   is_gateway_sender_allowed,
+  type GatewayPolicy,
 } from "../src/gateway/access.js";
+import { create_discord_adapter } from "../src/gateway/discord.js";
+import { create_twitch_adapter } from "../src/gateway/twitch.js";
+import { logger } from "../src/util/log.js";
 import { assert_bind_allowed, create_webhook_adapter, MAX_WEBHOOK_BODY_BYTES } from "../src/gateway/webhook.js";
 import { format_agent_reply, split_text } from "../src/gateway/format.js";
 import { create_telegram_adapter } from "../src/gateway/telegram.js";
@@ -605,6 +610,60 @@ describe("gateway access", () => {
       expect(open.gateway?.tools_enabled).toBe("all");
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("builds one GatewayPolicy from config: toolset plus the sender allowlists", () => {
+    const work_dir = temp_work_dir();
+    try {
+      const policy = create_gateway_policy(config_for(work_dir, { allowed_users: { discord: ["u1"] } }));
+      expect(policy.tools_enabled).toEqual([...DEFAULT_GATEWAY_TOOLS_ENABLED]);
+      expect(policy.allows("webhook", "c", "anyone")).toBe(true);
+      expect(policy.allows("discord", "c", "u1")).toBe(true);
+      expect(policy.allows("discord", "c", "u2")).toBe(false);
+      expect(policy.allows("telegram", "c", "u1")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets the bus use an injected policy instead of the config's", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const deny_all: GatewayPolicy = { tools_enabled: [], allows: () => false };
+      const bus = new GatewayBus({ config: config_for(work_dir), policy: deny_all, agent_factory: () => recording_agent(records) });
+      expect(await bus.handle("webhook", "c1", "u1", "hello")).toBeUndefined();
+      expect(records).toEqual([]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("adapter capabilities", () => {
+  it("declares each platform's reply cap, also on idle adapters", () => {
+    const saved = { ...process.env };
+    for (const key of ["LICH_TELEGRAM_BOT_TOKEN", "LICH_DISCORD_BOT_TOKEN", "LICH_TWITCH_OAUTH_TOKEN", "LICH_TWITCH_NICK"]) {
+      delete process.env[key];
+    }
+    const params = {
+      config: parse_agent_config({ providers: [{ kind: "openai_compat", name: "m", model: "x" }] }),
+      handle_message: async () => "",
+      get_agent: (): Agent => {
+        throw new Error("not used");
+      },
+      reply_router: () => undefined,
+    };
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      expect(create_telegram_adapter(params).capabilities).toEqual({ kind: "text", max_reply_chars: 4096 });
+      expect(create_discord_adapter(params).capabilities).toEqual({ kind: "text", max_reply_chars: 2000 });
+      expect(create_twitch_adapter(params).capabilities).toEqual({ kind: "text", max_reply_chars: TWITCH_MESSAGE_CAP });
+      expect(create_webhook_adapter({ ...params, port: 0, host: "127.0.0.1" }).capabilities).toEqual({ kind: "text" });
+    } finally {
+      vi.restoreAllMocks();
+      process.env = saved;
     }
   });
 });
