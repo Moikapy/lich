@@ -454,6 +454,18 @@ describe("forbidden file paths", () => {
     expect(write.error?.startsWith("forbidden_path")).toBe(true);
   });
 
+  it("denies .lich/profiles to read and write (global identity files when work_dir is home)", async () => {
+    await mkdir(path.join(tmp_root, ".lich", "profiles"), { recursive: true });
+    await writeFile(path.join(tmp_root, ".lich", "profiles", "coder.md"), "soul\n", "utf8");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const read = await executor.execute("read_file", { path: ".lich/profiles/coder.md" });
+    expect(read.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    const write = await executor.execute("write_file", { path: ".lich/profiles/coder.json", content: "{}\n" });
+    expect(write.error?.startsWith("forbidden_path")).toBe(true);
+  });
+
   it("allows writes under .lich/skills and .lich/plugins; denies other .lich writes and .env*", async () => {
     const registry = new ToolRegistry();
     register_builtin_tools(registry);

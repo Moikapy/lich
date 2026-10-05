@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Profiles (#117): `~/.lich/profiles/<name>.json` (plus an optional `<name>.md`
+  used as the system prompt) is merged between the global and project config.
+  Select one with `--profile`, `LICH_PROFILE`, a project `profile` key, or the
+  default set by `lich profile use`. New `lich profile list|show|create|use`.
+  File tools now refuse `.lich/profiles/`. See `docs/user-guide/profiles.md`.
+- `lich tui`, `chat`, `serve` and `gateway` now show the real config error
+  (for example `profile not found`) instead of always saying "no model
+  configured".
 - `lich init --global` writes the starter config to `~/.lich/config.json`
   (never overwrites). The setup wizard ends with "Save as the global default?"
   (default no); yes writes the answers to `~/.lich/config.json` and keeps

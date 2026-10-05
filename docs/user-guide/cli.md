@@ -8,6 +8,7 @@
 lich                   # open the TUI; first run on a TTY starts the setup wizard
 lich init              # write .lich/config.json without the wizard (flags apply; never overwrites)
 lich init --global     # write ~/.lich/config.json, the defaults every project inherits
+lich profile list      # named configs in ~/.lich/profiles (also show/create/use)
 lich "one shot task"   # run a single task and print the reply
 lich chat              # interactive chat (commands: /exit, /quit)
 lich tui               # interactive terminal UI (ink)
@@ -91,6 +92,7 @@ Per-kind defaults:
 - **Per-project keys:** `work_dir` and `session_dir` in the global file are ignored.
 - **Paths:** relative `plugins` paths in the global file resolve against `~/.lich/`. MCP `command` and `args` are used as written.
 - **Legacy location:** `~/.config/lich/config.json` is still read when `~/.lich/config.json` is absent, with a one-line hint to move it. Lich never writes there.
+- **Profiles:** a selected profile (`--profile`, `LICH_PROFILE`, or `lich profile use`) is merged between the global and project files. See [Profiles](profiles.md).
 - **`--config <path>`** replaces the whole chain; nothing is merged.
 
 `lich init` and `lich mcp` write only the project file. `lich init --global` and the wizard's "save as global" answer write `~/.lich/config.json`.
