@@ -8,11 +8,12 @@ import { logger } from "../util/log.js";
 import { sleep } from "../util/sleep.js";
 import { platform_token_env, read_platform_token } from "./token_env.js";
 import type { AdapterParams, PlatformAdapter, RawSocket } from "./types.js";
-import { create_idle_adapter, open_socket, run_inbound_message } from "./types.js";
+import { create_idle_adapter, open_socket, run_inbound_message, type AdapterCapabilities } from "./types.js";
 
 export const TWITCH_IRC_URL = "wss://irc-ws.chat.twitch.tv:443";
 /** Content budget under Twitch's 500-char message / 512-byte IRC line caps. */
 export const TWITCH_MESSAGE_CAP = 450;
+export const TWITCH_CAPABILITIES: AdapterCapabilities = { kind: "text", max_reply_chars: TWITCH_MESSAGE_CAP };
 export const TWITCH_BACKOFF_MS = [5000, 10000, 20000, 30000] as const;
 const TWITCH_CHUNK_GAP_MS = 1600;
 
@@ -34,13 +35,14 @@ export function create_twitch_adapter(params: AdapterParams): PlatformAdapter {
   if (twitch === undefined) {
     const token_env = platform_token_env(params.config, "twitch");
     const reason = token_env === "LICH_TWITCH_OAUTH_TOKEN" ? "LICH_TWITCH_OAUTH_TOKEN / NICK not set" : `${token_env} / LICH_TWITCH_NICK not set`;
-    return create_idle_adapter("twitch", reason);
+    return create_idle_adapter("twitch", reason, TWITCH_CAPABILITIES);
   }
   let running = false;
   let socket: RawSocket | undefined;
   let stop_controller = new AbortController();
   return {
     name: "twitch",
+    capabilities: TWITCH_CAPABILITIES,
     start: async () => {
       running = true;
       stop_controller = new AbortController();

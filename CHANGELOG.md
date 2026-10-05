@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Gateway (#144): sender allowlists and the gateway toolset are one
+  `GatewayPolicy`, built from config at startup (`src/gateway/access.ts`).
+  Platform adapters declare `capabilities` (`{ kind: "text", max_reply_chars }`);
+  the runner logs them. **Breaking for custom adapters:** `PlatformAdapter`
+  requires `capabilities`, and `create_idle_adapter` takes it as a third
+  argument.
 - Gateway (#144): conversations queue on the shared `SessionManager` instead of
   their own promise chains. Beyond `max_conversations`, the least recently used
   conversation is evicted (it was the oldest inserted). Only Telegram's `/start`

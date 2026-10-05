@@ -12,7 +12,7 @@ import { history_after_run_error } from "../agent/loop.js";
 import type { Message } from "../providers/types.js";
 import { create_session_manager, type SessionManager } from "../session/manager.js";
 import { logger } from "../util/log.js";
-import { check_gateway_sender } from "./access.js";
+import { create_gateway_policy, type GatewayPolicy } from "./access.js";
 import { sanitize_agent_error, type GatewayReply } from "./types.js";
 
 export interface GatewayBusOptions {
@@ -22,6 +22,8 @@ export interface GatewayBusOptions {
 
 export interface BusParams {
   config: AgentConfig;
+  /** Who may talk to the agent; defaults to `create_gateway_policy(config)`. */
+  policy?: GatewayPolicy;
   agent_factory: () => Agent;
   /** Subscribe to agent tool events for debug logging (creates the agent). */
   wire_tool_logging?: boolean;
@@ -31,7 +33,7 @@ const DEFAULT_HISTORY_CAP = 40;
 const DEFAULT_MAX_CONVERSATIONS = 200;
 
 export class GatewayBus {
-  private readonly config: AgentConfig;
+  private readonly policy: GatewayPolicy;
   private readonly agent_factory: () => Agent;
   private agent: Agent | undefined;
   private readonly histories: Map<string, Message[]> = new Map();
@@ -41,7 +43,7 @@ export class GatewayBus {
   private stop_logging: (() => void) | undefined;
 
   constructor(params: BusParams, options?: GatewayBusOptions) {
-    this.config = params.config;
+    this.policy = params.policy ?? create_gateway_policy(params.config);
     this.agent_factory = params.agent_factory;
     this.history_cap = options?.history_cap ?? DEFAULT_HISTORY_CAP;
     this.max_conversations = options?.max_conversations ?? DEFAULT_MAX_CONVERSATIONS;
@@ -58,7 +60,7 @@ export class GatewayBus {
 
   /** Like `handle`, with the run's usage and whether it failed; undefined when the sender is denied. */
   async reply(platform: string, chat_id: string, user_id: string, text: string): Promise<GatewayReply | undefined> {
-    if (check_gateway_sender(this.config, platform, chat_id, user_id) === false) {
+    if (this.policy.allows(platform, chat_id, user_id) === false) {
       return undefined;
     }
     const key = conversation_key(platform, chat_id);
