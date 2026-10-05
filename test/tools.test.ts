@@ -472,6 +472,11 @@ describe("forbidden file paths", () => {
     expect(walked.output).not.toContain("coder.md");
     const usage = await executor.execute("disk_usage", { path: ".lich/profiles" });
     expect(usage.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    const parent = await executor.execute("disk_usage", { path: ".lich" });
+    if (parent.error !== "du_unavailable") {
+      expect(parent.ok).toBe(true);
+      expect(parent.output).not.toContain("profiles");
+    }
   });
 
   it("allows writes under .lich/skills and .lich/plugins; denies other .lich writes and .env*", async () => {

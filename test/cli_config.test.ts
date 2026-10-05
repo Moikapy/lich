@@ -353,8 +353,11 @@ describe("load_layered_config profiles", () => {
   });
 
   it("puts the profile over ~/.lich/config.json when the work_dir is home", () => {
-    write_file(global_config_path(), JSON.stringify({ agent_name: "home", max_turns: 9 }));
     write_file(path.join(profiles(), "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    // Without ~/.lich/config.json the legacy file is still the base.
+    write_file(path.join(home, ".config", "lich", "config.json"), JSON.stringify({ agent_name: "legacy", theme: "lich" }));
+    expect(load_layered_config(home, "coder")?.config).toEqual({ agent_name: "coder", theme: "lich" });
+    write_file(global_config_path(), JSON.stringify({ agent_name: "home", max_turns: 9 }));
     expect(load_layered_config(home, "coder")?.config).toEqual({ agent_name: "coder", max_turns: 9 });
   });
 

@@ -151,8 +151,8 @@ export function load_layered_config(work_dir: string, profile_flag?: string): La
   ];
   // With work_dir = home the project file is the global file, so the profile goes over it.
   const config =
-    project_path === global_path
-      ? merge_config_layers(project ?? {}, profile?.layer ?? {})
+    project_path === global_path && project !== undefined
+      ? merge_config_layers(project, profile?.layer ?? {})
       : merge_config_layers(merge_config_layers(base ?? {}, profile?.layer ?? {}), project ?? {});
   delete config["profile"];
   return { config, sources, notes, ...(selected === undefined ? {} : { profile: selected }) };

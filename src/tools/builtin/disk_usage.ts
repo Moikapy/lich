@@ -3,7 +3,14 @@ import { readdir } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { JsonSchemaObject } from "../../util/json_schema.js";
-import { assert_file_tool_access, capture_errors, optional_number_arg, optional_string_arg, resolve_safe_path } from "../guard.js";
+import {
+  assert_file_tool_access,
+  capture_errors,
+  file_tool_denied,
+  optional_number_arg,
+  optional_string_arg,
+  resolve_safe_path,
+} from "../guard.js";
 import type { Tool, ToolContext } from "../types.js";
 import { clamp_int_arg } from "./fetch_url.js";
 
@@ -38,12 +45,19 @@ function run_du(entry_path: string): Promise<number> {
   });
 }
 
-/** Measure every depth-1 entry iteratively; null signals du itself is missing. */
-async function measure_entries(root: string): Promise<DirEntry[] | null> {
+/**
+ * Measure every depth-1 entry iteratively, skipping what file tools may not read
+ * (.lich/config.json, .lich/profiles); null signals du itself is missing.
+ */
+async function measure_entries(root: string, work_dir: string): Promise<DirEntry[] | null> {
   const entries = await readdir(root, { withFileTypes: true });
   const measured: DirEntry[] = [];
   for (const entry of entries as Dirent[]) {
-    const bytes = await run_du(path.join(root, entry.name));
+    const full = path.join(root, entry.name);
+    if (file_tool_denied(work_dir, full, "read") === true) {
+      continue;
+    }
+    const bytes = await run_du(full);
     if (bytes < 0) {
       return null;
     }
@@ -69,7 +83,7 @@ async function run_disk_usage(args: Record<string, unknown>, work_dir: string): 
   const max_entries = clamp_int_arg(args, "max_entries", DEFAULT_MAX_ENTRIES, MAX_MAX_ENTRIES);
   const root = resolve_safe_path(work_dir, target);
   assert_file_tool_access(work_dir, root, "read");
-  const usage = await measure_entries(root);
+  const usage = await measure_entries(root, work_dir);
   if (usage === null) {
     throw new Error("du_unavailable");
   }
