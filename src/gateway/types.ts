@@ -5,6 +5,7 @@
  */
 import type { Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
+import type { Usage } from "../providers/types.js";
 import { logger } from "../util/log.js";
 
 export type PlatformName = "webhook" | "telegram" | "discord" | "twitch";
@@ -29,13 +30,28 @@ export interface PlatformAdapter {
   stop(): Promise<void>;
 }
 
-/** Handles one inbound message and resolves to the reply text. */
+/** One run's reply: text, token usage, and whether the agent failed (text is then the sanitized error). */
+export interface GatewayReply {
+  text: string;
+  usage?: Usage;
+  failed?: boolean;
+}
+
+/** Handles one inbound message and resolves to the reply (text alone, or text plus usage/failure). */
 export type InboundHandler = (
   platform: string,
   chat_id: string,
   user_id: string,
   text: string,
-) => Promise<string | undefined>;
+) => Promise<string | GatewayReply | undefined>;
+
+/** Reply text for chat platforms, whichever form the handler returned. */
+export function reply_text(reply: string | GatewayReply | undefined): string {
+  if (reply === undefined) {
+    return "";
+  }
+  return typeof reply === "string" ? reply : reply.text;
+}
 
 /** Dependencies handed to every adapter factory. */
 export interface AdapterParams {
@@ -97,7 +113,7 @@ export async function run_inbound_message(
   text: string,
 ): Promise<string> {
   try {
-    return (await handle(platform, chat_id, user_id, text)) ?? "";
+    return reply_text(await handle(platform, chat_id, user_id, text));
   } catch (error) {
     logger.error(`gateway ${platform} message handling failed`, error);
     return sanitize_agent_error(error);

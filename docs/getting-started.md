@@ -94,7 +94,7 @@ curl -s -X POST http://localhost:8089/message \
 Observed response shape (the `reply` text is the model's answer; `usage` is `null` on this endpoint):
 
 ```json
-{"reply":"Hello! How can I help you today? I can assist with coding, file management, running commands, web searches, and more — just let me know what you'd like to do.","usage":null}
+{"reply":"Hello! How can I help you today? I can assist with coding, file management, running commands, web searches, and more — just let me know what you'd like to do.","usage":{"prompt_tokens":812,"completion_tokens":41,"total_tokens":853}}
 ```
 
 Stop the gateway with Ctrl+C (SIGINT) or `kill` (SIGTERM); both shut down adapters cleanly.

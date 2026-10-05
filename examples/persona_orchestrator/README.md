@@ -49,7 +49,7 @@ curl -s -X POST http://127.0.0.1:8090/message \
   -d '{"text":"round 1: hero1 at full. goblin is the only living enemy.","chat_id":"npc:commander:run-1"}'
 ```
 
-Success is `{reply, usage}`. `usage` is the run's `usage_total`. The CLI webhook still sends `usage: null`; a Godot client that only reads `reply` needs no change. Missing `text` is `400 {"error":"text is required"}`. A bad token is `401`. Wrong `Content-Type` is `415`. Oversized body is `413`. Unknown or missing `chat_id` is still `200` with `reply` starting `agent error: unknown persona` and `usage: null` — this example does not default `chat_id` to `"default"`, because a persona cannot be inferred.
+Success is `{reply, usage}`. `usage` is the run's `usage_total`. The CLI webhook sends the same shape, and returns `502` on an agent failure; this example keeps `200` with an `agent error:` reply. Missing `text` is `400 {"error":"text is required"}`. A bad token is `401`. Wrong `Content-Type` is `415`. Oversized body is `413`. Unknown or missing `chat_id` is still `200` with `reply` starting `agent error: unknown persona` and `usage: null` — this example does not default `chat_id` to `"default"`, because a persona cannot be inferred.
 
 From a source checkout, with the working directory at the repo root:
 

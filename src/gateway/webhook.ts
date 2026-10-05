@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { logger } from "../util/log.js";
 import { format_agent_reply } from "./format.js";
 import { read_platform_token } from "./token_env.js";
-import type { AdapterParams, PlatformAdapter } from "./types.js";
+import { reply_text, type AdapterParams, type PlatformAdapter } from "./types.js";
 
 export const DEFAULT_GATEWAY_PORT = 8089;
 export const DEFAULT_GATEWAY_HOST = "127.0.0.1";
@@ -105,7 +105,13 @@ async function handle_message_post(
   const chat_id = payload.chat_id ?? "default";
   const user_id = payload.user_id ?? "anonymous";
   const reply = await params.handle_message(platform, String(chat_id), String(user_id), String(text));
-  respond_json_text(response, 200, format_agent_reply(reply ?? "", undefined, "webhook"));
+  if (typeof reply === "object" && reply.failed === true) {
+    // The text is already the sanitized agent error.
+    send_json(response, 502, { error: reply.text });
+    return;
+  }
+  const usage = typeof reply === "object" ? reply.usage : undefined;
+  respond_json_text(response, 200, format_agent_reply(reply_text(reply), usage, "webhook"));
 }
 
 function content_length_exceeds(request: IncomingMessage, max_bytes: number): boolean {

@@ -49,7 +49,7 @@ function is_known_platform(platform: string): boolean {
 function build_adapters(config: AgentConfig, bus: GatewayBus, platforms: readonly string[]): PlatformAdapter[] {
   const params: AdapterParams = {
     config,
-    handle_message: (platform, chat_id, user_id, text) => bus.handle(platform, chat_id, user_id, text),
+    handle_message: (platform, chat_id, user_id, text) => bus.reply(platform, chat_id, user_id, text),
     get_agent: () => {
       throw new Error("get_agent is reserved for future use");
     },
@@ -109,16 +109,37 @@ async function start_all_adapters(adapters: readonly PlatformAdapter[]): Promise
   }
 }
 
+/** Upper bound on waiting for adapters to stop, so a hung platform socket cannot block exit. */
+const SHUTDOWN_TIMEOUT_MS = 5000;
+
+/** Stops every adapter and waits for them (bounded), then releases the bus and agent. */
+export async function shutdown_gateway(
+  agent: Agent,
+  bus: GatewayBus,
+  adapters: readonly PlatformAdapter[],
+  timeout_ms = SHUTDOWN_TIMEOUT_MS,
+): Promise<void> {
+  const stops = Promise.allSettled(
+    adapters.map((adapter) =>
+      adapter.stop().catch((error: unknown) => logger.warn(`gateway adapter stop failed: ${adapter.name}`, error)),
+    ),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      logger.warn(`gateway adapters did not stop within ${timeout_ms}ms; exiting anyway`);
+      resolve();
+    }, timeout_ms);
+  });
+  await Promise.race([stops, timeout]);
+  clearTimeout(timer);
+  bus.stop();
+  agent.close();
+}
+
 function install_signal_handlers(agent: Agent, bus: GatewayBus, adapters: readonly PlatformAdapter[]): void {
   const shutdown = (): void => {
-    for (const adapter of adapters) {
-      void adapter
-        .stop()
-        .catch((error: unknown) => logger.warn(`gateway adapter stop failed: ${adapter.name}`, error));
-    }
-    bus.stop();
-    agent.close();
-    process.exit(0);
+    void shutdown_gateway(agent, bus, adapters).finally(() => process.exit(0));
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
