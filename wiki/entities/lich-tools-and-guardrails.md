@@ -1,7 +1,7 @@
 ---
 title: Lich tools, executor and guardrails
 created: 2026-09-23
-updated: 2026-10-04
+updated: 2026-10-05
 type: entity
 tags: [tools, security, runtime]
 sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, "#161", "#163"]
@@ -32,7 +32,7 @@ It also:
 
 ## Guardrails (the "wards")
 
-- **File tools:** realpath confinement to `work_dir`, and writes to `.lich/config.json` are denied.
+- **File tools:** realpath confinement to `work_dir`. `.lich/config.json` and `.lich/profiles/` are denied for reads and writes, and `list_dir`/`disk_usage` skip them (`src/tools/guard.ts:83@ab0f508`, #172; see [[lich-config]]).
 - **Network tools:** an SSRF guard blocks private and loopback URLs unless `LICH_ALLOW_PRIVATE_URLS=1`, and redirects are re-checked.
 - **`terminal` is not sandboxed.** It runs `bash -lc` in `work_dir` with secret env vars scrubbed. The docs say this plainly.
 
