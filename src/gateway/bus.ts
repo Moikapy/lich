@@ -1,17 +1,19 @@
 /**
  * GatewayBus: conversation-keyed runner over one shared Agent.
  *
- * Per-conversation history lives in a bounded Map; concurrent messages for
- * the same conversation are serialized through a promise chain so history
- * never interleaves. Agent failures become sanitized reply strings.
+ * Per-conversation history lives in a bounded Map evicted by least recent
+ * use; messages for the same conversation are serialized on the shared
+ * SessionManager so history never interleaves. Agent failures become
+ * sanitized reply strings.
  */
 import type { Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import { history_after_run_error } from "../agent/loop.js";
 import type { Message } from "../providers/types.js";
+import { create_session_manager, type SessionManager } from "../session/manager.js";
 import { logger } from "../util/log.js";
 import { check_gateway_sender } from "./access.js";
-import { sanitize_agent_error } from "./types.js";
+import { sanitize_agent_error, type GatewayReply } from "./types.js";
 
 export interface GatewayBusOptions {
   history_cap?: number;
@@ -33,7 +35,7 @@ export class GatewayBus {
   private readonly agent_factory: () => Agent;
   private agent: Agent | undefined;
   private readonly histories: Map<string, Message[]> = new Map();
-  private readonly chains: Map<string, Promise<void>> = new Map();
+  private readonly sessions: SessionManager = create_session_manager();
   private readonly history_cap: number;
   private readonly max_conversations: number;
   private stop_logging: (() => void) | undefined;
@@ -48,32 +50,19 @@ export class GatewayBus {
     }
   }
 
-  /** Serializes runs per conversation and resolves to the reply text. */
+  /** Serializes runs per conversation and resolves to the reply text (undefined when empty or denied). */
   async handle(platform: string, chat_id: string, user_id: string, text: string): Promise<string | undefined> {
+    const reply = await this.reply(platform, chat_id, user_id, text);
+    return reply === undefined || reply.text.length === 0 ? undefined : reply.text;
+  }
+
+  /** Like `handle`, with the run's usage and whether it failed; undefined when the sender is denied. */
+  async reply(platform: string, chat_id: string, user_id: string, text: string): Promise<GatewayReply | undefined> {
     if (check_gateway_sender(this.config, platform, chat_id, user_id) === false) {
       return undefined;
     }
     const key = conversation_key(platform, chat_id);
-    const previous = this.chains.get(key) ?? Promise.resolve();
-    const run = previous.then(() => this.run_once(key, platform, chat_id, user_id, text));
-    let tracked: Promise<void> = Promise.resolve();
-    tracked = run.then(
-      () => {
-        this.release_chain(key, tracked);
-      },
-      () => {
-        this.release_chain(key, tracked);
-      },
-    );
-    this.chains.set(key, tracked);
-    return run;
-  }
-
-  /** Drops a settled chain entry unless a newer message re-queued the key. */
-  private release_chain(key: string, tracked: Promise<void>): void {
-    if (this.chains.get(key) === tracked) {
-      this.chains.delete(key);
-    }
+    return this.sessions.enqueue(key, () => this.run_once(key, platform, chat_id, user_id, text));
   }
 
   /** Unsubscribes the debug tool logger (bus owns no other resources). */
@@ -88,22 +77,28 @@ export class GatewayBus {
     chat_id: string,
     user_id: string,
     text: string,
-  ): Promise<string | undefined> {
-    const input = text.startsWith("/start") === true ? "hello" : text;
+  ): Promise<GatewayReply> {
+    const input = is_telegram_start(platform, text) === true ? "hello" : text;
     const history = this.history_for(key);
     const agent = this.ensure_agent();
     try {
       const result = await agent.run({ input, history, label: `gw:${platform}:${chat_id}` });
-      this.histories.set(key, cap_history(result.messages, this.history_cap));
-      return final_reply_text(result.outcome.final?.content);
+      this.store_history(key, cap_history(result.messages, this.history_cap));
+      return { text: result.outcome.final?.content ?? "", usage: result.usage_total };
     } catch (error) {
       logger.error(`gateway bus run failed for ${key} (user ${user_id})`, error);
       const kept = history_after_run_error(error);
       if (kept !== undefined) {
-        this.histories.set(key, cap_history(kept, this.history_cap));
+        this.store_history(key, cap_history(kept, this.history_cap));
       }
-      return sanitize_agent_error(error);
+      return { text: sanitize_agent_error(error), failed: true };
     }
+  }
+
+  /** Re-inserts the key so Map order tracks the most recent use. */
+  private store_history(key: string, messages: Message[]): void {
+    this.histories.delete(key);
+    this.histories.set(key, messages);
   }
 
   private ensure_agent(): Agent {
@@ -113,7 +108,7 @@ export class GatewayBus {
     return this.agent;
   }
 
-  /** Oldest-first eviction keeps the conversation map bounded. */
+  /** Least-recently-used eviction keeps the conversation map bounded. */
   private history_for(key: string): Message[] {
     while (this.histories.size >= this.max_conversations && this.histories.has(key) === false) {
       const oldest = this.histories.keys().next();
@@ -139,6 +134,11 @@ export class GatewayBus {
 
 function conversation_key(platform: string, chat_id: string): string {
   return `${platform}:${chat_id}`;
+}
+
+/** Telegram's bot-start command (`/start`, `/start@bot`, `/start <payload>`); not `/started` or other platforms. */
+function is_telegram_start(platform: string, text: string): boolean {
+  return platform === "telegram" && /^\/start(@\w+)?(\s|$)/.test(text);
 }
 
 /**
@@ -194,8 +194,4 @@ function assistant_owning_tools(messages: readonly Message[], start: number): nu
   }
   const calls = parent.tool_calls;
   return calls !== undefined && calls.length > 0 ? index : undefined;
-}
-
-function final_reply_text(content: string | undefined): string | undefined {
-  return content === undefined || content.length === 0 ? undefined : content;
 }

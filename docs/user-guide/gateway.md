@@ -4,7 +4,7 @@
 
 ## How it works
 
-`lich gateway <platform...>` runs a long-lived process that forwards inbound chat messages to **one shared agent** and routes replies back. Per-conversation memory is keyed `platform:chat_id` (Telegram/Discord chat ids, Twitch channel names, webhook `chat_id` field): each conversation keeps its own bounded history capped at 40 messages (oldest evicted; conversations beyond 200 are evicted oldest-first). Messages for the same conversation are serialized, so overlapping messages never interleave histories; different conversations can run concurrently. Failures become a safe one-line reply: `agent error: <flattened message, 300 chars max>`.
+`lich gateway <platform...>` runs a long-lived process that forwards inbound chat messages to **one shared agent** and routes replies back. Per-conversation memory is keyed `platform:chat_id` (Telegram/Discord chat ids, Twitch channel names, webhook `chat_id` field): each conversation keeps its own bounded history capped at 40 messages (oldest evicted; beyond 200 conversations, the least recently used one is evicted). Messages for the same conversation are serialized, so overlapping messages never interleave histories; different conversations can run concurrently. Failures become a safe one-line reply: `agent error: <flattened message, 300 chars max>`.
 
 ```mermaid
 flowchart LR
@@ -25,7 +25,7 @@ lich gateway telegram discord twitch # no webhook server
 lich gateway                         # defaults to webhook
 ```
 
-The gateway is silent after startup: Telegram/Discord/Twitch respond only in chats, channels, or servers the bot can see or has joined, and the webhook only serves HTTP. Telegram media messages arrive as the placeholder text `media not supported yet`; other non-text events are ignored. Telegram `/start` is answered like a plain "hello".
+The gateway is silent after startup: Telegram/Discord/Twitch respond only in chats, channels, or servers the bot can see or has joined, and the webhook only serves HTTP. Telegram media messages arrive as the placeholder text `media not supported yet`; other non-text events are ignored. Telegram `/start` (also `/start@bot` and `/start <payload>`) is answered like a plain "hello"; other text, and other platforms, are passed through as written.
 
 **Security defaults:** the webhook binds loopback only; Telegram/Discord/Twitch default-deny until you configure allowlists; the gateway agent uses a read-only tool subset (no `terminal`, no file writes) unless you override `gateway.tools_enabled`.
 
@@ -40,7 +40,7 @@ lich gateway webhook
 ```sh
 curl -s -X POST http://127.0.0.1:8089/message \
   -H "content-type: application/json" -d '{"text": "hello"}'
-# -> {"reply":"...","usage":null}
+# -> {"reply":"...","usage":{"prompt_tokens":...,"completion_tokens":...,"total_tokens":...}}
 
 curl -s http://127.0.0.1:8089/health
 # -> {"status":"ok"}
@@ -203,10 +203,10 @@ Request:
 Only `text` is required. Any `platform` field in the body is ignored; the conversation key is always `webhook:<chat_id>`. Success (`200`):
 
 ```json
-{"reply":"Hello! How can I help you today? ...","usage":null}
+{"reply":"Hello! How can I help you today? ...","usage":{"prompt_tokens":812,"completion_tokens":24,"total_tokens":836}}
 ```
 
-`reply` is the agent's final answer; `usage` is always `null` on this endpoint (webhook replies are formatted without usage stats, unlike the chat/TUI footers). Errors:
+`reply` is the agent's final answer; `usage` is the run's token totals. Errors:
 
 | Status | When |
 | --- | --- |
@@ -214,8 +214,7 @@ Only `text` is required. Any `platform` field in the body is ignored; the conver
 | `401` | `LICH_GATEWAY_TOKEN` is set and the `x-lich-token` header does not match. |
 | `404` | Anything other than `POST /message` or `GET /health`. |
 | `500` | Internal dispatch failure: `{"error":"internal error"}`. |
-
-Agent-level failures (e.g. every provider failed) return `200` with `reply` set to a sanitized one-line `agent error: ...` string, so callers always get a deliverable text.
+| `502` | The agent run failed (e.g. every provider failed): `{"error":"agent error: ..."}`, a sanitized one-line message. |
 
 ### `GET /health`
 

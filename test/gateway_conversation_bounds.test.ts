@@ -148,8 +148,9 @@ describe("gateway max_conversations", () => {
 
     const other = bus.handle("webhook", "b", "u", "b1");
     const b1 = await wait_for_start(started, "b1");
-    const chains = (bus as unknown as { chains: Map<string, Promise<void>> }).chains;
-    expect(chains.has("webhook:a")).toBe(true);
+    // Both conversations still hold a queue: evicting a's history does not drop its run queue.
+    const sessions = (bus as unknown as { sessions: { pending_count(): number } }).sessions;
+    expect(sessions.pending_count()).toBe(2);
 
     const third = bus.handle("webhook", "a", "u", "a3");
     await new Promise((resolve) => setImmediate(resolve));

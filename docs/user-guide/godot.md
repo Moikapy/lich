@@ -44,10 +44,10 @@ curl -s -X POST http://127.0.0.1:8089/message \
   -d '{"text":"round 1: hero1 at full. goblin is the only living enemy.","chat_id":"run-1"}'
 ```
 
-Success is exactly one JSON object. This endpoint always sends `usage: null` — it does not forward provider token counts:
+Success is exactly one JSON object, with the run's token totals in `usage`:
 
 ```json
-{"reply":"...","usage":null}
+{"reply":"...","usage":{"prompt_tokens":812,"completion_tokens":24,"total_tokens":836}}
 ```
 
 | Status | Body |
@@ -56,10 +56,11 @@ Success is exactly one JSON object. This endpoint always sends `usage: null` —
 | `401` | `{"error":"unauthorized"}` when `LICH_GATEWAY_TOKEN` is set and `x-lich-token` does not match |
 | `404` | `{"error":"not found"}` for any other method or path |
 | `500` | `{"error":"internal error"}` if the handler throws before a response is sent |
+| `502` | `{"error":"agent error: ..."}` when the agent run fails (a sanitized one-line message) |
 
-A failed run is still `200`. `reply` is then a sanitized `agent error: ...` line. There is no streaming, pagination, or cursor. Full platform notes: [webhook API](gateway.md#webhook-api-reference).
+There is no streaming, pagination, or cursor. Full platform notes: [webhook API](gateway.md#webhook-api-reference).
 
-Memory is keyed `platform:chat_id`, capped at 40 messages (oldest dropped) and 200 conversations (oldest dropped). For a roguelike, `chat_id` = the run id gives the commander that process's memory of the run. A new run id starts a fresh history. That history is in memory only — restarting the gateway clears it. Restate facts the digest still needs. Durable notes are a different file, below.
+Memory is keyed `platform:chat_id`, capped at 40 messages (oldest dropped) and 200 conversations (least recently used dropped). For a roguelike, `chat_id` = the run id gives the commander that process's memory of the run. A new run id starts a fresh history. That history is in memory only — restarting the gateway clears it. Restate facts the digest still needs. Durable notes are a different file, below.
 
 ## Wire the example plugin
 
@@ -157,6 +158,6 @@ Plugins run in-process with the agent's privileges (files, network, environment)
 ## Limits
 
 - A long run evicts gateway history past 40 messages. Put habits that still matter in the digest, or in `memory.jsonl` if they must survive a restart.
-- More than 200 concurrent `chat_id`s on one process drops the oldest conversation. Fine for one developer machine; a host of many runs should know the cap.
+- More than 200 concurrent `chat_id`s on one process drops the least recently used conversation. Fine for one developer machine; a host of many runs should know the cap.
 - Combat must finish if the gateway is down, the call times out, or `orders.jsonl` is empty or garbage. The game's fallback is the game's — this repo does not ship one.
 - Same-`chat_id` calls run one after another. Different `chat_id`s run concurrently. The plugin itself makes no concurrency guarantee; one bridge per `chat_id` is the intended pattern.

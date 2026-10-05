@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Gateway (#144): conversations queue on the shared `SessionManager` instead of
+  their own promise chains. Beyond `max_conversations`, the least recently used
+  conversation is evicted (it was the oldest inserted). Only Telegram's `/start`
+  command (`/start`, `/start@bot`, `/start <payload>`) is rewritten to "hello";
+  `/started ...` and other platforms pass through. Shutdown waits for adapters
+  to stop (up to 5 s) before exiting.
+- **Breaking (webhook):** `POST /message` returns the run's token `usage`
+  instead of `null`, and an agent failure is `502 {"error":"agent error: ..."}`
+  instead of `200` with the error in `reply`.
 - Profiles (#117): `~/.lich/profiles/<name>.json` (plus an optional `<name>.md`
   used as the system prompt) is merged between the global and project config.
   Select one with `--profile`, `LICH_PROFILE`, a project `profile` key, or the
