@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `lich init --global` writes the starter config to `~/.lich/config.json`
+  (never overwrites). The setup wizard ends with "Save as the global default?"
+  (default no); yes writes the answers to `~/.lich/config.json` and keeps
+  discovered project plugins in the project file (#117).
 - Global defaults live in `~/.lich/config.json`. A project `.lich/config.json`
   is merged over it key by key instead of hiding it (#117). A project
   `providers` array replaces the global one and drops the global `models`
