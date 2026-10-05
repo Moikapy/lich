@@ -95,10 +95,20 @@ export class GatewayBus {
     }
   }
 
-  /** Re-inserts the key so Map order tracks the most recent use. */
+  /**
+   * Re-inserts the key so Map order tracks the most recent use, then trims to
+   * the cap: concurrent new chats can each pass `history_for` before any stores.
+   */
   private store_history(key: string, messages: Message[]): void {
     this.histories.delete(key);
     this.histories.set(key, messages);
+    while (this.histories.size > this.max_conversations) {
+      const oldest = this.histories.keys().next();
+      if (oldest.done === true || oldest.value === key) {
+        break;
+      }
+      this.histories.delete(oldest.value);
+    }
   }
 
   private ensure_agent(): Agent {

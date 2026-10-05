@@ -4,7 +4,7 @@
 
 ## How it works
 
-`lich gateway <platform...>` runs a long-lived process that forwards inbound chat messages to **one shared agent** and routes replies back. Per-conversation memory is keyed `platform:chat_id` (Telegram/Discord chat ids, Twitch channel names, webhook `chat_id` field): each conversation keeps its own bounded history capped at 40 messages (oldest evicted; beyond 200 conversations, the least recently used one is evicted). Messages for the same conversation are serialized, so overlapping messages never interleave histories; different conversations can run concurrently. Failures become a safe one-line reply: `agent error: <flattened message, 300 chars max>`.
+`lich gateway <platform...>` runs a long-lived process that forwards inbound chat messages to **one shared agent** and routes replies back. Per-conversation memory is keyed `platform:chat_id` (Telegram/Discord chat ids, Twitch channel names, webhook `chat_id` field): each conversation keeps its own bounded history capped at 40 messages (oldest evicted; beyond 200 conversations, the least recently used one is evicted). Messages for the same conversation are serialized, so overlapping messages never interleave histories; different conversations can run concurrently. Failures become a safe one-line reply, `agent error: <flattened message, 300 chars max>`; the webhook returns it as HTTP `502 {"error":"agent error: ..."}`.
 
 ```mermaid
 flowchart LR

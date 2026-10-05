@@ -123,6 +123,29 @@ describe("gateway max_conversations", () => {
     expect(c2?.history_len).toBeGreaterThan(0);
   });
 
+  it("stays within max_conversations when new chats run concurrently", async () => {
+    const work_dir = make_temp_dir();
+    const started: HeldRun[] = [];
+    const bus = new GatewayBus(
+      {
+        config: parse_agent_config({
+          providers: [{ kind: "openai_compat", name: "main", model: "mock-model" }],
+          work_dir,
+          log_level: "error",
+        }),
+        agent_factory: () => holding_agent(started),
+      },
+      { max_conversations: 2, history_cap: 40 },
+    );
+    const replies = ["a", "b", "c", "d"].map((chat) => bus.handle("webhook", chat, "u", `${chat}1`));
+    for (const chat of ["a", "b", "c", "d"]) {
+      (await wait_for_start(started, `${chat}1`)).release();
+    }
+    await Promise.all(replies);
+    const histories = (bus as unknown as { histories: Map<string, Message[]> }).histories;
+    expect([...histories.keys()]).toEqual(["webhook:c", "webhook:d"]);
+  });
+
   it("keeps an in-flight chain after history eviction so later turns stay serialized", async () => {
     const work_dir = make_temp_dir();
     const started: HeldRun[] = [];

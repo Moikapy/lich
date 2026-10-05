@@ -652,6 +652,36 @@ describe("webhook adapter", () => {
     });
   }
 
+  it("stops promptly while a keep-alive client is still connected", async () => {
+    const work_dir = temp_work_dir();
+    let port: number | undefined;
+    const adapter = make_adapter(work_dir, "echo", (seen) => {
+      port = seen;
+    });
+    try {
+      await adapter.start();
+      const { request } = await import("node:http");
+      const agent = new (await import("node:http")).Agent({ keepAlive: true });
+      await new Promise<void>((resolve, reject) => {
+        const req = request(
+          { host: "127.0.0.1", port, path: "/health", agent },
+          (response) => {
+            response.resume();
+            response.on("end", () => resolve());
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+      const started = Date.now();
+      await adapter.stop();
+      expect(Date.now() - started).toBeLessThan(1000);
+      agent.destroy();
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns the run's usage, and HTTP 502 with the error when the agent fails", async () => {
     const work_dir = temp_work_dir();
     let port: number | undefined;
