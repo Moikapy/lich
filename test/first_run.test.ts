@@ -547,6 +547,66 @@ describe("lich init and bare lich", () => {
     }
   });
 
+  it("rejects a bad profile command before it writes, and a non-TTY or cancelled create writes nothing", async () => {
+    const profile_file = path.join(String(process.env.HOME), ".lich", "profiles", "coder.json");
+    await expect(run_cli(["profile"])).rejects.toThrow("profile requires list, show, create, or use");
+    await expect(run_cli(["profile", "list", "extra"])).rejects.toThrow("profile list takes no name");
+    await expect(run_cli(["profile", "show", "coder", "extra"])).rejects.toThrow("profile takes one name");
+    await expect(run_cli(["profile", "show"])).rejects.toThrow("profile show requires a name");
+    await expect(run_cli(["profile", "use", "../x"])).rejects.toThrow("invalid profile name");
+    expect(existsSync(profile_file)).toBe(false);
+
+    const restore_tty = set_tty(false);
+    try {
+      await expect(run_cli(["profile", "create", "coder"])).rejects.toThrow("profile create needs a TTY");
+      expect(existsSync(profile_file)).toBe(false);
+    } finally {
+      restore_tty();
+    }
+
+    const restore_on = set_tty(true);
+    wizard.cancel = true;
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "create", "coder"])).toBe(1);
+      expect(stderr.mock.calls.map((call) => String(call[0])).join("")).toContain("profile create cancelled");
+      expect(existsSync(profile_file)).toBe(false);
+    } finally {
+      stderr.mockRestore();
+      restore_on();
+      wizard.cancel = false;
+    }
+  });
+
+  it("shows json and soul, lists only slug names, and can select a soul-only profile", async () => {
+    const home = String(process.env.HOME);
+    const dir = path.join(home, ".lich", "profiles");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "NotASlug.json"), "{}\n");
+    writeFileSync(path.join(dir, "notes.txt"), "nope\n");
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "list"])).toBe(0);
+      expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toContain("no profiles in ");
+      writeFileSync(path.join(dir, "coder.json"), "{\n  \"agent_name\": \"coder\"\n}\n");
+      writeFileSync(path.join(dir, "coder.md"), "  soul text  \n");
+      writeFileSync(path.join(dir, "bard.md"), "You are a bard.\n");
+      stdout.mockClear();
+      expect(await run_cli(["profile", "show", "coder"])).toBe(0);
+      const shown = stdout.mock.calls.map((call) => String(call[0])).join("");
+      expect(shown).toContain('"agent_name": "coder"');
+      expect(shown).toContain("(system prompt, 9 chars)");
+      stdout.mockClear();
+      expect(await run_cli(["profile", "list"])).toBe(0);
+      expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toBe("  bard (soul)\n  coder (soul)\n");
+      await expect(run_cli(["profile", "show", "missing"])).rejects.toThrow(/^profile not found: missing$/);
+      expect(await run_cli(["profile", "use", "bard"])).toBe(0);
+      expect(JSON.parse(readFileSync(global_config_path(), "utf8"))).toEqual({ profile: "bard" });
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
   it("bare lich --profile skips the wizard and runs with the profile; --profile with --config is rejected", async () => {
     const home = String(process.env.HOME);
     mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
