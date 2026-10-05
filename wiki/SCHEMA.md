@@ -81,7 +81,7 @@ Raw files carry `source_url`, `ingested` and `sha256`. The hash covers the body 
 Add a tag here before you use it.
 
 - **Layers:** core, runtime, surface, gateway, serve, ossuary, cli, tui
-- **Subsystems:** providers, tools, plugins, mcp, sessions, events, context, memory, skills, security
+- **Subsystems:** providers, tools, plugins, mcp, sessions, events, context, memory, skills, security, config
 - **Games:** games, npc, play, editor, engines, content
 - **Comparisons:** hermes, ecosystem
 - **Meta:** decision, roadmap, process, docs, performance, research
