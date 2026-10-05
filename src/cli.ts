@@ -606,8 +606,15 @@ async function offer_wizard(work_dir: string, hint?: string): Promise<"written" 
       return "cancelled";
     }
     const config = build_setup_config(answers);
-    // With work_dir = home the project file is the global file: write it once, plugins included.
-    if (save_global === false || project_config_path(work_dir) === global_config_path()) {
+    if (project_config_path(work_dir) === global_config_path()) {
+      // With work_dir = home the project file is the global file: write it once. Other
+      // projects resolve its relative plugin paths against ~/.lich, so store them absolute.
+      const plugins = Array.isArray(config["plugins"]) === true ? (config["plugins"] as string[]) : [];
+      config["plugins"] = plugins.map((entry) => path.resolve(work_dir, entry));
+      process.stdout.write(`${write_lich_config(work_dir, config).message}\n`);
+      return "written";
+    }
+    if (save_global === false) {
       process.stdout.write(`${write_lich_config(work_dir, config).message}\n`);
       return "written";
     }
