@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `lich profile use` copies `~/.config/lich/config.json` into `~/.lich/config.json`
+  when the global file does not exist yet, so legacy settings (including
+  `tools_enabled`) stay in effect. `lich init --global` refuses to create
+  `~/.lich/config.json` while that legacy file is still the live config.
 - Gateway (#144): conversations queue on the shared `SessionManager` instead of
   their own promise chains. Beyond `max_conversations`, the least recently used
   conversation is evicted (it was the oldest inserted). Only Telegram's `/start`
