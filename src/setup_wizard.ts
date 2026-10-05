@@ -227,6 +227,16 @@ async function ask_plugins(work_dir: string, ask: AskLine): Promise<string[] | u
   return enabled;
 }
 
+/** Last wizard step. True writes the answers to the global file; undefined means cancelled. */
+export async function ask_save_global(ask: AskLine, global_path: string): Promise<boolean | undefined> {
+  const answer = await ask(`Save as the global default in ${global_path} (every project inherits it)? [y/N]: `);
+  if (answer === undefined) {
+    return undefined;
+  }
+  const yes = answer.trim().toLowerCase();
+  return yes === "y" || yes === "yes";
+}
+
 /** All steps skippable. Undefined means Ctrl+C or a rejected env name: caller must not write. */
 export async function collect_setup_answers(work_dir: string, ask: AskLine, model_hint?: string): Promise<SetupAnswers | undefined> {
   const agent_name = await ask_name(ask);

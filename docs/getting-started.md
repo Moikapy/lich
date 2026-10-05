@@ -42,7 +42,7 @@ lich config > .lich/config.json
 
 `lich config` honors `LICH_PROVIDER_KIND` and `LICH_MODEL` when you have them set, and otherwise prints an ollama-oriented template. The file is picked up automatically from `.lich/config.json` in the working directory, merged over `~/.lich/config.json` if you keep defaults there — after this, plain `lich "task"` needs no env vars.
 
-`lich init` writes that same starter file for you (it creates `.lich/` and never overwrites an existing `.lich/config.json`). Bare `lich` on a TTY, with no config in that search chain, runs a setup wizard and writes `.lich/config.json` once before opening the TUI. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. Non-TTY stdin skips the wizard. `.lich/` is gitignored.
+`lich init` writes that same starter file for you (it creates `.lich/` and never overwrites an existing `.lich/config.json`). Bare `lich` on a TTY, with no config in that search chain, runs a setup wizard and writes `.lich/config.json` once before opening the TUI. Answer yes to its last question to save the answers as your global default in `~/.lich/config.json` (or run `lich init --global`), so new projects skip the wizard. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. Non-TTY stdin skips the wizard. `.lich/` is gitignored.
 
 ### Path C: an explicit config file
 

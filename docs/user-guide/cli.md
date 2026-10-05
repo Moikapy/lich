@@ -7,6 +7,7 @@
 ```sh
 lich                   # open the TUI; first run on a TTY starts the setup wizard
 lich init              # write .lich/config.json without the wizard (flags apply; never overwrites)
+lich init --global     # write ~/.lich/config.json, the defaults every project inherits
 lich "one shot task"   # run a single task and print the reply
 lich chat              # interactive chat (commands: /exit, /quit)
 lich tui               # interactive terminal UI (ink)
@@ -24,8 +25,8 @@ lich --help            # usage text
 lich --version         # package.json version (published package and this tree: 0.8.0)
 ```
 
-- **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if none of `.lich/config.json`, `~/.lich/config.json` or the legacy `~/.config/lich/config.json` exists, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. An existing config in that chain skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
-- **`lich init`** writes that starter file without prompts, using the same writer as the wizard. Existing flags such as `--model` are written into the file and win over `LICH_MODEL`. It never overwrites an existing `.lich/config.json`. `.lich/` is gitignored.
+- **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if none of `.lich/config.json`, `~/.lich/config.json` or the legacy `~/.config/lich/config.json` exists, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. Its last question, "Save as the global default?" (default no), writes the answers to `~/.lich/config.json` instead, so later projects skip the wizard; plugins found under the project's `.lich/plugins` still go to the project file. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. An existing config in that chain skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
+- **`lich init`** writes that starter file without prompts, using the same writer as the wizard. Existing flags such as `--model` are written into the file and win over `LICH_MODEL`. It never overwrites an existing `.lich/config.json`. `.lich/` is gitignored. `lich init --global` writes the same starter to `~/.lich/config.json` instead (never overwriting it, and without `work_dir` or `session_dir`).
 - **One-shot** joins all positional words into a single task, runs the agent loop, prints the final answer to stdout, and exits. Progress (turn numbers, tool results) goes to stderr. Ctrl+C cancels the run (exit `1`); a second Ctrl+C quits at once (exit `130`).
 - **Chat** is a readline REPL over one long-lived agent: each line is a turn, memory persists across lines, and an empty line, `/exit`, or `/quit` ends the session. After each turn it prints a `[turns N | tokens M]` footer. Ctrl+C cancels the running turn and keeps the session; at the prompt it ends chat. A second Ctrl+C while a turn is still cancelling quits at once (exit `130`).
 - **TUI** launches the ink interface. See the [TUI guide](tui.md).
@@ -92,7 +93,7 @@ Per-kind defaults:
 - **Legacy location:** `~/.config/lich/config.json` is still read when `~/.lich/config.json` is absent, with a one-line hint to move it. Lich never writes there.
 - **`--config <path>`** replaces the whole chain; nothing is merged.
 
-`lich init`, the setup wizard and `lich mcp` write only the project file.
+`lich init` and `lich mcp` write only the project file. `lich init --global` and the wizard's "save as global" answer write `~/.lich/config.json`.
 
 ## Config file reference
 

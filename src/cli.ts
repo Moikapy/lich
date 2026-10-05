@@ -4,6 +4,7 @@
  * config files, and environment-based provider resolution.
  */
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,6 +17,7 @@ import {
   load_layered_config,
   config_template,
   existing_config_path,
+  global_config_path,
   provider_kind_defaults,
   starter_config_object,
   write_lich_config,
@@ -26,7 +28,7 @@ import { empty_mcp_flags, take_mcp_flag, type McpCliFlags } from "./cli_mcp_flag
 import { package_root_from_module_url, run_ossuary } from "./cli_ossuary.js";
 import { run_update } from "./cli_update.js";
 import type { Message } from "./providers/types.js";
-import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
+import { ask_line as ask_wizard_line, ask_save_global, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
 import { is_enoent } from "./util/fs.js";
 import { load_theme, notice_flavor } from "./util/theme.js";
 
@@ -44,6 +46,8 @@ interface CliOptions {
   positionals: string[];
   mcp_flags: McpCliFlags;
   serve_flags: ServeCliFlags;
+  /** `lich init --global`: write ~/.lich/config.json instead of the project file. */
+  global?: boolean;
 }
 
 const FLAG_KEYS: Record<string, string> = {
@@ -66,6 +70,7 @@ function usage_text(): string {
     "Usage:",
     "  lich                   open the TUI (first run: setup wizard, then TUI)",
     "  lich init              write .lich/config.json without the wizard (flags apply; never overwrites)",
+    "  lich init --global     write ~/.lich/config.json, the defaults every project inherits",
     '  lich "one shot task"   run a single task and print the reply',
     "  lich chat              interactive chat (commands: /exit, /quit)",
     "  lich tui               interactive terminal UI (ink)",
@@ -223,6 +228,7 @@ export function parse_args(argv: string[]): CliOptions {
   };
   const mcp = argv.includes("mcp");
   const serve = first_positional_of(argv) === "serve";
+  const init = first_positional_of(argv) === "init";
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) {
@@ -260,6 +266,10 @@ export function parse_args(argv: string[]): CliOptions {
         index = consumed;
         continue;
       }
+    }
+    if (init === true && arg === "--global") {
+      options.global = true;
+      continue;
     }
     if (serve === true) {
       const consumed = take_serve_flag(argv, index, options.serve_flags);
@@ -582,16 +592,30 @@ function work_dir_of(options: CliOptions): string {
   return options.overrides["work_dir"] ?? process.cwd();
 }
 
-async function offer_wizard(work_dir: string, hint?: string): Promise<string | "cancelled"> {
+async function offer_wizard(work_dir: string, hint?: string): Promise<"written" | "cancelled"> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answers = await collect_setup_answers(work_dir, (prompt) => ask_wizard_line(rl, prompt), hint);
+    const ask = (prompt: string): Promise<string | undefined> => ask_wizard_line(rl, prompt);
+    const answers = await collect_setup_answers(work_dir, ask, hint);
     if (answers === undefined) {
       return "cancelled";
     }
-    const result = write_lich_config(work_dir, build_setup_config(answers));
-    process.stdout.write(`${result.message}\n`);
-    return result.path;
+    const save_global = await ask_save_global(ask, global_config_path());
+    if (save_global === undefined) {
+      return "cancelled";
+    }
+    const config = build_setup_config(answers);
+    if (save_global === false) {
+      process.stdout.write(`${write_lich_config(work_dir, config).message}\n`);
+      return "written";
+    }
+    // Discovered plugins are project paths (.lich/plugins/...), so they stay in the project file.
+    const { plugins, ...global_config } = config;
+    process.stdout.write(`${write_lich_config(homedir(), global_config).message}\n`);
+    if (Array.isArray(plugins) === true && plugins.length > 0) {
+      process.stdout.write(`${write_lich_config(work_dir, { plugins }).message}\n`);
+    }
+    return "written";
   } finally {
     rl.close();
   }
@@ -612,7 +636,7 @@ async function maybe_first_run(options: CliOptions, work_dir: string): Promise<n
     process.stderr.write("lich: setup cancelled; nothing written\n");
     return 1;
   }
-  options.config_path = wrote;
+  // Discovery picks up what the wizard wrote, project and global alike.
   return undefined;
 }
 
@@ -644,10 +668,16 @@ function run_init(options: CliOptions): number {
   }
   const config = starter_config_object();
   apply_overrides(config, options.overrides);
-  const result = write_lich_config(work_dir_of(options), config);
+  if (options.global === true) {
+    // The global layer ignores these, so do not write them there.
+    delete config["work_dir"];
+    delete config["session_dir"];
+  }
+  // write_lich_config(home) targets ~/.lich/config.json, the global file.
+  const result = write_lich_config(options.global === true ? homedir() : work_dir_of(options), config);
   process.stdout.write(`${result.message}\n`);
   if (result.written === true && model_still_placeholder(config) === true) {
-    process.stdout.write("next: edit the model in .lich/config.json if needed, then run `lich`\n");
+    process.stdout.write(`next: edit the model in ${result.path} if needed, then run \`lich\`\n`);
   }
   return 0;
 }
