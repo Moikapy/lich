@@ -68,7 +68,8 @@ function reject_symlink_leaf(resolved: string, target: string, base_dir: string)
 }
 
 /**
- * Deny `.lich/config.json` to file tools; allow `.lich/` writes only under
+ * Deny `.lich/config.json` and `.lich/profiles/` to file tools (with work_dir =
+ * home these are the global identity files); allow `.lich/` writes only under
  * `skills/` and `plugins/`; deny `.env*` basenames on writes.
  */
 export function assert_file_tool_access(work_dir: string, resolved: string, mode: "read" | "write"): void {
@@ -77,6 +78,9 @@ export function assert_file_tool_access(work_dir: string, resolved: string, mode
   const parts = rel.split(path.sep).filter((part) => part.length > 0);
   if (parts[0] === ".lich" && parts[1] === "config.json" && parts.length === 2) {
     throw new Error("forbidden_path: .lich/config.json");
+  }
+  if (parts[0] === ".lich" && parts[1] === "profiles") {
+    throw new Error("forbidden_path: .lich/profiles");
   }
   if (mode === "write" && parts[0] === ".lich") {
     const allowed = parts[1] === "skills" || parts[1] === "plugins";
@@ -89,6 +93,16 @@ export function assert_file_tool_access(work_dir: string, resolved: string, mode
     if (leaf === ".env" || leaf.startsWith(".env.")) {
       throw new Error("forbidden_path: .env*");
     }
+  }
+}
+
+/** True when `assert_file_tool_access` would refuse `resolved`. */
+export function file_tool_denied(work_dir: string, resolved: string, mode: "read" | "write"): boolean {
+  try {
+    assert_file_tool_access(work_dir, resolved, mode);
+    return false;
+  } catch {
+    return true;
   }
 }
 

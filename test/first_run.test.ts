@@ -17,9 +17,9 @@ vi.mock("../src/cli_config.js", async (import_original) => {
   const actual = await import_original<typeof import("../src/cli_config.js")>();
   return {
     ...actual,
-    write_lich_config: (work_dir: string, config: Record<string, unknown>) => {
+    write_lich_config: (work_dir: string, config: Record<string, unknown>, update?: boolean) => {
       writes.calls.push({ work_dir, config });
-      return actual.write_lich_config(work_dir, config);
+      return actual.write_lich_config(work_dir, config, update);
     },
   };
 });
@@ -111,7 +111,7 @@ beforeEach(() => {
   wizard.lines = [];
   tui_run.configs = [];
   gateway_run.fn.mockClear();
-  for (const key of ["LICH_MODEL", "LICH_PROVIDER_KIND"] as const) {
+  for (const key of ["LICH_MODEL", "LICH_PROVIDER_KIND", "LICH_PROFILE"] as const) {
     saved_env[key] = process.env[key];
     delete process.env[key];
   }
@@ -509,6 +509,68 @@ describe("lich init and bare lich", () => {
       }
       await expect(run_cli(["tui", "--global"])).rejects.toThrow("unknown flag: --global");
     });
+  });
+
+  it("lich profile create runs the wizard into ~/.lich/profiles/<name>.json and never overwrites", async () => {
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      wizard.lines = ["coder", "", "code-model", "", "", ""];
+      expect(await run_cli(["profile", "create", "coder"])).toBe(0);
+      const file = path.join(String(process.env.HOME), ".lich", "profiles", "coder.json");
+      const written = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      expect(written["agent_name"]).toBe("coder");
+      expect(written["plugins"]).toEqual([]);
+      await expect(run_cli(["profile", "create", "coder"])).rejects.toThrow("already exists");
+    } finally {
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("lich profile use records the default in ~/.lich/config.json, keeping its other keys, and list marks it", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    writeFileSync(path.join(home, ".lich", "profiles", "bard.md"), "You are a bard.");
+    writeFileSync(global_config_path(), JSON.stringify({ max_turns: 4 }));
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "use", "coder"])).toBe(0);
+      expect(JSON.parse(readFileSync(global_config_path(), "utf8"))).toEqual({ max_turns: 4, profile: "coder" });
+      stdout.mockClear();
+      expect(await run_cli(["profile", "list"])).toBe(0);
+      expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toBe("  bard (soul)\n* coder\n");
+      await expect(run_cli(["profile", "use", "ghost"])).rejects.toThrow("profile not found: ghost");
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("bare lich --profile skips the wizard and runs with the profile; --profile with --config is rejected", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({
+      agent_name: "coder",
+      providers: [{ kind: "ollama", name: "main", model: "code-model" }],
+    }));
+    const dir = make_temp_dir("profile-run");
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      wizard.lines = ["should-not-be-read"];
+      expect(await run_cli(["--work-dir", dir, "--profile", "coder"])).toBe(0);
+      expect(writes.calls).toHaveLength(0);
+      expect(tui_run.configs[0]?.agent_name).toBe("coder");
+      expect(tui_run.configs[0]?.providers?.[0]?.model).toBe("code-model");
+      await expect(run_cli(["tui", "--profile", "coder", "--config", global_config_path()])).rejects.toThrow(
+        "--profile cannot be combined with --config",
+      );
+      await expect(run_cli(["tui", "--profile", "ghost"])).rejects.toThrow("lich tui: profile not found: ghost");
+    } finally {
+      stdout.mockRestore();
+      restore_tty();
+    }
   });
 
   it("lets lich tui pick up the file lich init wrote", async () => {

@@ -202,17 +202,23 @@ describe("load_layered_config", () => {
   let saved_home: string | undefined;
   let home: string;
 
+  let saved_profile: string | undefined;
+
   beforeEach(() => {
     saved_home = process.env.HOME;
+    saved_profile = process.env.LICH_PROFILE;
     home = make_temp_dir("home");
     process.env.HOME = home;
+    delete process.env.LICH_PROFILE;
   });
 
   afterEach(() => {
-    if (saved_home === undefined) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = saved_home;
+    for (const [key, value] of [["HOME", saved_home], ["LICH_PROFILE", saved_profile]] as const) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
   });
 
@@ -278,6 +284,87 @@ describe("load_layered_config", () => {
     const layered = load_layered_config(home);
     expect(layered?.config).toEqual({ agent_name: "home" });
     expect(layered?.sources).toEqual([global_config_path()]);
+  });
+});
+
+describe("load_layered_config profiles", () => {
+  let saved: { home?: string; profile?: string };
+  let home: string;
+
+  beforeEach(() => {
+    saved = { home: process.env.HOME, profile: process.env.LICH_PROFILE };
+    home = make_temp_dir("home");
+    process.env.HOME = home;
+    delete process.env.LICH_PROFILE;
+  });
+
+  afterEach(() => {
+    for (const [key, value] of [["HOME", saved.home], ["LICH_PROFILE", saved.profile]] as const) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  function write_file(file: string, body: string): void {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, body);
+  }
+
+  const profiles = (): string => path.join(home, ".lich", "profiles");
+
+  it("merges global < profile < project, resolving profile plugin paths against ~/.lich/profiles", () => {
+    const work = make_temp_dir("work");
+    write_file(global_config_path(), JSON.stringify({ agent_name: "global", max_turns: 9, theme: "lich" }));
+    write_file(path.join(profiles(), "coder.json"), JSON.stringify({ agent_name: "coder", max_turns: 5, plugins: ["p.mjs"] }));
+    write_file(project_config_path(work), JSON.stringify({ max_turns: 2 }));
+    const layered = load_layered_config(work, "coder");
+    expect(layered?.config).toEqual({ agent_name: "coder", max_turns: 2, theme: "lich", plugins: [path.join(profiles(), "p.mjs")] });
+    expect(layered?.profile).toBe("coder");
+    expect(layered?.sources).toEqual([global_config_path(), path.join(profiles(), "coder.json"), project_config_path(work)]);
+  });
+
+  it("uses a non-empty soul as the system prompt, which a project system_prompt still overrides", () => {
+    const work = make_temp_dir("work");
+    write_file(path.join(profiles(), "bard.json"), JSON.stringify({ system_prompt: "from json" }));
+    write_file(path.join(profiles(), "bard.md"), "  You are a bard.\n");
+    expect(load_layered_config(work, "bard")?.config["system_prompt"]).toBe("You are a bard.");
+    write_file(path.join(profiles(), "bard.md"), "   \n");
+    expect(load_layered_config(work, "bard")?.config["system_prompt"]).toBe("from json");
+    write_file(project_config_path(work), JSON.stringify({ system_prompt: "project" }));
+    write_file(path.join(profiles(), "bard.md"), "You are a bard.");
+    expect(load_layered_config(work, "bard")?.config["system_prompt"]).toBe("project");
+  });
+
+  it("picks the flag, then LICH_PROFILE, then the project profile key, then the global one, and drops the key", () => {
+    const work = make_temp_dir("work");
+    for (const name of ["a", "b", "c", "d"]) {
+      write_file(path.join(profiles(), `${name}.json`), JSON.stringify({ agent_name: name }));
+    }
+    write_file(global_config_path(), JSON.stringify({ profile: "d" }));
+    expect(load_layered_config(work)?.config).toEqual({ agent_name: "d" });
+    write_file(project_config_path(work), JSON.stringify({ profile: "c" }));
+    expect(load_layered_config(work)?.config).toEqual({ agent_name: "c" });
+    process.env.LICH_PROFILE = "b";
+    expect(load_layered_config(work)?.config).toEqual({ agent_name: "b" });
+    expect(load_layered_config(work, "a")?.config).toEqual({ agent_name: "a" });
+  });
+
+  it("puts the profile over ~/.lich/config.json when the work_dir is home", () => {
+    write_file(path.join(profiles(), "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    // Without ~/.lich/config.json the legacy file is still the base.
+    write_file(path.join(home, ".config", "lich", "config.json"), JSON.stringify({ agent_name: "legacy", theme: "lich" }));
+    expect(load_layered_config(home, "coder")?.config).toEqual({ agent_name: "coder", theme: "lich" });
+    write_file(global_config_path(), JSON.stringify({ agent_name: "home", max_turns: 9 }));
+    expect(load_layered_config(home, "coder")?.config).toEqual({ agent_name: "coder", max_turns: 9 });
+  });
+
+  it("throws for a missing profile or a name that is not a plain slug, without absolute paths", () => {
+    const work = make_temp_dir("work");
+    expect(() => load_layered_config(work, "ghost")).toThrow(/^profile not found: ghost$/);
+    expect(() => load_layered_config(work, "../x")).toThrow("invalid profile name");
   });
 });
 

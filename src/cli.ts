@@ -25,6 +25,7 @@ import {
   type ProviderKind,
 } from "./cli_config.js";
 import { run_mcp } from "./cli_mcp.js";
+import { run_profile } from "./cli_profile.js";
 import { empty_mcp_flags, take_mcp_flag, type McpCliFlags } from "./cli_mcp_flags.js";
 import { package_root_from_module_url, run_ossuary } from "./cli_ossuary.js";
 import { run_update } from "./cli_update.js";
@@ -62,6 +63,7 @@ const FLAG_KEYS: Record<string, string> = {
   "--session-dir": "session_dir",
   "--log-level": "log_level",
   "--theme": "theme",
+  "--profile": "profile",
 };
 
 function usage_text(): string {
@@ -83,11 +85,14 @@ function usage_text(): string {
     "  lich mcp list          list mcp servers in .lich/config.json",
     "  lich mcp add <name>    add a catalog or --command/--url server (disabled)",
     "  lich mcp enable <name> / disable <name> / remove <name>",
+    "  lich profile list      list profiles in ~/.lich/profiles (* = default)",
+    "  lich profile create <name> / show <name> / use <name>",
     "  lich --help            show this help",
     "  lich --version         print version",
     "",
     "Flags (before or after the subcommand):",
     "  --config <path>        JSON config file parsed by parse_agent_config",
+    "  --profile <name>       merge ~/.lich/profiles/<name>.json between global and project config (or LICH_PROFILE)",
     "  --work-dir <path>      working directory for tools",
     "  --max-turns <n>        loop turn budget (default 25)",
     "  --model <m>            model name (default from LICH_MODEL)",
@@ -129,6 +134,7 @@ function non_tui_resume_mode(first: string | undefined): string | undefined {
     first === "init" ||
     first === "config" ||
     first === "mcp" ||
+    first === "profile" ||
     first === "update" ||
     first === "chat" ||
     first === "gateway" ||
@@ -142,6 +148,11 @@ function non_tui_resume_mode(first: string | undefined): string | undefined {
 
 /** Mode-aware config failure message; one-shot keeps the generic variant. */
 function error_for_mode(mode: string, base_message: string): string {
+  const modes = ["tui", "gateway", "serve", "chat"];
+  // Only the missing-model case gets the hint; other errors (bad file, unknown profile) pass through.
+  if (modes.includes(mode) === true && base_message.startsWith("no model configured") === false) {
+    return `lich ${mode}: ${base_message}`;
+  }
   if (mode === "tui") {
     return "lich tui: no model configured — set LICH_MODEL (e.g. glm-5.3-flash:cloud), pass --model, or create .lich/config.json (`lich config` prints a template)";
   }
@@ -395,9 +406,12 @@ function apply_overrides(config: Record<string, unknown>, overrides: Record<stri
   apply_provider_override(config, overrides);
 }
 
-/** Project `.lich/config.json` (under `--work-dir`, else cwd) merged over the global `~/.lich/config.json`. */
-function load_discovered_config(work_dir: string): Record<string, unknown> | undefined {
-  const layered = load_layered_config(work_dir);
+/**
+ * Project `.lich/config.json` (under `--work-dir`, else cwd) merged over the
+ * global `~/.lich/config.json`, with the selected profile in between.
+ */
+function load_discovered_config(work_dir: string, profile?: string): Record<string, unknown> | undefined {
+  const layered = load_layered_config(work_dir, profile);
   for (const note of layered?.notes ?? []) {
     process.stderr.write(`${note}\n`);
   }
@@ -405,9 +419,14 @@ function load_discovered_config(work_dir: string): Record<string, unknown> | und
 }
 
 function build_config(options: CliOptions): AgentConfig {
+  if (options.config_path !== undefined && options.overrides["profile"] !== undefined) {
+    throw new Error("--profile cannot be combined with --config (--config replaces every layer)");
+  }
   const base =
     options.config_path === undefined
-      ? load_discovered_config(work_dir_of(options)) ?? { providers: [env_provider(options.overrides)] }
+      ? load_discovered_config(work_dir_of(options), options.overrides["profile"]) ?? {
+          providers: [env_provider(options.overrides)],
+        }
       : load_config_file(options.config_path);
   apply_overrides(base, options.overrides);
   const providers = base["providers"];
@@ -631,7 +650,8 @@ async function offer_wizard(work_dir: string, hint?: string): Promise<"written" 
 }
 
 async function maybe_first_run(options: CliOptions, work_dir: string): Promise<number | undefined> {
-  if (options.config_path !== undefined) {
+  // An explicit file or a requested profile is the setup; build_config reports a missing one.
+  if (options.config_path !== undefined || options.overrides["profile"] !== undefined || (process.env.LICH_PROFILE ?? "").length > 0) {
     return undefined;
   }
   const existing = existing_config_path(work_dir);
@@ -797,6 +817,9 @@ export async function run_cli(argv: string[]): Promise<number> {
   }
   if (first === "mcp") {
     return run_mcp(work_dir_of(options), options.positionals, options.mcp_flags);
+  }
+  if (first === "profile") {
+    return run_profile(options.positionals);
   }
   if (first === "update") {
     if (options.positionals.length > 1) {

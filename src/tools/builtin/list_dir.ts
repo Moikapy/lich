@@ -2,7 +2,14 @@ import { readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { JsonSchemaObject } from "../../util/json_schema.js";
-import { capture_errors, optional_number_arg, optional_string_arg, resolve_safe_path } from "../guard.js";
+import {
+  assert_file_tool_access,
+  capture_errors,
+  file_tool_denied,
+  optional_number_arg,
+  optional_string_arg,
+  resolve_safe_path,
+} from "../guard.js";
 import type { Tool } from "../types.js";
 
 const MAX_ENTRIES = 500;
@@ -53,12 +60,17 @@ async function push_entries(
   queue: Array<{ dir: string; remaining: number }>,
   entries: Dirent[],
   current: { dir: string; remaining: number },
+  work_dir: string,
 ): Promise<boolean> {
   for (const entry of sort_entries(entries)) {
     if (lines.length >= MAX_ENTRIES) {
       return true;
     }
     const full = path.join(current.dir, entry.name);
+    // Never list what file tools may not read (.lich/config.json, .lich/profiles).
+    if (file_tool_denied(work_dir, full, "read") === true) {
+      continue;
+    }
     if (entry.isDirectory() === true) {
       lines.push(`d ${entry.name}/`);
       if (current.remaining > 1) {
@@ -71,7 +83,7 @@ async function push_entries(
   return false;
 }
 
-async function collect_lines(root: string, max_depth: number): Promise<string[]> {
+async function collect_lines(root: string, max_depth: number, work_dir: string): Promise<string[]> {
   const lines: string[] = [];
   const queue: Array<{ dir: string; remaining: number }> = [{ dir: root, remaining: max_depth }];
   let truncated = false;
@@ -84,7 +96,7 @@ async function collect_lines(root: string, max_depth: number): Promise<string[]>
     if (entries === undefined) {
       continue;
     }
-    truncated = await push_entries(lines, queue, entries, current);
+    truncated = await push_entries(lines, queue, entries, current, work_dir);
   }
   if (truncated === true) {
     lines.push(`(... truncated at ${MAX_ENTRIES} entries)`);
@@ -105,7 +117,8 @@ export const list_dir_tool: Tool = {
       const target = optional_string_arg(args, "path", ".");
       const depth = clamp_depth(optional_number_arg(args, "depth", 1));
       const root = resolve_safe_path(context.work_dir, target);
-      const lines = await collect_lines(root, depth);
+      assert_file_tool_access(context.work_dir, root, "read");
+      const lines = await collect_lines(root, depth, context.work_dir);
       return { ok: true, output: lines.join("\n") };
     }),
 };
