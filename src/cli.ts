@@ -13,7 +13,7 @@ import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import type { EnvelopedAgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
 import {
-  load_config,
+  load_layered_config,
   config_template,
   existing_config_path,
   provider_kind_defaults,
@@ -384,13 +384,13 @@ function apply_overrides(config: Record<string, unknown>, overrides: Record<stri
   apply_provider_override(config, overrides);
 }
 
-/** Same search as the wizard: `--work-dir` (else cwd), then the user-home file. */
+/** Project `.lich/config.json` (under `--work-dir`, else cwd) merged over the global `~/.lich/config.json`. */
 function load_discovered_config(work_dir: string): Record<string, unknown> | undefined {
-  const found = existing_config_path(work_dir);
-  if (found === undefined) {
-    return undefined;
+  const layered = load_layered_config(work_dir);
+  for (const note of layered?.notes ?? []) {
+    process.stderr.write(`${note}\n`);
   }
-  return load_config(found);
+  return layered?.config;
 }
 
 function build_config(options: CliOptions): AgentConfig {
@@ -603,8 +603,8 @@ async function maybe_first_run(options: CliOptions, work_dir: string): Promise<n
   }
   const existing = existing_config_path(work_dir);
   if (existing !== undefined) {
+    // Leave config_path unset so build_config merges the project file over the global one.
     process.stdout.write(`${skip_setup_message(existing)}\n`);
-    options.config_path = existing;
     return undefined;
   }
   const wrote = await offer_wizard(work_dir, model_hint(options));

@@ -5,13 +5,16 @@
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   config_search_paths,
   config_template,
   ensure_lich_config_dir,
   find_config_file,
+  global_config_path,
   load_config,
+  load_layered_config,
+  merge_config_layers,
   project_config_path,
   write_lich_config,
 } from "../src/cli_config.js";
@@ -71,10 +74,20 @@ afterEach(() => {
 });
 
 describe("config_search_paths", () => {
-  it("lists the cwd .lich config first and the user config home second", () => {
+  it("lists the cwd .lich config, then ~/.lich/config.json, then the legacy ~/.config/lich file", () => {
     const paths = config_search_paths();
-    expect(paths[0]).toBe(path.resolve(process.cwd(), ".lich/config.json"));
-    expect(paths[1]).toBe(path.resolve(homedir(), ".config/lich/config.json"));
+    expect(paths).toEqual([
+      path.resolve(process.cwd(), ".lich/config.json"),
+      path.resolve(homedir(), ".lich/config.json"),
+      path.resolve(homedir(), ".config/lich/config.json"),
+    ]);
+  });
+
+  it("lists the global file once when the work_dir is the home directory", () => {
+    expect(config_search_paths(homedir())).toEqual([
+      path.resolve(homedir(), ".lich/config.json"),
+      path.resolve(homedir(), ".config/lich/config.json"),
+    ]);
   });
 
   it("resolves the first entry from the requested work_dir", () => {
@@ -85,7 +98,7 @@ describe("config_search_paths", () => {
   it("keeps both entries ordered for a work_dir inside the config home", () => {
     const paths = config_search_paths(path.join(homedir(), ".config/lich"));
     expect(paths[0]).toBe(path.resolve(homedir(), ".config/lich/.lich/config.json"));
-    expect(paths[1]).toBe(path.resolve(homedir(), ".config/lich/config.json"));
+    expect(paths[2]).toBe(path.resolve(homedir(), ".config/lich/config.json"));
   });
 });
 
@@ -182,6 +195,112 @@ describe("ensure_lich_config_dir", () => {
     expect(lich_dir).toBe(path.join(dir, ".lich"));
     expect(existsSync(lich_dir)).toBe(true);
     expect(() => ensure_lich_config_dir(dir)).not.toThrow();
+  });
+});
+
+describe("load_layered_config", () => {
+  let saved_home: string | undefined;
+  let home: string;
+
+  beforeEach(() => {
+    saved_home = process.env.HOME;
+    home = make_temp_dir("home");
+    process.env.HOME = home;
+  });
+
+  afterEach(() => {
+    if (saved_home === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = saved_home;
+    }
+  });
+
+  function write_json(file: string, value: unknown): void {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(value));
+  }
+
+  it("returns undefined when neither a project nor a global config exists", () => {
+    expect(load_layered_config(make_temp_dir("none"))).toBeUndefined();
+  });
+
+  it("merges the project over ~/.lich/config.json per key", () => {
+    const work = make_temp_dir("work");
+    write_json(global_config_path(), { agent_name: "wight", max_turns: 9, theme: "lich" });
+    write_json(project_config_path(work), { max_turns: 3 });
+    const layered = load_layered_config(work);
+    expect(layered?.config).toEqual({ agent_name: "wight", max_turns: 3, theme: "lich" });
+    expect(layered?.sources).toEqual([global_config_path(), project_config_path(work)]);
+    expect(layered?.notes).toEqual([]);
+  });
+
+  it("ignores work_dir and session_dir from the global layer and resolves its plugin paths against ~/.lich", () => {
+    const work = make_temp_dir("work");
+    write_json(global_config_path(), {
+      work_dir: "/elsewhere",
+      session_dir: "/elsewhere/sessions",
+      plugins: ["./plugins/a.mjs", { path: "b.mjs", settings: { x: 1 } }, "/abs/c.mjs"],
+    });
+    const config = load_layered_config(work)?.config;
+    expect(config?.["work_dir"]).toBeUndefined();
+    expect(config?.["session_dir"]).toBeUndefined();
+    expect(config?.["plugins"]).toEqual([
+      path.join(home, ".lich", "plugins", "a.mjs"),
+      { path: path.join(home, ".lich", "b.mjs"), settings: { x: 1 } },
+      "/abs/c.mjs",
+    ]);
+  });
+
+  it("keeps project plugin paths and work_dir as written", () => {
+    const work = make_temp_dir("work");
+    write_json(global_config_path(), { plugins: ["./g.mjs"] });
+    write_json(project_config_path(work), { work_dir: work, plugins: ["./p.mjs"] });
+    expect(load_layered_config(work)?.config).toEqual({ work_dir: work, plugins: ["./p.mjs"] });
+  });
+
+  it("reads the legacy ~/.config/lich file only when ~/.lich/config.json is absent, with a note", () => {
+    const work = make_temp_dir("work");
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    write_json(legacy, { agent_name: "legacy" });
+    const old = load_layered_config(work);
+    expect(old?.config).toEqual({ agent_name: "legacy" });
+    expect(old?.notes[0]).toContain(global_config_path());
+    write_json(global_config_path(), { agent_name: "global" });
+    const current = load_layered_config(work);
+    expect(current?.config).toEqual({ agent_name: "global" });
+    expect(current?.notes).toEqual([]);
+  });
+
+  it("does not merge ~/.lich/config.json over itself, or the legacy file under it, when the work_dir is home", () => {
+    write_json(global_config_path(), { agent_name: "home" });
+    write_json(path.join(home, ".config", "lich", "config.json"), { theme: "legacy" });
+    const layered = load_layered_config(home);
+    expect(layered?.config).toEqual({ agent_name: "home" });
+    expect(layered?.sources).toEqual([global_config_path()]);
+  });
+});
+
+describe("merge_config_layers", () => {
+  const base_providers = [{ kind: "ollama", name: "a", model: "m" }];
+
+  it("lets a project providers array replace the base's and drops the base models", () => {
+    const merged = merge_config_layers(
+      { providers: base_providers, models: { chat: ["a"] } },
+      { providers: [{ kind: "ollama", name: "b", model: "n" }] },
+    );
+    expect(merged).toEqual({ providers: [{ kind: "ollama", name: "b", model: "n" }] });
+  });
+
+  it("keeps the base models when the project does not set providers, and project models when it does", () => {
+    expect(merge_config_layers({ providers: base_providers, models: { chat: ["a"] } }, { max_turns: 2 })).toEqual({
+      providers: base_providers,
+      models: { chat: ["a"] },
+      max_turns: 2,
+    });
+    expect(
+      merge_config_layers({ models: { chat: ["a"] } }, { providers: base_providers, models: { compress: ["a"] } }),
+    ).toEqual({ providers: base_providers, models: { compress: ["a"] } });
   });
 });
 
