@@ -18,6 +18,7 @@ import {
   config_template,
   existing_config_path,
   global_config_path,
+  legacy_user_config_active,
   project_config_path,
   provider_kind_defaults,
   starter_config_object,
@@ -701,6 +702,12 @@ function run_init(options: CliOptions): number {
     // The global layer ignores these, so do not write them there.
     delete config["work_dir"];
     delete config["session_dir"];
+    // A new ~/.lich/config.json stops the legacy file from being read at all.
+    if (legacy_user_config_active() === true) {
+      throw new Error(
+        "legacy config at ~/.config/lich/config.json is still in use; move it to ~/.lich/config.json before init --global",
+      );
+    }
   }
   // write_lich_config(home) targets ~/.lich/config.json, the global file.
   const result = write_lich_config(options.global === true ? homedir() : work_dir_of(options), config);
