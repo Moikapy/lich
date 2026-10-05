@@ -464,6 +464,14 @@ describe("forbidden file paths", () => {
     expect(read.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
     const write = await executor.execute("write_file", { path: ".lich/profiles/coder.json", content: "{}\n" });
     expect(write.error?.startsWith("forbidden_path")).toBe(true);
+    const listed = await executor.execute("list_dir", { path: ".lich/profiles" });
+    expect(listed.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    const walked = await executor.execute("list_dir", { path: ".lich", depth: 3 });
+    expect(walked.ok).toBe(true);
+    expect(walked.output).not.toContain("profiles");
+    expect(walked.output).not.toContain("coder.md");
+    const usage = await executor.execute("disk_usage", { path: ".lich/profiles" });
+    expect(usage.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
   });
 
   it("allows writes under .lich/skills and .lich/plugins; denies other .lich writes and .env*", async () => {

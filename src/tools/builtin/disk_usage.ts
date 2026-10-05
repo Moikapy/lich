@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { JsonSchemaObject } from "../../util/json_schema.js";
-import { capture_errors, optional_number_arg, optional_string_arg, resolve_safe_path } from "../guard.js";
+import { assert_file_tool_access, capture_errors, optional_number_arg, optional_string_arg, resolve_safe_path } from "../guard.js";
 import type { Tool, ToolContext } from "../types.js";
 import { clamp_int_arg } from "./fetch_url.js";
 
@@ -68,6 +68,7 @@ async function run_disk_usage(args: Record<string, unknown>, work_dir: string): 
   const target = optional_string_arg(args, "path", ".");
   const max_entries = clamp_int_arg(args, "max_entries", DEFAULT_MAX_ENTRIES, MAX_MAX_ENTRIES);
   const root = resolve_safe_path(work_dir, target);
+  assert_file_tool_access(work_dir, root, "read");
   const usage = await measure_entries(root);
   if (usage === null) {
     throw new Error("du_unavailable");

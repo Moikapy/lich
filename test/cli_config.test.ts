@@ -352,9 +352,15 @@ describe("load_layered_config profiles", () => {
     expect(load_layered_config(work, "a")?.config).toEqual({ agent_name: "a" });
   });
 
-  it("throws for a missing profile or a name that is not a plain slug", () => {
+  it("puts the profile over ~/.lich/config.json when the work_dir is home", () => {
+    write_file(global_config_path(), JSON.stringify({ agent_name: "home", max_turns: 9 }));
+    write_file(path.join(profiles(), "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    expect(load_layered_config(home, "coder")?.config).toEqual({ agent_name: "coder", max_turns: 9 });
+  });
+
+  it("throws for a missing profile or a name that is not a plain slug, without absolute paths", () => {
     const work = make_temp_dir("work");
-    expect(() => load_layered_config(work, "ghost")).toThrow("profile not found: ghost");
+    expect(() => load_layered_config(work, "ghost")).toThrow(/^profile not found: ghost$/);
     expect(() => load_layered_config(work, "../x")).toThrow("invalid profile name");
   });
 });

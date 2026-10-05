@@ -96,6 +96,16 @@ export function assert_file_tool_access(work_dir: string, resolved: string, mode
   }
 }
 
+/** True when `assert_file_tool_access` would refuse `resolved`. */
+export function file_tool_denied(work_dir: string, resolved: string, mode: "read" | "write"): boolean {
+  try {
+    assert_file_tool_access(work_dir, resolved, mode);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 /** Read a required non-empty string argument, or throw `missing_arg`. */
 export function require_string_arg(args: Record<string, unknown>, key: string): string {
   const value = args[key];

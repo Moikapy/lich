@@ -26,7 +26,7 @@ A profile only needs the keys that differ from your global config. For example, 
 { "agent_name": "coder", "providers": [{ "kind": "ollama", "name": "main", "model": "qwen3:8b" }] }
 ```
 
-`--config <path>` still replaces every layer and cannot be combined with `--profile`.
+`--config <path>` still replaces every layer. It cannot be combined with `--profile`, and `LICH_PROFILE` is ignored when it is given.
 
 ## The soul file
 

@@ -78,7 +78,7 @@ function show_profile(name: string): void {
 async function create_profile(name: string): Promise<number> {
   const paths = profile_paths(name);
   if (existsSync(paths.json) === true) {
-    throw new Error(`profile ${name} already exists at ${paths.json}`);
+    throw new Error(`profile ${name} already exists`);
   }
   if (process.stdin.isTTY !== true) {
     throw new Error("profile create needs a TTY; write the JSON by hand instead");

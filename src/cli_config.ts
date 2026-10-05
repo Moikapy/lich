@@ -107,7 +107,7 @@ function profile_layer(name: string): { layer: Record<string, unknown>; sources:
   const has_json = existsSync(paths.json);
   const has_soul = existsSync(paths.soul);
   if (has_json === false && has_soul === false) {
-    throw new Error(`profile not found: ${name} (expected ${paths.json})`);
+    throw new Error(`profile not found: ${name}`);
   }
   const layer = has_json === true ? global_layer(read_config_object(paths.json), profiles_dir()) : {};
   delete layer["profile"];
@@ -149,7 +149,11 @@ export function load_layered_config(work_dir: string, profile_flag?: string): La
     ...(profile?.sources ?? []),
     ...(project === undefined ? [] : [project_path]),
   ];
-  const config = merge_config_layers(merge_config_layers(base ?? {}, profile?.layer ?? {}), project ?? {});
+  // With work_dir = home the project file is the global file, so the profile goes over it.
+  const config =
+    project_path === global_path
+      ? merge_config_layers(project ?? {}, profile?.layer ?? {})
+      : merge_config_layers(merge_config_layers(base ?? {}, profile?.layer ?? {}), project ?? {});
   delete config["profile"];
   return { config, sources, notes, ...(selected === undefined ? {} : { profile: selected }) };
 }
