@@ -32,7 +32,7 @@ Without `--config`, `load_layered_config` (`src/cli_config.ts:127@ab0f508`) merg
 
 ## Writers
 
-- `write_lich_config` (`src/cli_config.ts:277@ab0f508`) is the only config writer. Create mode uses an exclusive open; update mode writes a temp file and renames it into place, keeping the file mode (`src/cli_config.ts:307@ab0f508`, #166).
+- `write_lich_config` (`src/cli_config.ts:277@ab0f508`) is the only writer of `.lich/config.json` files (project and global); profile JSON is written by `lich profile create` (`src/cli_profile.ts:101@ab0f508`). Create mode uses an exclusive open; update mode writes a temp file and renames it into place, keeping the file mode (`src/cli_config.ts:307@ab0f508`, #166).
 - `lich init` writes the project file; `lich init --global` writes the global one, without `work_dir`/`session_dir` (`src/cli.ts:694@ab0f508`).
 - The setup wizard runs only when no file exists anywhere in the chain. Its last question can save the answers globally; discovered project plugins then stay in the project file, or are stored absolute when the project file is the global file (`src/cli.ts:615@ab0f508`).
 - `lich profile create` writes a profile through the wizard and never overwrites. `lich mcp` edits only the project file.
@@ -50,6 +50,6 @@ A config profile could later seed a runtime Profile, but today they are separate
 
 ## Errors
 
-`tui`, `chat`, `serve` and `gateway` give the "no model configured" hint only for that error. Others pass through as `lich <mode>: <message>` (`src/cli.ts:150@ab0f508`). Messages carry no absolute paths (`.cursor/review-rules.md`).
+`tui`, `chat`, `serve` and `gateway` give the "no model configured" hint only for that error. Others pass through as `lich <mode>: <message>` (`src/cli.ts:150@ab0f508`). The profile errors (`profile not found`, `profile <name> already exists`) carry no absolute paths (`.cursor/review-rules.md`). `config not found` and `invalid config json` still name the file.
 
 Related: [[lich-tools-and-guardrails]], [[hermes-agent]] (its profiles are separate home directories; Lich layers files instead).
