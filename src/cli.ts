@@ -18,6 +18,7 @@ import {
   config_template,
   existing_config_path,
   global_config_path,
+  project_config_path,
   provider_kind_defaults,
   starter_config_object,
   write_lich_config,
@@ -605,7 +606,8 @@ async function offer_wizard(work_dir: string, hint?: string): Promise<"written" 
       return "cancelled";
     }
     const config = build_setup_config(answers);
-    if (save_global === false) {
+    // With work_dir = home the project file is the global file: write it once, plugins included.
+    if (save_global === false || project_config_path(work_dir) === global_config_path()) {
       process.stdout.write(`${write_lich_config(work_dir, config).message}\n`);
       return "written";
     }

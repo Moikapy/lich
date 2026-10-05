@@ -9,7 +9,7 @@ import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const writes = vi.hoisted(() => ({ calls: [] as Array<{ work_dir: string; config: Record<string, unknown> }> }));
 const wizard = vi.hoisted(() => ({ cancel: false, lines: [] as string[] }));
-const tui_run = vi.hoisted(() => ({ configs: [] as Array<{ agent_name?: string; max_turns?: number; providers?: Array<{ model?: string }> }> }));
+const tui_run = vi.hoisted(() => ({ configs: [] as Array<{ agent_name?: string; max_turns?: number; plugins?: unknown[]; providers?: Array<{ model?: string }> }> }));
 const gateway_run = vi.hoisted(() => ({
   fn: vi.fn(async (_config: unknown, _platforms: readonly string[]) => 0),
 }));
@@ -437,6 +437,26 @@ describe("lich init and bare lich", () => {
       const config = tui_run.configs[0];
       expect(config?.agent_name).toBe("ada");
       expect(config?.providers?.[0]?.model).toBe("global-model");
+      expect(config?.plugins).toEqual([".lich/plugins/demo.ts"]);
+    } finally {
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("wizard writes the global file once, plugins included, when the work_dir is home", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "plugins"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "plugins", "demo.ts"), "export const plugin = { name: 'demo', tools: [] };\n");
+    wizard.lines = ["", "", "home-model", "", "", "", "y", "y"];
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["--work-dir", home])).toBe(0);
+      const written = JSON.parse(readFileSync(global_config_path(), "utf8")) as Record<string, unknown>;
+      expect(written["plugins"]).toEqual([".lich/plugins/demo.ts"]);
+      expect((written["providers"] as Array<{ model: string }>)[0]?.model).toBe("home-model");
+      expect(tui_run.configs[0]?.plugins).toEqual([".lich/plugins/demo.ts"]);
     } finally {
       stdout.mockRestore();
       restore_tty();
