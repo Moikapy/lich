@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Gateway: a failed turn no longer drops a conversation's history when a new
+  chat evicted it while that turn was still in flight. The history loaded for
+  the run is written back.
 - Gateway (#144): sender allowlists and the gateway toolset are one
   `GatewayPolicy`, built from config at startup (`src/gateway/access.ts`).
   Platform adapters declare `capabilities` (`{ kind: "text", max_reply_chars }`);
