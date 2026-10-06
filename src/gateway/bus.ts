@@ -92,6 +92,10 @@ export class GatewayBus {
       const kept = history_after_run_error(error);
       if (kept !== undefined) {
         this.store_history(key, cap_history(kept, this.history_cap));
+      } else if (this.histories.has(key) === false && history.length > 0) {
+        // A new chat may have evicted this key while the run was in flight.
+        // Nothing was stored, so put the loaded history back.
+        this.store_history(key, history);
       }
       return { text: sanitize_agent_error(error), failed: true };
     }

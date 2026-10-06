@@ -188,4 +188,55 @@ describe("gateway max_conversations", () => {
     expect(await third).toBe("echo:a3");
     expect(await other).toBe("echo:b1");
   });
+
+  it("restores history when a new chat evicts an in-flight conversation and that run fails", async () => {
+    const work_dir = make_temp_dir();
+    const records: RunRecord[] = [];
+    const started: HeldRun[] = [];
+    const bus = new GatewayBus(
+      {
+        config: parse_agent_config({
+          providers: [{ kind: "openai_compat", name: "main", model: "mock-model" }],
+          work_dir,
+          log_level: "error",
+        }),
+        agent_factory: () => failing_held_agent(records, started, "a2"),
+      },
+      { max_conversations: 2, history_cap: 40 },
+    );
+
+    expect(await bus.handle("webhook", "a", "u", "a1")).toBe("echo:a1");
+    expect(await bus.handle("webhook", "b", "u", "b1")).toBe("echo:b1");
+
+    const failed = bus.handle("webhook", "a", "u", "a2");
+    await wait_for_start(started, "a2");
+    // c arrives while a2 is in flight, so history_for evicts a (the LRU slot).
+    expect(await bus.handle("webhook", "c", "u", "c1")).toBe("echo:c1");
+    started.find((run) => run.input === "a2")?.release();
+    expect(await failed).toContain("agent error:");
+
+    expect(await bus.handle("webhook", "a", "u", "a3")).toBe("echo:a3");
+    const a3 = records.find((record) => record.input === "a3");
+    expect(a3?.history_len).toBeGreaterThan(0);
+  });
 });
+
+/** Holds `fail_input` until release, then throws; every other input echoes. */
+function failing_held_agent(records: RunRecord[], started: HeldRun[], fail_input: string): Agent {
+  return {
+    run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+      const history = options.history ?? [];
+      if (options.input === fail_input) {
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        started.push({ input: options.input, history_len: history.length, release });
+        await gate;
+        throw new Error("provider down");
+      }
+      records.push({ input: options.input, history_len: history.length });
+      return echo_result(options.input, history);
+    },
+  } as unknown as Agent;
+}
