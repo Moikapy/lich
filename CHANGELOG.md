@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `lich serve` queues frames per session on each connection instead of
+  per connection (#144). A long `prompt.submit` no longer holds up other
+  sessions or session-less frames such as `health` on the same socket. Frames
+  for one session keep their order; replies across sessions may interleave,
+  so clients match them by JSON-RPC `id` (Ossuary already does).
 - Gateway (#144): sender allowlists and the gateway toolset are one
   `GatewayPolicy`, built from config at startup (`src/gateway/access.ts`).
   Platform adapters declare `capabilities` (`{ kind: "text", max_reply_chars }`);

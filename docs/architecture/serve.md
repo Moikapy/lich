@@ -84,8 +84,9 @@ about it from the next `session.clear` or `prompt.submit` failing with
 `not_found`. Evicted transcripts stay on disk and can be resumed again.
 
 `prompt.submit` runs the server Agent with that bag's history and
-`AgentRunOptions.session` (one JSONL file per serve session). Runs are serialized
-so AgentEvent fan-out stays correctly tagged with `session_id`. While a run is
+`AgentRunOptions.session` (one JSONL file per serve session). Runs of one
+session are serialized; different sessions run concurrently. Each run's events
+arrive through its own `on_event` and are tagged with that run's `session_id`. While a run is
 in flight, `prompt.abort` aborts it via `AbortSignal`. The submit result mirrors
 `AgentRunResult` (`reply`, `usage`, `session_path`, `turns_used`, `stopped_reason`).
 
@@ -113,8 +114,12 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
   do not assume `file://` / `app://` behavior here.
 - Frame size capped at ~1 MiB (`maxPayload`).
 - `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
-- Frames are handled per-connection in arrival order: pipelined requests get
-  in-order replies even when earlier requests hit slower filesystem awaits.
+- Frames are queued per session within a connection: frames whose
+  `params.session_id` match are handled in arrival order and get in-order
+  replies, while other sessions, and frames that name no session (such as
+  `health`, `session.list` or `session.create`), do not wait behind them.
+  Replies from different sessions can therefore interleave; match them by
+  JSON-RPC `id`.
   `prompt.abort` is dispatched immediately so it can cancel an in-flight
   `prompt.submit` on the same socket instead of waiting behind that run.
   A submit already accepted on that socket, but still waiting behind another
