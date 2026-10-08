@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { create_agent } from "../src/agent/agent.js";
+import type { Message } from "../src/providers/types.js";
 import { open_session, read_session_messages } from "../src/session/store.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
@@ -361,6 +362,115 @@ describe("read_session_messages resume hygiene", () => {
       { role: "tool", tool_call_id: "c1", name: "read_file", content: "body" },
       { role: "assistant", content: "done" },
     ]);
+  });
+
+  it("closes a missing middle call and does not let an unrelated tool row satisfy it", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "middle");
+    const rows: Array<{ ts: string; message: Message }> = [
+      {
+        ts: "2026-01-01T00:00:00.000Z",
+        message: { role: "user", content: "run three" },
+      },
+      {
+        ts: "2026-01-01T00:00:01.000Z",
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { id: "c1", name: "read_file", args: { path: "a.txt" } },
+            { id: "c2", name: "read_file", args: { path: "b.txt" } },
+            { id: "c3", name: "read_file", args: { path: "c.txt" } },
+          ],
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:02.000Z",
+        message: { role: "tool", tool_call_id: "c1", name: "read_file", content: "denied", is_error: true },
+      },
+      {
+        ts: "2026-01-01T00:00:03.000Z",
+        message: { role: "tool", tool_call_id: "stray", name: "read_file", content: "not-this-call" },
+      },
+      {
+        ts: "2026-01-01T00:00:04.000Z",
+        message: { role: "tool", tool_call_id: "c3", name: "read_file", content: "c-body" },
+      },
+    ];
+    for (const row of rows) {
+      await handle.append({ ts: row.ts, kind: "message", message: row.message });
+    }
+    const messages = await read_session_messages(handle.path);
+    const tool_ids = messages.map((message) => (message.role === "tool" ? message.tool_call_id : ""));
+    expect(tool_ids.filter((id) => id.length > 0)).toEqual(["c1", "stray", "c3", "c2"]);
+    expect(messages[2]).toMatchObject({ tool_call_id: "c1", content: "denied", is_error: true });
+    expect(messages[3]).toMatchObject({ tool_call_id: "stray", content: "not-this-call" });
+    expect(messages[4]).toMatchObject({ tool_call_id: "c3", content: "c-body" });
+    expect(messages[5]).toMatchObject({
+      role: "tool",
+      tool_call_id: "c2",
+      name: "read_file",
+      is_error: true,
+      content: JSON.stringify({ ok: false, output: "", error: "cancelled" }),
+    });
+  });
+
+  it("closes a later assistant's open calls after an earlier exchange and drops trailing users", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "two-groups");
+    const rows: Array<{ ts: string; message: Message }> = [
+      { ts: "2026-01-01T00:00:00.000Z", message: { role: "user", content: "go" } },
+      {
+        ts: "2026-01-01T00:00:01.000Z",
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: "c1", name: "read_file", args: { path: "a.txt" } }],
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:02.000Z",
+        message: { role: "tool", tool_call_id: "c1", name: "read_file", content: "a-body" },
+      },
+      {
+        ts: "2026-01-01T00:00:03.000Z",
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { id: "c2", name: "terminal", args: { command: "echo b" } },
+            { id: "c3", name: "terminal", args: { command: "echo c" } },
+          ],
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:04.000Z",
+        message: { role: "tool", tool_call_id: "c2", name: "terminal", content: "b-body" },
+      },
+      { ts: "2026-01-01T00:00:05.000Z", message: { role: "user", content: "unanswered" } },
+    ];
+    for (const row of rows) {
+      await handle.append({ ts: row.ts, kind: "message", message: row.message });
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "assistant", "tool", "tool"]);
+    expect(messages.map((message) => (message.role === "tool" ? message.tool_call_id : ""))).toEqual([
+      "",
+      "",
+      "c1",
+      "",
+      "c2",
+      "c3",
+    ]);
+    expect(messages[2]).toMatchObject({ tool_call_id: "c1", content: "a-body" });
+    expect(messages[4]).toMatchObject({ tool_call_id: "c2", content: "b-body" });
+    expect(messages[5]).toMatchObject({
+      tool_call_id: "c3",
+      name: "terminal",
+      is_error: true,
+      content: JSON.stringify({ ok: false, output: "", error: "cancelled" }),
+    });
+    expect(JSON.stringify(messages)).not.toContain("unanswered");
   });
 
   it("drops every trailing user message left by repeated failures", async () => {

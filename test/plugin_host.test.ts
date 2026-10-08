@@ -120,10 +120,17 @@ describe("plugin entries in config", () => {
 
   it("loader deep-freezes a copy of object-entry settings", async () => {
     const nested = { level: 1 };
-    const { plugins } = await load_plugins([{ path: "named.plugin.ts", settings: { nested } }], FIXTURES);
-    const settings = plugins[0]?.settings as { nested: { level: number } };
+    const list = [{ id: "a" }];
+    const { plugins } = await load_plugins([{ path: "named.plugin.ts", settings: { nested, list } }], FIXTURES);
+    const settings = plugins[0]?.settings as { nested: { level: number }; list: { id: string }[] };
     expect(Object.isFrozen(settings.nested)).toBe(true);
+    expect(Object.isFrozen(settings.list)).toBe(true);
+    expect(Object.isFrozen(settings.list[0])).toBe(true);
     expect(Object.isFrozen(nested)).toBe(false);
+    expect(Object.isFrozen(list)).toBe(false);
+    expect(() => {
+      settings.list.push({ id: "b" });
+    }).toThrow(TypeError);
   });
 });
 
@@ -273,5 +280,30 @@ describe("before_llm_call", () => {
     const run = await agent.run({ input: "go" });
     expect(run.outcome.final?.content).toBe("done");
     expect(requests[0]?.at(-1)?.role).toBe("user");
+  });
+
+  it("keeps a later note when an earlier hook throws, and drops empty or non-string notes", async () => {
+    const plugins: Plugin[] = [
+      {
+        name: "broken",
+        hooks: {
+          before_llm_call: () => {
+            throw new Error("decision model down");
+          },
+        },
+      },
+      { name: "blank", hooks: { before_llm_call: () => ({ note: "" }) } },
+      { name: "weird", hooks: { before_llm_call: () => ({ note: 4 }) as unknown as { note: string } } },
+      { name: "lane", hooks: { before_llm_call: () => ({ note: "hold the gate" }) } },
+    ];
+    const { fetch_fn, requests } = recording_fetch(() => text("done"));
+    const agent = await make_agent(
+      fetch_fn,
+      plugins.map((plugin) => ({ plugin, entry: plugin.name })),
+    );
+    const run = await agent.run({ input: "go" });
+    expect(run.outcome.final?.content).toBe("done");
+    expect(requests[0]?.at(-1)).toEqual({ role: "system", content: "[plugin lane] hold the gate" });
+    expect(run.messages.some((message) => message.content?.includes("hold the gate") === true)).toBe(false);
   });
 });
