@@ -130,7 +130,7 @@ describe("serve rpc framing", () => {
     expect(null_id.body).toEqual({
       jsonrpc: "2.0",
       id: null,
-      result: { status: "ok", version: "9.9.9" },
+      result: expect.objectContaining({ status: "ok", version: "9.9.9" }),
     });
 
     const null_params = await dispatch(
@@ -140,7 +140,7 @@ describe("serve rpc framing", () => {
     expect(null_params.body).toEqual({
       jsonrpc: "2.0",
       id: 3,
-      result: { status: "ok", version: "9.9.9" },
+      result: expect.objectContaining({ status: "ok", version: "9.9.9" }),
     });
   });
 

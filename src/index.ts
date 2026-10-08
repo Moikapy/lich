@@ -63,6 +63,7 @@ export {
   SERVE_METHODS,
   SERVE_NOTIFICATION_EVENT,
   SERVE_ERROR_CODES,
+  SERVE_PROTOCOL_VERSION,
 } from "./serve/protocol.js";
 export type {
   HealthParams,
@@ -78,6 +79,7 @@ export type {
   PromptAbortResult,
   PromptSubmitParams,
   PromptSubmitResult,
+  ServeCapabilities,
   ServeEventNotification,
   ServeEventParams,
   ServeMethod,
