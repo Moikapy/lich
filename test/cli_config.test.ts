@@ -366,6 +366,54 @@ describe("load_layered_config profiles", () => {
     expect(() => load_layered_config(work, "ghost")).toThrow(/^profile not found: ghost$/);
     expect(() => load_layered_config(work, "../x")).toThrow("invalid profile name");
   });
+
+  it("loads a soul-only profile as the system prompt and lists only the markdown file", () => {
+    const work = make_temp_dir("work");
+    const soul = path.join(profiles(), "bard.md");
+    write_file(soul, "  You are a bard.\n");
+    const layered = load_layered_config(work, "bard");
+    expect(layered?.profile).toBe("bard");
+    expect(layered?.config).toEqual({ system_prompt: "You are a bard." });
+    expect(layered?.sources).toEqual([soul]);
+  });
+
+  it("drops a profile's work_dir and session_dir, and resolves only string plugin paths", () => {
+    const work = make_temp_dir("work");
+    write_file(global_config_path(), JSON.stringify({ theme: "lich" }));
+    write_file(
+      path.join(profiles(), "coder.json"),
+      JSON.stringify({
+        agent_name: "coder",
+        work_dir: "/tmp/elsewhere",
+        session_dir: "/tmp/sessions",
+        plugins: [{ path: "plug.mjs", settings: { x: 1 } }, 12, { path: 3 }, null],
+      }),
+    );
+    const layered = load_layered_config(work, "coder");
+    expect(layered?.config).toEqual({
+      theme: "lich",
+      agent_name: "coder",
+      plugins: [{ path: path.join(profiles(), "plug.mjs"), settings: { x: 1 } }, 12, { path: 3 }, null],
+    });
+  });
+
+  it("skips empty and non-string profile selectors, and refuses a blank-padded name", () => {
+    const work = make_temp_dir("work");
+    write_file(path.join(profiles(), "kept.json"), JSON.stringify({ agent_name: "kept" }));
+    write_file(global_config_path(), JSON.stringify({ profile: "kept" }));
+    write_file(project_config_path(work), JSON.stringify({ profile: 1 }));
+    process.env.LICH_PROFILE = "";
+    expect(load_layered_config(work)?.config).toEqual({ agent_name: "kept" });
+    process.env.LICH_PROFILE = " ";
+    expect(() => load_layered_config(work)).toThrow('invalid profile name " "');
+  });
+
+  it("refuses a profile JSON array instead of falling through to its soul file", () => {
+    const work = make_temp_dir("work");
+    write_file(path.join(profiles(), "coder.json"), "[]\n");
+    write_file(path.join(profiles(), "coder.md"), "You are a coder.");
+    expect(() => load_layered_config(work, "coder")).toThrow(/^invalid config json:/);
+  });
 });
 
 describe("merge_config_layers", () => {
