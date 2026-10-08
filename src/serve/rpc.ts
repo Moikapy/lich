@@ -10,7 +10,12 @@ import type {
   JsonRpcSuccess,
   ServeMethod,
 } from "./protocol.js";
-import { SERVE_ERROR_CODES, SERVE_METHODS } from "./protocol.js";
+import {
+  SERVE_ERROR_CODES,
+  SERVE_METHODS,
+  SERVE_NOTIFICATION_EVENT,
+  SERVE_PROTOCOL_VERSION,
+} from "./protocol.js";
 import type { ServeEventNotify, ServePromptService } from "./prompts.js";
 import type { ServeSessionStore } from "./sessions.js";
 
@@ -78,7 +83,17 @@ async function dispatch_method(
     if (params !== undefined && is_empty_params(params) !== true) {
       return error_response(id, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params");
     }
-    const result: HealthResult = { status: "ok", version: context.version };
+    const result: HealthResult = {
+      status: "ok",
+      version: context.version,
+      protocol_version: SERVE_PROTOCOL_VERSION,
+      capabilities: {
+        methods: SERVE_METHODS.filter(
+          (name) => context.prompts !== undefined || name.startsWith("prompt.") !== true,
+        ),
+        notifications: [SERVE_NOTIFICATION_EVENT],
+      },
+    };
     return { jsonrpc: "2.0", id: id as JsonRpcId, result };
   }
   if (method === "session.create") {

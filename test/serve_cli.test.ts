@@ -165,7 +165,7 @@ describe("bun src/cli.ts serve boot", () => {
     expect(result).toEqual({
       jsonrpc: "2.0",
       id: 1,
-      result: { status: "ok", version: LICH_VERSION },
+      result: expect.objectContaining({ status: "ok", version: LICH_VERSION, protocol_version: 1 }),
     });
     child.kill("SIGTERM");
     await wait_exit(child);
