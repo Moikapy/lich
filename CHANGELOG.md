@@ -7,6 +7,9 @@
   sessions or session-less frames such as `health` on the same socket. Frames
   for one session keep their order; replies across sessions may interleave,
   so clients match them by JSON-RPC `id` (Ossuary already does).
+  `session.resume` shares the lane of `params.id`, so resuming the transcript
+  a submit is still writing waits until that run finishes instead of forking
+  a mid-run history that drops the in-flight user turn.
 - Gateway (#144): sender allowlists and the gateway toolset are one
   `GatewayPolicy`, built from config at startup (`src/gateway/access.ts`).
   Platform adapters declare `capabilities` (`{ kind: "text", max_reply_chars }`);
