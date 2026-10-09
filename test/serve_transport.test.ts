@@ -460,6 +460,50 @@ describe("serve websocket transport", () => {
       ws.close();
     }
   });
+
+  it("keeps empty, numeric, and null session ids on the session-less lane", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-ws-lane-key"), "sessions");
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    const arrived: number[] = [];
+    ws.on("message", (data) => {
+      const id = (JSON.parse(String(data)) as { id?: unknown }).id;
+      if (typeof id === "number") {
+        arrived.push(id);
+      }
+    });
+    const send_health = (id: number, params: unknown): void => {
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "health", params }));
+    };
+    try {
+      serve_store_spy.arm();
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "session.create", params: { source: "test" } }));
+      await vi.waitFor(() => {
+        expect(serve_store_spy.events).toContain("create_start");
+      });
+      send_health(2, { session_id: "other" });
+      send_health(3, { session_id: "" });
+      send_health(4, { session_id: 0 });
+      send_health(5, { session_id: null });
+      send_health(6, []);
+      await vi.waitFor(() => {
+        expect(arrived).toContain(2);
+      });
+      expect(arrived).toEqual([2]);
+      serve_store_spy.release_gate?.();
+      await vi.waitFor(
+        () => {
+          expect(arrived).toEqual([2, 1, 3, 4, 5, 6]);
+        },
+        { timeout: 5000 },
+      );
+    } finally {
+      serve_store_spy.release_gate?.();
+      ws.close();
+    }
+  });
 });
 
 async function rpc_over_ws(

@@ -1204,6 +1204,118 @@ describe("serve prompt over websocket", () => {
     }
   });
 
+  it("holds later frames on a session until its in-flight submit finishes", async () => {
+    const work_dir = await make_temp_dir("serve-ws-lane-order");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_hang1!: () => void;
+    const hang1 = new Promise<void>((resolve) => {
+      release_hang1 = resolve;
+    });
+    let release_hang2!: () => void;
+    const hang2 = new Promise<void>((resolve) => {
+      release_hang2 = resolve;
+    });
+    let hang1_started!: () => void;
+    const started1 = new Promise<void>((resolve) => {
+      hang1_started = resolve;
+    });
+    let hang2_started!: () => void;
+    const started2 = new Promise<void>((resolve) => {
+      hang2_started = resolve;
+    });
+    let saw_hang2 = false;
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: string }> };
+      const contents = body.messages.map((message) => message.content);
+      if (contents.includes("hang2")) {
+        saw_hang2 = true;
+        hang2_started();
+        await hang2;
+      } else if (contents.includes("hang1")) {
+        hang1_started();
+        await hang1;
+      }
+      return new Response(
+        JSON.stringify({
+          model: "mock-model",
+          choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir, agent, version: "9.9.9" });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create = async (id: number): Promise<string> =>
+        ((await request_rpc(ws, { jsonrpc: "2.0", id, method: "session.create", params: { source: "test" } })).result as {
+          session_id: string;
+        }).session_id;
+      const a = await create(1);
+      const b = await create(2);
+      const order: string[] = [];
+      const first = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "prompt.submit",
+        params: { session_id: a, text: "hang1" },
+      }).then((body) => {
+        order.push("hang1");
+        return body;
+      });
+      await started1;
+      const second = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "prompt.submit",
+        params: { session_id: a, text: "hang2" },
+      }).then((body) => {
+        order.push("hang2");
+        return body;
+      });
+      const cleared_b = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "session.clear",
+        params: { session_id: b },
+      });
+      order.push("clear-b");
+      expect(saw_hang2).toBe(false);
+      expect(cleared_b.result).toEqual({ session_id: b });
+      release_hang1();
+      const [first_body] = await Promise.all([first, started2]);
+      expect(first_body.result).toMatchObject({ session_id: a, stopped_reason: "final" });
+      expect(order).toEqual(["clear-b", "hang1"]);
+      let clear_a_done = false;
+      const clear_a = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "session.clear",
+        params: { session_id: a },
+      }).then((body) => {
+        clear_a_done = true;
+        order.push("clear-a");
+        return body;
+      });
+      const health = await request_rpc(ws, { jsonrpc: "2.0", id: 7, method: "health" });
+      expect(health.result).toMatchObject({ status: "ok", version: "9.9.9" });
+      // Clear was sent before this health frame. A dropped lane would already have replied.
+      expect(clear_a_done).toBe(false);
+      release_hang2();
+      const [second_body, cleared_a] = await Promise.all([second, clear_a]);
+      expect(second_body.result).toMatchObject({ session_id: a, stopped_reason: "final" });
+      expect(cleared_a.result).toEqual({ session_id: a });
+      expect(order).toEqual(["clear-b", "hang1", "hang2", "clear-a"]);
+    } finally {
+      release_hang1();
+      release_hang2();
+      ws.close();
+    }
+  });
+
   it("stop() aborts an in-flight prompt instead of draining the model call", async () => {
     const work_dir = await make_temp_dir("serve-stop-abort");
     const session_dir = path.join(work_dir, "sessions");
