@@ -131,6 +131,29 @@ describe("compress role in the loop", () => {
     const outcome = await run_conversation({ chat, compress_chat, tools: runner, definitions: () => [] }, seed, params);
     expect(outcome.messages.some((message) => message.content?.includes("MAIN SUMMARY") === true)).toBe(true);
   });
+
+  it("does not fall back to the chat chain when the compress call is aborted", async () => {
+    const controller = new AbortController();
+    const chat_roles: string[] = [];
+    let compress_attempts = 0;
+    const chat: ChatFn = async (messages) => {
+      chat_roles.push(is_compress_call(messages) ? "compress" : "turn");
+      return result(is_compress_call(messages) ? "MAIN SUMMARY" : "done");
+    };
+    const compress_chat: ChatFn = async () => {
+      compress_attempts += 1;
+      controller.abort();
+      throw new Error("compress aborted");
+    };
+    const outcome = await run_conversation(
+      { chat, compress_chat, tools: runner, definitions: () => [] },
+      seed,
+      { ...params, signal: controller.signal },
+    );
+    expect(compress_attempts).toBe(1);
+    expect(chat_roles).not.toContain("compress");
+    expect(outcome.messages.some((message) => message.content?.includes("MAIN SUMMARY") === true)).toBe(false);
+  });
 });
 
 describe("Agent model roles", () => {
