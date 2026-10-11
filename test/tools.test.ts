@@ -265,6 +265,15 @@ describe("executor", () => {
     expect(Date.now() - started < 4000).toBe(true);
   });
 
+  it("ignores a non-positive or non-numeric terminal_timeout_ms instead of killing at once", async () => {
+    for (const configured of ["0", "-5", "nope", ""]) {
+      const context: ToolContext = { work_dir: tmp_root, env: { LICH_TERMINAL_TIMEOUT_MS: configured } };
+      const result = await terminal_tool.execute({ command: "sleep 0.2" }, context);
+      expect(result.ok, configured).toBe(true);
+      expect(result.error, configured).toBeUndefined();
+    }
+  });
+
   it("terminal declares a 300000ms executor timeout", () => {
     expect(terminal_tool.timeout_ms).toBe(300000);
   });
