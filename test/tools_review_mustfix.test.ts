@@ -174,6 +174,34 @@ describe("S-1/S-3 grep_files guards", () => {
     expect(dir.output).not.toContain("api_key");
     expect(dir.output).not.toContain("sk-test-secret");
   });
+
+  it("denies grepping .lich/profiles and still searches the rest of .lich", async () => {
+    const work = await make_temp_dir();
+    await mkdir(path.join(work, ".lich", "profiles"), { recursive: true });
+    await mkdir(path.join(work, ".lich", "skills"), { recursive: true });
+    await writeFile(path.join(work, ".lich", "profiles", "coder.md"), "profile-soul-secret\n");
+    await writeFile(path.join(work, ".lich", "skills", "note.md"), "skill-marker\n");
+    const direct = await grep_files_tool.execute(
+      { pattern: "profile-soul-secret", path: ".lich/profiles/coder.md" },
+      { work_dir: work, env: {} },
+    );
+    expect(direct.ok).toBe(false);
+    expect(direct.error).toMatch(/forbidden_path: \.lich\/profiles/);
+    expect(direct.output).not.toContain("profile-soul-secret");
+    const root = await grep_files_tool.execute(
+      { pattern: "profile-soul-secret", path: ".lich/profiles" },
+      { work_dir: work, env: {} },
+    );
+    expect(root.ok).toBe(false);
+    expect(root.error).toMatch(/forbidden_path: \.lich\/profiles/);
+    const walked = await grep_files_tool.execute(
+      { pattern: "profile-soul-secret|skill-marker", path: ".lich" },
+      { work_dir: work, env: {} },
+    );
+    expect(walked.ok).toBe(true);
+    expect(walked.output).toContain("skill-marker");
+    expect(walked.output).not.toContain("profile-soul-secret");
+  });
 });
 
 describe("S-4 terminal env scrub", () => {
