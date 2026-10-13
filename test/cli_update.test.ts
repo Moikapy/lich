@@ -158,6 +158,65 @@ describe("lich update", () => {
     expect(result.stderr).toContain("npx");
     expect(result.calls).toEqual([]);
   });
+
+  it("installs when a prerelease is older than the stable registry version", async () => {
+    const result = await run_update_case("0.4.0-rc.1", { exit_code: 0, stdout: "0.4.0\n", stderr: "" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("lich 0.4.0-rc.1 -> 0.4.0");
+    expect(install_calls(result.calls)).toEqual([["npm", "install", "-g", "@moikapy/lich@latest"]]);
+  });
+
+  it("does not install a prerelease over the same stable version", async () => {
+    const result = await run_update_case("0.4.0", { exit_code: 0, stdout: "0.4.0-rc.2\n", stderr: "" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("lich 0.4.0 is up to date");
+    expect(install_calls(result.calls)).toEqual([]);
+  });
+
+  it("accepts a v prefix and a patch bump", async () => {
+    const result = await run_update_case("v0.4.0", { exit_code: 0, stdout: "0.4.1\n", stderr: "" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("lich v0.4.0 -> 0.4.1");
+    expect(install_calls(result.calls)).toEqual([["npm", "install", "-g", "@moikapy/lich@latest"]]);
+  });
+
+  it("does not install when the registry version is not semver", async () => {
+    const result = await run_update_case("0.4.0", { exit_code: 0, stdout: "latest\n", stderr: "" });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('unexpected version "latest"');
+    expect(install_calls(result.calls)).toEqual([]);
+  });
+
+  it("does not install when the installed version cannot be compared", async () => {
+    const result = await run_update_case("0.4", { exit_code: 0, stdout: "0.4.1\n", stderr: "" });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("could not compare versions (installed 0.4, registry 0.4.1)");
+    expect(install_calls(result.calls)).toEqual([]);
+  });
+
+  it("reports EPERM from the install error code without a permission string", async () => {
+    const result = await run_update_case(
+      "0.4.0",
+      { exit_code: 0, stdout: "0.5.0\n", stderr: "" },
+      "npm",
+      { exit_code: 1, stdout: "", stderr: "npm ERR! code 1", error_code: "EPERM" },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("permission denied");
+    expect(install_calls(result.calls)).toEqual([["npm", "install", "-g", "@moikapy/lich@latest"]]);
+  });
+
+  it("reports a missing npm when the install spawn fails after a successful lookup", async () => {
+    const result = await run_update_case(
+      "0.4.0",
+      { exit_code: 0, stdout: "0.5.0\n", stderr: "" },
+      "npm",
+      { exit_code: 127, stdout: "", stderr: "spawn npm ENOENT", error_code: "ENOENT" },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("npm is not on PATH");
+    expect(install_calls(result.calls)).toEqual([["npm", "install", "-g", "@moikapy/lich@latest"]]);
+  });
 });
 
 describe("detect_install_kind", () => {
