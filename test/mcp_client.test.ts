@@ -452,4 +452,49 @@ describe("mcp tool disablement", () => {
     expect(config.mcp_servers?.loop).toEqual({ enabled: false, url: "http://localhost:9/mcp" });
     expect(Object.isFrozen(config.mcp_servers?.loop)).toBe(true);
   });
+
+  it("rejects mcp env names that are not POSIX identifiers and freezes a valid map", () => {
+    const secret = "super-secret-value";
+    const bad_names = ["FOO-BAR", "1TOKEN", "HAS SPACE", ""];
+    for (const name of bad_names) {
+      let thrown = "";
+      try {
+        parse_agent_config({
+          providers,
+          mcp_servers: { lab: { command: "tool", args: ["--stdio"], env: { [name]: secret } } },
+        });
+      } catch (error) {
+        thrown = error instanceof Error ? error.message : String(error);
+      }
+      expect(thrown).toMatch(/invalid env var name/);
+      expect(thrown).not.toContain(secret);
+    }
+    expect(() =>
+      parse_agent_config({
+        providers,
+        mcp_servers: { lab: { command: "tool", args: ["--stdio"], env: { OK: 1 } } },
+      }),
+    ).toThrow(/Expected string, received number/);
+    expect(() =>
+      parse_agent_config({
+        providers,
+        mcp_servers: { loop: { url: "http://127.0.0.1:9/mcp", env: { PATH: secret } } },
+      }),
+    ).toThrow(/Unrecognized key\(s\) in object: 'env'/);
+
+    const config = parse_agent_config({
+      providers,
+      mcp_servers: {
+        lab: { command: "tool", args: ["--stdio"], env: { LICH_PROJECT: "game", _OK: "1" } },
+      },
+    });
+    const entry = config.mcp_servers?.lab;
+    expect(entry).toEqual({
+      enabled: false,
+      command: "tool",
+      args: ["--stdio"],
+      env: { LICH_PROJECT: "game", _OK: "1" },
+    });
+    expect(entry !== undefined && "env" in entry && Object.isFrozen(entry.env)).toBe(true);
+  });
 });
