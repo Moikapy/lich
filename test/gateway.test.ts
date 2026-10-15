@@ -19,8 +19,10 @@ import { create_discord_adapter } from "../src/gateway/discord.js";
 import { create_twitch_adapter } from "../src/gateway/twitch.js";
 import { logger } from "../src/util/log.js";
 import { assert_bind_allowed, create_webhook_adapter, MAX_WEBHOOK_BODY_BYTES } from "../src/gateway/webhook.js";
-import { format_agent_reply, split_text } from "../src/gateway/format.js";
-import { create_telegram_adapter } from "../src/gateway/telegram.js";
+import { format_agent_reply } from "../src/gateway/format.js";
+import { create_gateway_bus } from "../src/gateway/runner.js";
+import { create_telegram_adapter, split_text, TELEGRAM_CAPABILITIES, TELEGRAM_MAX_MESSAGE_CHARS } from "../src/gateway/telegram.js";
+import { resolve_docs_root } from "../src/tools/builtin/docs_read.js";
 import { parse_irc_line, sanitize_twitch_outbound, TWITCH_MESSAGE_CAP } from "../src/gateway/twitch.js";
 import { note_partial_messages } from "../src/agent/loop.js";
 import { GatewayBus } from "../src/gateway/bus.js";
@@ -455,14 +457,27 @@ describe("gateway bus", () => {
     try {
       const records: RunRecord[] = [];
       const bus = new GatewayBus({
-        config: config_for(work_dir, { allowed_users: { telegram: ["u1"] } }),
+        config: config_for(work_dir, { allowed_users: { telegram: ["u1"], discord: ["u1"] } }),
         agent_factory: () => recording_agent(records),
       });
       await bus.handle("telegram", "t1", "u1", "/start");
       await bus.handle("telegram", "t2", "u1", "/start@lich_bot deep-link");
       await bus.handle("telegram", "t3", "u1", "/started a thing");
       await bus.handle("webhook", "w1", "u1", "/start");
-      expect(records.map((run) => run.input)).toEqual(["hello", "hello", "/started a thing", "/start"]);
+      await bus.handle("telegram", "t4", "u1", "/start@lich_bot");
+      await bus.handle("telegram", "t5", "u1", "/start/foo");
+      await bus.handle("telegram", "t6", "u1", "/start@");
+      await bus.handle("discord", "d1", "u1", "/start");
+      expect(records.map((run) => run.input)).toEqual([
+        "hello",
+        "hello",
+        "/started a thing",
+        "/start",
+        "hello",
+        "/start/foo",
+        "/start@",
+        "/start",
+      ]);
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
@@ -489,6 +504,35 @@ describe("gateway bus", () => {
       const failed = await bus.reply("webhook", "c1", "u1", "again");
       expect(failed?.failed).toBe(true);
       expect(failed?.text.startsWith("agent error: provider down")).toBe(true);
+      expect(failed?.usage).toBeUndefined();
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handle() omits an empty final reply; reply() still returns the empty text", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const bus = new GatewayBus({
+        config: config_for(work_dir),
+        agent_factory: () =>
+          ({
+            run: async (): Promise<AgentRunResult> => ({
+              outcome: {
+                messages: [],
+                final: { role: "assistant", content: "" },
+                result: undefined,
+                turns_used: 1,
+                stopped_reason: "final",
+              },
+              messages: [],
+              usage_total: usage_small,
+              session_path: undefined,
+            }),
+          }) as unknown as Agent,
+      });
+      expect(await bus.handle("webhook", "c1", "u1", "hi")).toBeUndefined();
+      expect(await bus.reply("webhook", "c1", "u1", "hi")).toEqual({ text: "", usage: usage_small });
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
@@ -635,6 +679,108 @@ describe("gateway access", () => {
       const bus = new GatewayBus({ config: config_for(work_dir), policy: deny_all, agent_factory: () => recording_agent(records) });
       expect(await bus.handle("webhook", "c1", "u1", "hello")).toBeUndefined();
       expect(records).toEqual([]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("logs a denial when the policy refuses a public-platform sender", () => {
+    const work_dir = temp_work_dir();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      const policy = create_gateway_policy(config_for(work_dir));
+      expect(policy.allows("twitch", "lobby", "viewer")).toBe(false);
+      expect(warn).toHaveBeenCalledWith("gateway denied twitch chat=lobby user=viewer");
+    } finally {
+      warn.mockRestore();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("gateway agent toolset", () => {
+  function stop_reply(): Response {
+    return new Response(
+      JSON.stringify({
+        model: "mock-model",
+        choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+      { status: 200 },
+    );
+  }
+
+  function tool_names_from(body: string | undefined): string[] {
+    const parsed = JSON.parse(body ?? "{}") as { tools?: Array<{ function: { name: string } }> };
+    return (parsed.tools ?? []).map((tool) => tool.function.name);
+  }
+
+  /** Docs tools register only when a docs root resolves for the gateway agent. */
+  function expected_default_tools(work_dir: string): string[] {
+    const names = [...DEFAULT_GATEWAY_TOOLS_ENABLED];
+    const docs = resolve_docs_root({
+      work_dir,
+      env: {
+        LICH_TERMINAL_TIMEOUT_MS: "60000",
+        LICH_TEST_COMMAND: process.env.LICH_TEST_COMMAND ?? "",
+      },
+    });
+    if (docs === undefined) {
+      return names.filter((name) => name.startsWith("docs_") === false);
+    }
+    return names;
+  }
+
+  it("registers the safe policy toolset when the top-level list is all", async () => {
+    const work_dir = temp_work_dir();
+    const seen: string[][] = [];
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      seen.push(tool_names_from(typeof init?.body === "string" ? init.body : undefined));
+      return stop_reply();
+    };
+    try {
+      const config = parse_agent_config({
+        providers: [{ kind: "openai_compat", name: "main", model: "mock-model", base_url: "http://mock.local/v1", fetch_fn }],
+        work_dir,
+        tools_enabled: "all",
+        log_level: "error",
+      });
+      const { agent, bus } = await create_gateway_bus(config);
+      try {
+        await bus.handle("webhook", "c1", "u1", "hello");
+      } finally {
+        bus.stop();
+        agent.close();
+      }
+      expect([...(seen[0] ?? [])].sort()).toEqual(expected_default_tools(work_dir).sort());
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("opens the full toolset, including git_commit, when gateway.tools_enabled is all", async () => {
+    const work_dir = temp_work_dir();
+    const seen: string[][] = [];
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      seen.push(tool_names_from(typeof init?.body === "string" ? init.body : undefined));
+      return stop_reply();
+    };
+    try {
+      const config = parse_agent_config({
+        providers: [{ kind: "openai_compat", name: "main", model: "mock-model", base_url: "http://mock.local/v1", fetch_fn }],
+        work_dir,
+        tools_enabled: ["read_file"],
+        gateway: { tools_enabled: "all" },
+        log_level: "error",
+      });
+      const { agent, bus } = await create_gateway_bus(config);
+      try {
+        await bus.handle("webhook", "c1", "u1", "hello");
+      } finally {
+        bus.stop();
+        agent.close();
+      }
+      expect(seen[0]).toEqual(expect.arrayContaining(["terminal", "write_file", "git_commit"]));
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
@@ -952,13 +1098,17 @@ describe("gateway format", () => {
 });
 
 describe("telegram splitting", () => {
-  it("splits a 5000-char message into two chunks within the limit", () => {
+  it("splits a 5000-char message into two chunks within the declared cap", () => {
+    const limit = TELEGRAM_MAX_MESSAGE_CHARS;
+    // Telegram Bot API sendMessage limit.
+    expect(limit).toBe(4096);
+    expect(TELEGRAM_CAPABILITIES.max_reply_chars).toBe(limit);
     const long = "word ".repeat(1000).trimEnd();
-    expect(long.length).toBeGreaterThan(4096);
-    const chunks = split_text(long, 4096);
+    expect(long.length).toBeGreaterThan(limit);
+    const chunks = split_text(long, limit);
     expect(chunks.length).toBe(2);
     for (const chunk of chunks) {
-      expect(chunk.length).toBeLessThanOrEqual(4096);
+      expect(chunk.length).toBeLessThanOrEqual(limit);
       expect(chunk.length).toBeGreaterThan(0);
     }
     expect(chunks.join(" ")).toBe(long);
@@ -966,13 +1116,21 @@ describe("telegram splitting", () => {
 
   it("prefers newline boundaries when available", () => {
     const text = `${"a".repeat(3000)}\n${"b".repeat(3000)}`;
-    const chunks = split_text(text, 4096);
+    const chunks = split_text(text, TELEGRAM_MAX_MESSAGE_CHARS);
     expect(chunks.length).toBe(2);
     expect(chunks[0]?.includes("\n")).toBe(false);
   });
 
+  it("hard-cuts a token that has no whitespace inside the declared cap", () => {
+    const limit = TELEGRAM_MAX_MESSAGE_CHARS;
+    const token = "x".repeat(limit + 25);
+    const chunks = split_text(token, limit);
+    expect(chunks.map((chunk) => chunk.length)).toEqual([limit, 25]);
+    expect(chunks.join("")).toBe(token);
+  });
+
   it("keeps short messages intact as a single chunk", () => {
-    expect(split_text("short", 4096)).toEqual(["short"]);
+    expect(split_text("short", TELEGRAM_MAX_MESSAGE_CHARS)).toEqual(["short"]);
   });
 
   it("degrades to an idle adapter when the token is missing", () => {
