@@ -359,6 +359,7 @@ describe("http_request", () => {
       url: "https://api.example.com/ping",
       headers: ["x-token", "abc"],
     });
+    expect(fetch_mock).toHaveBeenCalledTimes(1);
     const second = fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined;
     expect([...new Headers(second?.[1]?.headers).keys()]).toEqual([]);
   });
