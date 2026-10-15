@@ -26,6 +26,29 @@ describe("open_session", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("keeps a hostile label inside the session directory and caps the slug", async () => {
+    await mkdir(TMP_BASE, { recursive: true });
+    const dir = await mkdtemp(path.join(TMP_BASE, "session-label-"));
+    try {
+      const hostile = await open_session(dir, "../secret/../../etc/passwd");
+      expect(path.dirname(hostile.path)).toBe(dir);
+      expect(hostile.id.includes("..")).toBe(false);
+      expect(hostile.id.includes("/")).toBe(false);
+      expect(hostile.id.endsWith("-secret-etc-passwd")).toBe(true);
+      await hostile.append({ ts: "2026-01-01T00:00:00.000Z", kind: "meta", meta: { ok: true } });
+      expect((await stat(hostile.path)).isFile()).toBe(true);
+
+      const punctuation = await open_session(dir, "!!!");
+      expect(punctuation.id).toMatch(/-\d+$/);
+      expect(punctuation.path.startsWith(`${dir}${path.sep}`)).toBe(true);
+
+      const capped = await open_session(dir, "a".repeat(80));
+      expect(capped.id.endsWith(`-${"a".repeat(40)}`)).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("read_session_messages", () => {
@@ -47,6 +70,42 @@ describe("read_session_messages", () => {
       const empty = path.join(dir, "empty.jsonl");
       await writeFile(empty, "", "utf8");
       expect(await read_session_messages(empty)).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops roles outside the transcript allowlist and keeps the surrounding turns", async () => {
+    await mkdir(TMP_BASE, { recursive: true });
+    const dir = await mkdtemp(path.join(TMP_BASE, "session-roles-"));
+    try {
+      const file_path = path.join(dir, "mixed.jsonl");
+      const lines = [
+        { kind: "message", message: { role: "system", content: "keep-system" } },
+        { kind: "message", message: { role: "user", content: "keep-user" } },
+        { kind: "message", message: { role: "function", content: "injected" } },
+        { kind: "message", message: { role: "User", content: "case" } },
+        { kind: "message", message: "nope" },
+        { kind: "message", message: { content: "missing-role" } },
+        {
+          kind: "message",
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [{ id: "c1", name: "read_file", args: { path: "a.txt" } }],
+          },
+        },
+        { kind: "message", message: { role: "tool", tool_call_id: "c1", name: "read_file", content: "kept-tool" } },
+        { kind: "message", message: { role: "assistant", content: "keep-assistant" } },
+      ];
+      const body = lines.map((line) => JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", ...line })).join("\n");
+      await writeFile(file_path, `${body}\nnot-json\n\n`, "utf8");
+      const messages = await read_session_messages(file_path);
+      expect(messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "tool", "assistant"]);
+      expect(JSON.stringify(messages)).not.toContain("injected");
+      expect(JSON.stringify(messages)).not.toContain("case");
+      expect(JSON.stringify(messages)).not.toContain("missing-role");
+      expect(messages[3]).toMatchObject({ role: "tool", tool_call_id: "c1", content: "kept-tool" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
