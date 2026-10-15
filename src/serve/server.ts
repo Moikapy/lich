@@ -233,11 +233,14 @@ function attach_client(
   prompts: ServePromptService | undefined,
   inflight: Set<Promise<void>>,
 ): void {
-  // Serialize frames per connection: pipelined requests get in-order replies,
-  // and the tail catch keeps any rejection from becoming an unhandled one.
-  // prompt.abort is not on that tail. It must run while prompt.submit is still
+  // Serialize frames per session on this connection: frames for one session_id
+  // get in-order replies, while different sessions (and session-less frames
+  // such as health or session.list) no longer wait behind each other's runs.
+  // session.resume is keyed by params.id so it waits on the transcript it reads.
+  // Replies across lanes can interleave; clients match them by JSON-RPC id.
+  // prompt.abort is on no lane. It must run while prompt.submit is still
   // awaiting the model; waiting would deadlock a hung run with its own cancel.
-  let tail: Promise<void> = Promise.resolve();
+  const tails = new Map<string, Promise<void>>();
   const track = (chain: Promise<void>): void => {
     inflight.add(chain);
     void chain.finally(() => {
@@ -256,10 +259,37 @@ function attach_client(
     // Arm the controller before this frame waits on `tail`, so prompt.abort
     // (which skips the tail) can cancel a submit that has not started yet.
     const prepared = arm_queued_submit(data, prompts);
-    const chain = tail.then(() => run_frame(data, prepared));
-    tail = chain;
+    const lane = frame_lane(data);
+    const chain = (tails.get(lane) ?? Promise.resolve()).then(() => run_frame(data, prepared));
+    tails.set(lane, chain);
     track(chain);
+    // Drop an idle lane so the map does not grow with every session ever used.
+    void chain.finally(() => {
+      if (tails.get(lane) === chain) {
+        tails.delete(lane);
+      }
+    });
   });
+}
+
+/**
+ * Lane for a frame. `prompt.submit` / `session.clear` use `params.session_id`.
+ * `session.resume` uses `params.id` (the transcript being read) so a resume of
+ * the file an in-flight submit is appending waits until that run finishes.
+ * Other frames share "".
+ */
+function frame_lane(data: RawData): string {
+  const body = parse_frame_object(data);
+  const params = body?.params;
+  if (typeof params !== "object" || params === null || Array.isArray(params)) {
+    return "";
+  }
+  const record = params as { session_id?: unknown; id?: unknown };
+  if (body?.method === "session.resume" && typeof record.id === "string" && record.id.length > 0) {
+    return `session:${record.id}`;
+  }
+  const session_id = record.session_id;
+  return typeof session_id === "string" && session_id.length > 0 ? `session:${session_id}` : "";
 }
 
 interface PreparedSubmit {

@@ -7,9 +7,10 @@ import { sleep } from "../util/sleep.js";
 import { logger } from "../util/log.js";
 import { platform_token_env, read_platform_token } from "./token_env.js";
 import type { AdapterParams, PlatformAdapter } from "./types.js";
-import { create_idle_adapter, run_inbound_message } from "./types.js";
+import { create_idle_adapter, run_inbound_message, type AdapterCapabilities } from "./types.js";
 
 export const TELEGRAM_MAX_MESSAGE_CHARS = 4096;
+export const TELEGRAM_CAPABILITIES: AdapterCapabilities = { kind: "text", max_reply_chars: TELEGRAM_MAX_MESSAGE_CHARS };
 
 interface TelegramUpdate {
   update_id?: number;
@@ -25,11 +26,12 @@ export const TELEGRAM_BACKOFF_MS = [2000, 4000, 8000, 16000, 30000] as const;
 export function create_telegram_adapter(params: AdapterParams): PlatformAdapter {
   const token = read_platform_token(params.config, "telegram");
   if (token === undefined) {
-    return create_idle_adapter("telegram", `${platform_token_env(params.config, "telegram")} not set`);
+    return create_idle_adapter("telegram", `${platform_token_env(params.config, "telegram")} not set`, TELEGRAM_CAPABILITIES);
   }
   let running = false;
   return {
     name: "telegram",
+    capabilities: TELEGRAM_CAPABILITIES,
     start: async () => {
       running = true;
       void poll_loop(params, token, () => running);

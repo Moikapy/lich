@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { create_agent } from "../src/agent/agent.js";
-import { open_session, read_session_messages } from "../src/session/store.js";
+import { open_session, read_session_messages, type SessionRecord } from "../src/session/store.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const temp_dirs: string[] = [];
@@ -381,5 +381,45 @@ describe("read_session_messages resume hygiene", () => {
     }
     const messages = await read_session_messages(handle.path);
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("drops a cancelled user seed once a later turn is appended", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "cancelled-seed");
+    const lines: SessionRecord[] = [
+      { ts: "2026-01-01T00:00:00.000Z", kind: "message", message: { role: "user", content: "do-not-replay" } },
+      { ts: "2026-01-01T00:00:01.000Z", kind: "meta", meta: { event: "run_end", stopped_reason: "aborted" } },
+      { ts: "2026-01-01T00:00:02.000Z", kind: "meta", meta: { event: "run_start", input_chars: 5 } },
+      { ts: "2026-01-01T00:00:03.000Z", kind: "message", message: { role: "user", content: "after" } },
+      { ts: "2026-01-01T00:00:04.000Z", kind: "message", message: { role: "assistant", content: "ok" } },
+    ];
+    for (const line of lines) {
+      await handle.append(line);
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      { role: "user", content: "after" },
+      { role: "assistant", content: "ok" },
+    ]);
+  });
+
+  it("keeps adjacent user lines that have no meta between them", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "summary-users");
+    const contents = ["[context summary of earlier turns]\nnotes", "the real question", "answer"];
+    const roles = ["user", "user", "assistant"] as const;
+    for (const [index, content] of contents.entries()) {
+      await handle.append({
+        ts: `2026-01-01T00:00:0${index}.000Z`,
+        kind: "message",
+        message: { role: roles[index] ?? "user", content },
+      });
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      { role: "user", content: contents[0] },
+      { role: "user", content: contents[1] },
+      { role: "assistant", content: contents[2] },
+    ]);
   });
 });

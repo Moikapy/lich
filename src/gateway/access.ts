@@ -1,5 +1,7 @@
 /**
- * Gateway access: public-platform allowlists and the safe default toolset.
+ * Gateway access: public-platform allowlists and the safe default toolset,
+ * gathered into one GatewayPolicy built at startup (decision 0001: Profiles
+ * and Policy evolve from this file).
  */
 import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
@@ -40,6 +42,21 @@ export function is_gateway_sender_allowed(
   const user_ok = users.length === 0 || users.includes(user_id);
   const chat_ok = chats.length === 0 || chats.includes(chat_id);
   return user_ok && chat_ok;
+}
+
+/** What the gateway lets in and what its agent may use; built once from config. */
+export interface GatewayPolicy {
+  /** Tools the shared gateway agent registers. */
+  readonly tools_enabled: "all" | readonly string[];
+  /** True when the sender may talk to the agent; logs a denial. */
+  allows(platform: string, chat_id: string, user_id: string): boolean;
+}
+
+export function create_gateway_policy(config: AgentConfig): GatewayPolicy {
+  return {
+    tools_enabled: gateway_tools_enabled(config),
+    allows: (platform, chat_id, user_id) => check_gateway_sender(config, platform, chat_id, user_id),
+  };
 }
 
 /** Logs and returns false when the sender is not on the allowlist. */

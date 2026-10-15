@@ -289,8 +289,88 @@ describe("serve prompt rpc", () => {
     const abort_response = await rpc(context, "prompt.abort", { session_id: created.session_id }, 3);
     expect(abort_response.result).toEqual({ session_id: created.session_id, aborted: true });
     const submit = await submit_promise;
-    const result = submit.result as { stopped_reason: string };
+    const result = submit.result as { stopped_reason: string; reply?: string };
     expect(result.stopped_reason).toBe("aborted");
+    expect(result.reply).toBeUndefined();
+  });
+
+  it("does not replay a cancelled prompt or the previous reply", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-abort-replay");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    const bodies: string[] = [];
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_calls += 1;
+      bodies.push(String(init?.body ?? ""));
+      if (fetch_calls === 2) {
+        fetch_started();
+        const signal = init?.signal;
+        await new Promise<void>((_resolve, reject) => {
+          const fail = (): void => {
+            const error = new Error("fetch aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (signal?.aborted === true) {
+            fail();
+            return;
+          }
+          signal?.addEventListener("abort", fail, { once: true });
+        });
+        throw new Error("unreachable");
+      }
+      const content = fetch_calls === 1 ? "earlier" : "next";
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const first = (await rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "first" },
+      2,
+    )).result as { reply: string };
+    expect(first.reply).toBe("earlier");
+
+    const submit_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "do-not-replay" },
+      3,
+    );
+    await started;
+    await rpc(context, "prompt.abort", { session_id: created.session_id }, 4);
+    const aborted = (await submit_promise).result as { stopped_reason: string; reply?: string };
+    expect(aborted.stopped_reason).toBe("aborted");
+    expect(aborted.reply).toBeUndefined();
+    const history = sessions.get(created.session_id)?.history ?? [];
+    expect(history.some((message) => message.role === "user" && message.content === "do-not-replay")).toBe(false);
+    expect(history.some((message) => message.role === "assistant" && message.content === "earlier")).toBe(true);
+
+    const third = (await rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "after" },
+      5,
+    )).result as { reply: string };
+    expect(third.reply).toBe("next");
+    const next_body = bodies.at(-1) ?? "";
+    expect(next_body).toContain("after");
+    expect(next_body).toContain("earlier");
+    expect(next_body).not.toContain("do-not-replay");
   });
 
   it("returns an aborted result for a prompt aborted while queued", async () => {
@@ -1104,11 +1184,12 @@ describe("serve prompt over websocket", () => {
         return body;
       });
       await started;
+      // Same session_id, so this frame shares the submit's lane and must wait behind it.
       const health_promise = request_rpc(ws, {
         jsonrpc: "2.0",
         id: 4,
         method: "health",
-        params: { note: "prompt.abort" },
+        params: { session_id, note: "prompt.abort" },
       }).then((body) => {
         order.push(4);
         return body;
@@ -1138,6 +1219,143 @@ describe("serve prompt over websocket", () => {
       expect(health.error).toMatchObject({ code: -32602 });
       expect(order).toEqual([3, 2, 4]);
     } finally {
+      ws.close();
+    }
+  });
+
+  it("runs different sessions on one connection concurrently, and session-less frames do not wait", async () => {
+    const work_dir = await make_temp_dir("serve-ws-lanes");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_hang!: () => void;
+    const hang = new Promise<void>((resolve) => {
+      release_hang = resolve;
+    });
+    let hang_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      hang_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: string }> };
+      if (body.messages.some((message) => message.content === "hang")) {
+        hang_started();
+        await hang;
+      }
+      return new Response(
+        JSON.stringify({
+          model: "mock-model",
+          choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir, agent, version: "9.9.9" });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create = async (id: number): Promise<string> =>
+        ((await request_rpc(ws, { jsonrpc: "2.0", id, method: "session.create", params: { source: "test" } })).result as {
+          session_id: string;
+        }).session_id;
+      const a = await create(1);
+      const b = await create(2);
+      const order: string[] = [];
+      const slow = request_rpc(ws, { jsonrpc: "2.0", id: 3, method: "prompt.submit", params: { session_id: a, text: "hang" } }).then(
+        (body) => {
+          order.push("a");
+          return body;
+        },
+      );
+      await started;
+      const fast = await request_rpc(ws, { jsonrpc: "2.0", id: 4, method: "prompt.submit", params: { session_id: b, text: "hi" } });
+      order.push("b");
+      const health = await request_rpc(ws, { jsonrpc: "2.0", id: 5, method: "health" });
+      order.push("health");
+      expect(fast.result).toMatchObject({ session_id: b, stopped_reason: "final" });
+      expect(health.result).toBeDefined();
+      release_hang();
+      expect((await slow).result).toMatchObject({ session_id: a, stopped_reason: "final" });
+      expect(order).toEqual(["b", "health", "a"]);
+    } finally {
+      release_hang();
+      ws.close();
+    }
+  });
+
+  it("waits to resume the transcript an in-flight submit is writing", async () => {
+    const work_dir = await make_temp_dir("serve-ws-resume-lane");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_hang!: () => void;
+    const hang = new Promise<void>((resolve) => {
+      release_hang = resolve;
+    });
+    let hang_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      hang_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: string }> };
+      if (body.messages.some((message) => message.content === "hang")) {
+        hang_started();
+        await hang;
+      }
+      return new Response(
+        JSON.stringify({
+          model: "mock-model",
+          choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir, agent, version: "9.9.9" });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create = async (id: number): Promise<string> =>
+        ((await request_rpc(ws, { jsonrpc: "2.0", id, method: "session.create", params: { source: "test" } })).result as {
+          session_id: string;
+        }).session_id;
+      const live = await create(1);
+      const other = await create(2);
+      const slow = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "prompt.submit",
+        params: { session_id: live, text: "hang" },
+      });
+      await started;
+      let resumed_live = false;
+      const resume_live = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "session.resume",
+        params: { id: live },
+      }).then((body) => {
+        resumed_live = true;
+        return body;
+      });
+      const resume_other = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "session.resume",
+        params: { id: other },
+      });
+      expect(resume_other.result).toMatchObject({ resumed_id: other, message_count: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(resumed_live).toBe(false);
+      release_hang();
+      const resumed = await resume_live;
+      expect((await slow).result).toMatchObject({ session_id: live, stopped_reason: "final" });
+      const result = resumed.result as { message_count: number; resumed_id: string };
+      expect(result.resumed_id).toBe(live);
+      expect(result.message_count).toBeGreaterThanOrEqual(2);
+    } finally {
+      release_hang();
       ws.close();
     }
   });
