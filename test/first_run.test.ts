@@ -522,6 +522,10 @@ describe("lich init and bare lich", () => {
       "legacy config at ~/.config/lich/config.json is still in use",
     );
     expect(existsSync(global_config_path())).toBe(false);
+    await expect(run_cli(["init", "--work-dir", home, "--model", "starter"])).rejects.toThrow(
+      "legacy config at ~/.config/lich/config.json is still in use",
+    );
+    expect(existsSync(global_config_path())).toBe(false);
     expect(readFileSync(legacy, "utf8")).toBe(body);
   });
 
