@@ -216,6 +216,8 @@ describe("discord inbound", () => {
     const emit = (data: Record<string, unknown>): void => {
       socket.emit(JSON.stringify({ t: "MESSAGE_CREATE", d: data }));
     };
+    // A bare mention strips to "" and must not start an agent turn.
+    emit({ channel_id: "c1", content: "<@999>", author: { id: "u0", bot: false } });
     emit({ channel_id: "c1", content: "<@999> hello", author: { id: "u1", bot: false } });
     emit({ channel_id: "c1", content: "hi <@999>", author: { id: "u2", bot: false } });
     emit({ channel_id: "c1", content: "from bot", author: { id: "b1", bot: true } });

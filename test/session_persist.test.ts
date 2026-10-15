@@ -364,7 +364,7 @@ describe("read_session_messages resume hygiene", () => {
     ]);
   });
 
-  it("closes a missing middle call and does not let an unrelated tool row satisfy it", async () => {
+  it("closes a missing middle call and drops a tool row that answers no call", async () => {
     const work_dir = await make_temp_dir();
     const handle = await open_session(path.join(work_dir, "sessions"), "middle");
     const rows: Array<{ ts: string; message: Message }> = [
@@ -401,8 +401,9 @@ describe("read_session_messages resume hygiene", () => {
       await handle.append({ ts: row.ts, kind: "message", message: row.message });
     }
     const messages = await read_session_messages(handle.path);
-    // Only how each real call is answered is pinned here; whether an orphan
-    // tool row (the stray id) should survive resume is a separate question.
+    // Providers reject a tool result whose id matches no call, so "stray" is gone.
+    const tool_ids = messages.map((message) => (message.role === "tool" ? message.tool_call_id : ""));
+    expect(tool_ids.filter((id) => id.length > 0)).toEqual(["c1", "c3", "c2"]);
     const result_for = (id: string): Message | undefined =>
       messages.find((message) => message.role === "tool" && message.tool_call_id === id);
     expect(result_for("c1")).toMatchObject({ content: "denied", is_error: true });
@@ -414,6 +415,23 @@ describe("read_session_messages resume hygiene", () => {
       is_error: true,
       content: JSON.stringify({ ok: false, output: "", error: "cancelled" }),
     });
+  });
+
+  it("drops a tool row that follows no assistant call", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "orphan");
+    const rows: Message[] = [
+      { role: "user", content: "hi" },
+      { role: "tool", tool_call_id: "ghost", name: "read_file", content: "orphan" },
+      { role: "assistant", content: "hello" },
+    ];
+    for (const message of rows) {
+      await handle.append({ ts: "2026-01-01T00:00:00.000Z", kind: "message", message });
+    }
+    expect(await read_session_messages(handle.path)).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ]);
   });
 
   it("closes a later assistant's open calls after an earlier exchange and drops trailing users", async () => {

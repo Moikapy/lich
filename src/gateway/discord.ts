@@ -205,7 +205,8 @@ function identify_body(token: string): Record<string, unknown> {
 async function on_message_create(params: AdapterParams, data: Record<string, unknown> | undefined): Promise<void> {
   try {
     const message = normalize_message(data);
-    if (message === undefined) {
+    // A bare bot mention strips to "", which would start a turn with no input.
+    if (message === undefined || message.content.length === 0) {
       return;
     }
     const reply = await run_inbound_message(
