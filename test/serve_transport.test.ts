@@ -9,6 +9,8 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import WebSocket from "ws";
 import { LICH_VERSION } from "../src/index.js";
+import type { ServePromptService } from "../src/serve/prompts.js";
+import { SERVE_METHODS, SERVE_PROTOCOL_VERSION, type HealthResult } from "../src/serve/protocol.js";
 import { handle_serve_rpc_message } from "../src/serve/rpc.js";
 import { create_serve_server, type ServeServer } from "../src/serve/server.js";
 import { create_serve_session_store } from "../src/serve/sessions.js";
@@ -91,7 +93,7 @@ afterEach(async () => {
 });
 
 describe("serve rpc health", () => {
-  it("returns status and version for health", async () => {
+  it("returns status, versions and capabilities for health", async () => {
     const sessions = create_serve_session_store(path.join(await make_temp_dir("serve-health"), "s"));
     const raw = await handle_serve_rpc_message(
       JSON.stringify({ jsonrpc: "2.0", id: 1, method: "health", params: {} }),
@@ -100,8 +102,26 @@ describe("serve rpc health", () => {
     expect(JSON.parse(raw ?? "")).toEqual({
       jsonrpc: "2.0",
       id: 1,
-      result: { status: "ok", version: "9.9.9" },
+      result: {
+        status: "ok",
+        version: "9.9.9",
+        protocol_version: SERVE_PROTOCOL_VERSION,
+        capabilities: {
+          methods: ["health", "session.create", "session.list", "session.clear", "session.resume"],
+          notifications: ["event"],
+        },
+      },
     });
+  });
+
+  it("lists prompt methods in health only when an agent is configured", async () => {
+    const sessions = create_serve_session_store(path.join(await make_temp_dir("serve-health-agent"), "s"));
+    const raw = await handle_serve_rpc_message(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "health", params: {} }),
+      { version: "9.9.9", sessions, prompts: {} as ServePromptService },
+    );
+    const body = JSON.parse(raw ?? "") as { result: HealthResult };
+    expect(body.result.capabilities.methods).toEqual([...SERVE_METHODS]);
   });
 
   it("returns agent-not-configured for prompt.submit without an agent", async () => {
@@ -146,7 +166,7 @@ describe("serve websocket transport", () => {
     expect(result).toEqual({
       jsonrpc: "2.0",
       id: 1,
-      result: { status: "ok", version: LICH_VERSION },
+      result: expect.objectContaining({ status: "ok", version: LICH_VERSION }),
     });
   });
 

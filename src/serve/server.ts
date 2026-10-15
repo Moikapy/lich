@@ -236,6 +236,7 @@ function attach_client(
   // Serialize frames per session on this connection: frames for one session_id
   // get in-order replies, while different sessions (and session-less frames
   // such as health or session.list) no longer wait behind each other's runs.
+  // session.resume is keyed by params.id so it waits on the transcript it reads.
   // Replies across lanes can interleave; clients match them by JSON-RPC id.
   // prompt.abort is on no lane. It must run while prompt.submit is still
   // awaiting the model; waiting would deadlock a hung run with its own cancel.
@@ -271,13 +272,23 @@ function attach_client(
   });
 }
 
-/** Lane for a frame: its params.session_id, or "" for frames that name no session. */
+/**
+ * Lane for a frame. `prompt.submit` / `session.clear` use `params.session_id`.
+ * `session.resume` uses `params.id` (the transcript being read) so a resume of
+ * the file an in-flight submit is appending waits until that run finishes.
+ * Other frames share "".
+ */
 function frame_lane(data: RawData): string {
-  const params = parse_frame_object(data)?.params;
+  const body = parse_frame_object(data);
+  const params = body?.params;
   if (typeof params !== "object" || params === null || Array.isArray(params)) {
     return "";
   }
-  const session_id = (params as { session_id?: unknown }).session_id;
+  const record = params as { session_id?: unknown; id?: unknown };
+  if (body?.method === "session.resume" && typeof record.id === "string" && record.id.length > 0) {
+    return `session:${record.id}`;
+  }
+  const session_id = record.session_id;
   return typeof session_id === "string" && session_id.length > 0 ? `session:${session_id}` : "";
 }
 
