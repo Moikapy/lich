@@ -7,6 +7,9 @@
   a user line that a later turn followed after the run was aborted or failed
   before any assistant reply. Adjacent user lines with nothing between them
   (a compression summary and the next question) stay.
+- Gateway: a failed turn no longer drops a conversation's history when a new
+  chat evicted it while that turn was still in flight. The history loaded for
+  the run is written back.
 - `lich serve` `health` also returns `protocol_version` (`1`, bumped only on
   breaking changes) and `capabilities: { methods, notifications }` (#144).
   `methods` lists `prompt.*` only when the server has an Agent.
@@ -15,6 +18,9 @@
   sessions or session-less frames such as `health` on the same socket. Frames
   for one session keep their order; replies across sessions may interleave,
   so clients match them by JSON-RPC `id` (Ossuary already does).
+  `session.resume` shares the lane of `params.id`, so resuming the transcript
+  a submit is still writing waits until that run finishes instead of forking
+  a mid-run history that drops the in-flight user turn.
 - Gateway (#144): sender allowlists and the gateway toolset are one
   `GatewayPolicy`, built from config at startup (`src/gateway/access.ts`).
   Platform adapters declare `capabilities` (`{ kind: "text", max_reply_chars }`);
