@@ -308,12 +308,14 @@ export function starter_config_object(): Record<string, unknown> {
 /**
  * The only writer of `.lich/config.json`. Create leaves an existing file
  * untouched. `update` replaces that file with the object the caller built,
- * so a caller must keep unrelated keys itself.
+ * so a caller must keep unrelated keys itself. `mode` sets the permission
+ * bits when `update` creates the file; an existing file keeps its own.
  */
 export function write_lich_config(
   work_dir: string,
   config: Record<string, unknown>,
   update = false,
+  mode?: number,
 ): LichConfigWriteResult {
   ensure_lich_config_dir(work_dir);
   const file = project_config_path(work_dir);
@@ -322,7 +324,7 @@ export function write_lich_config(
   }
   const text = `${JSON.stringify(config, null, 2)}\n`;
   if (update === true) {
-    replace_file(file, text);
+    replace_file(file, text, mode);
     return { path: file, written: true, message: `updated ${file}` };
   }
   try {
@@ -338,11 +340,12 @@ export function write_lich_config(
 
 /**
  * Write a sibling temp file, then rename it over `file`, so readers never see
- * a partial config. The temp file takes the existing file's mode.
+ * a partial config. The temp file takes the existing file's mode, or
+ * `new_mode` when there is no file yet.
  */
-function replace_file(file: string, text: string): void {
+function replace_file(file: string, text: string, new_mode?: number): void {
   const temp = `${file}.${process.pid}.tmp`;
-  const mode = statSync(file, { throwIfNoEntry: false })?.mode;
+  const mode = statSync(file, { throwIfNoEntry: false })?.mode ?? new_mode;
   try {
     // Create it with the old mode so a 0600 config is never briefly wider.
     writeFileSync(temp, text, { encoding: "utf8", mode: mode === undefined ? undefined : mode & 0o777 });

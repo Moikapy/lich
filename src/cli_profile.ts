@@ -3,7 +3,7 @@
  * between the global ~/.lich/config.json and the project config; `<name>.md`
  * next to it, when present, becomes its system prompt.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import {
@@ -118,9 +118,9 @@ function use_profile(name: string): void {
   }
   // A new global file hides the legacy one, so copy that file's settings first.
   const seed = global_config_seed();
-  const result = write_lich_config(homedir(), { ...seed.config, profile: name }, true);
-  if (seed.from_legacy === true && seed.mode !== undefined && result.written === true) {
-    chmodSync(result.path, seed.mode);
+  // Create it with the legacy file's mode so a 0600 file with keys is never briefly wider.
+  const result = write_lich_config(homedir(), { ...seed.config, profile: name }, true, seed.mode);
+  if (seed.from_legacy === true && result.written === true) {
     process.stderr.write("lich: copied the legacy config into ~/.lich/config.json so it stays in effect\n");
   }
   write_line(`default profile: ${name} (in ${global_config_path()})`);

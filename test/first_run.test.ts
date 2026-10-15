@@ -17,9 +17,10 @@ vi.mock("../src/cli_config.js", async (import_original) => {
   const actual = await import_original<typeof import("../src/cli_config.js")>();
   return {
     ...actual,
-    write_lich_config: (work_dir: string, config: Record<string, unknown>, update?: boolean) => {
+    write_lich_config: (...args: Parameters<typeof actual.write_lich_config>) => {
+      const [work_dir, config] = args;
       writes.calls.push({ work_dir, config });
-      return actual.write_lich_config(work_dir, config, update);
+      return actual.write_lich_config(...args);
     },
   };
 });

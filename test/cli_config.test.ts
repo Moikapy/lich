@@ -407,6 +407,12 @@ describe("write_lich_config update", () => {
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(readdirSync(path.dirname(file))).toEqual(["config.json"]);
   });
+
+  it("creates a missing file with the given mode", () => {
+    const dir = make_temp_dir("atomic-new-mode");
+    write_lich_config(dir, { version: 1 }, true, 0o600);
+    expect(statSync(project_config_path(dir)).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe("integration shape", () => {
