@@ -81,6 +81,7 @@ describe("read_session_messages", () => {
     try {
       const file_path = path.join(dir, "mixed.jsonl");
       const lines = [
+        { kind: "message", message: { role: "system", content: "keep-system" } },
         { kind: "message", message: { role: "user", content: "keep-user" } },
         { kind: "message", message: { role: "function", content: "injected" } },
         { kind: "message", message: { role: "User", content: "case" } },
@@ -100,11 +101,11 @@ describe("read_session_messages", () => {
       const body = lines.map((line) => JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", ...line })).join("\n");
       await writeFile(file_path, `${body}\nnot-json\n\n`, "utf8");
       const messages = await read_session_messages(file_path);
-      expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "assistant"]);
+      expect(messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "tool", "assistant"]);
       expect(JSON.stringify(messages)).not.toContain("injected");
       expect(JSON.stringify(messages)).not.toContain("case");
       expect(JSON.stringify(messages)).not.toContain("missing-role");
-      expect(messages[2]).toMatchObject({ role: "tool", tool_call_id: "c1", content: "kept-tool" });
+      expect(messages[3]).toMatchObject({ role: "tool", tool_call_id: "c1", content: "kept-tool" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
