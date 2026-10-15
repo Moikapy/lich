@@ -302,6 +302,23 @@ describe("mcp handshake", () => {
     expect(plan_stdio("my_redot", redot, ["--script", "evil.gd"], work_dir)).toMatch(/refused redot args/);
   });
 
+  it("pins a redot basename even under another server name", async () => {
+    const work_dir = await temp_dir("mcp-redot-pin");
+    const redot = path.join(work_dir, "redot");
+    const redot_upper = path.join(work_dir, "REDOT");
+    await writeFile(redot, "");
+    await writeFile(redot_upper, "");
+    const project = path.join(work_dir, "game");
+    const official = redot_args(project);
+    expect(plan_stdio("editor", redot, official, undefined)).toEqual({ command: redot, args: official });
+    expect(plan_stdio("editor", redot, [...official, "--editor"], undefined)).toMatch(/refused redot args/);
+    expect(plan_stdio("editor", redot, ["--mcp-server", "--headless", "--path", project], undefined)).toMatch(/refused redot args/);
+    expect(plan_stdio("editor", redot, ["--headless", "--mcp-server", "--path", ""], undefined)).toMatch(/refused project path/);
+    // catalog_by_basename lowercases, so REDOT is the pinned redot binary.
+    const upper = plan_stdio("editor", redot_upper, ["--script", "evil.gd"], undefined);
+    expect(upper).toMatch(/refused command basename 'REDOT'/);
+  });
+
   it("rejects a bad handshake and does not register tools", async () => {
     const work_dir = await temp_dir("mcp-bad-handshake");
     const binary = path.join(work_dir, "redot");
