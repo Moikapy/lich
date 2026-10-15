@@ -4,6 +4,7 @@
  * config files, and environment-based provider resolution.
  */
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,20 +14,23 @@ import { parse_agent_config, type AgentConfig } from "./agent/config.js";
 import type { EnvelopedAgentEmitter } from "./agent/events.js";
 import { LICH_VERSION } from "./index.js";
 import {
-  load_config,
+  load_layered_config,
   config_template,
   existing_config_path,
+  global_config_path,
+  project_config_path,
   provider_kind_defaults,
   starter_config_object,
   write_lich_config,
   type ProviderKind,
 } from "./cli_config.js";
 import { run_mcp } from "./cli_mcp.js";
+import { run_profile } from "./cli_profile.js";
 import { empty_mcp_flags, take_mcp_flag, type McpCliFlags } from "./cli_mcp_flags.js";
 import { package_root_from_module_url, run_ossuary } from "./cli_ossuary.js";
 import { run_update } from "./cli_update.js";
 import type { Message } from "./providers/types.js";
-import { ask_line as ask_wizard_line, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
+import { ask_line as ask_wizard_line, ask_save_global, build_setup_config, collect_setup_answers } from "./setup_wizard.js";
 import { is_enoent } from "./util/fs.js";
 import { load_theme, notice_flavor } from "./util/theme.js";
 
@@ -44,6 +48,8 @@ interface CliOptions {
   positionals: string[];
   mcp_flags: McpCliFlags;
   serve_flags: ServeCliFlags;
+  /** `lich init --global`: write ~/.lich/config.json instead of the project file. */
+  global?: boolean;
 }
 
 const FLAG_KEYS: Record<string, string> = {
@@ -57,6 +63,7 @@ const FLAG_KEYS: Record<string, string> = {
   "--session-dir": "session_dir",
   "--log-level": "log_level",
   "--theme": "theme",
+  "--profile": "profile",
 };
 
 function usage_text(): string {
@@ -66,6 +73,7 @@ function usage_text(): string {
     "Usage:",
     "  lich                   open the TUI (first run: setup wizard, then TUI)",
     "  lich init              write .lich/config.json without the wizard (flags apply; never overwrites)",
+    "  lich init --global     write ~/.lich/config.json, the defaults every project inherits",
     '  lich "one shot task"   run a single task and print the reply',
     "  lich chat              interactive chat (commands: /exit, /quit)",
     "  lich tui               interactive terminal UI (ink)",
@@ -77,11 +85,14 @@ function usage_text(): string {
     "  lich mcp list          list mcp servers in .lich/config.json",
     "  lich mcp add <name>    add a catalog or --command/--url server (disabled)",
     "  lich mcp enable <name> / disable <name> / remove <name>",
+    "  lich profile list      list profiles in ~/.lich/profiles (* = default)",
+    "  lich profile create <name> / show <name> / use <name>",
     "  lich --help            show this help",
     "  lich --version         print version",
     "",
     "Flags (before or after the subcommand):",
     "  --config <path>        JSON config file parsed by parse_agent_config",
+    "  --profile <name>       merge ~/.lich/profiles/<name>.json between global and project config (or LICH_PROFILE)",
     "  --work-dir <path>      working directory for tools",
     "  --max-turns <n>        loop turn budget (default 25)",
     "  --model <m>            model name (default from LICH_MODEL)",
@@ -123,6 +134,7 @@ function non_tui_resume_mode(first: string | undefined): string | undefined {
     first === "init" ||
     first === "config" ||
     first === "mcp" ||
+    first === "profile" ||
     first === "update" ||
     first === "chat" ||
     first === "gateway" ||
@@ -136,6 +148,11 @@ function non_tui_resume_mode(first: string | undefined): string | undefined {
 
 /** Mode-aware config failure message; one-shot keeps the generic variant. */
 function error_for_mode(mode: string, base_message: string): string {
+  const modes = ["tui", "gateway", "serve", "chat"];
+  // Only the missing-model case gets the hint; other errors (bad file, unknown profile) pass through.
+  if (modes.includes(mode) === true && base_message.startsWith("no model configured") === false) {
+    return `lich ${mode}: ${base_message}`;
+  }
   if (mode === "tui") {
     return "lich tui: no model configured — set LICH_MODEL (e.g. glm-5.3-flash:cloud), pass --model, or create .lich/config.json (`lich config` prints a template)";
   }
@@ -223,6 +240,7 @@ export function parse_args(argv: string[]): CliOptions {
   };
   const mcp = argv.includes("mcp");
   const serve = first_positional_of(argv) === "serve";
+  const init = first_positional_of(argv) === "init";
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) {
@@ -260,6 +278,10 @@ export function parse_args(argv: string[]): CliOptions {
         index = consumed;
         continue;
       }
+    }
+    if (init === true && arg === "--global") {
+      options.global = true;
+      continue;
     }
     if (serve === true) {
       const consumed = take_serve_flag(argv, index, options.serve_flags);
@@ -384,19 +406,27 @@ function apply_overrides(config: Record<string, unknown>, overrides: Record<stri
   apply_provider_override(config, overrides);
 }
 
-/** Same search as the wizard: `--work-dir` (else cwd), then the user-home file. */
-function load_discovered_config(work_dir: string): Record<string, unknown> | undefined {
-  const found = existing_config_path(work_dir);
-  if (found === undefined) {
-    return undefined;
+/**
+ * Project `.lich/config.json` (under `--work-dir`, else cwd) merged over the
+ * global `~/.lich/config.json`, with the selected profile in between.
+ */
+function load_discovered_config(work_dir: string, profile?: string): Record<string, unknown> | undefined {
+  const layered = load_layered_config(work_dir, profile);
+  for (const note of layered?.notes ?? []) {
+    process.stderr.write(`${note}\n`);
   }
-  return load_config(found);
+  return layered?.config;
 }
 
 function build_config(options: CliOptions): AgentConfig {
+  if (options.config_path !== undefined && options.overrides["profile"] !== undefined) {
+    throw new Error("--profile cannot be combined with --config (--config replaces every layer)");
+  }
   const base =
     options.config_path === undefined
-      ? load_discovered_config(work_dir_of(options)) ?? { providers: [env_provider(options.overrides)] }
+      ? load_discovered_config(work_dir_of(options), options.overrides["profile"]) ?? {
+          providers: [env_provider(options.overrides)],
+        }
       : load_config_file(options.config_path);
   apply_overrides(base, options.overrides);
   const providers = base["providers"];
@@ -582,29 +612,52 @@ function work_dir_of(options: CliOptions): string {
   return options.overrides["work_dir"] ?? process.cwd();
 }
 
-async function offer_wizard(work_dir: string, hint?: string): Promise<string | "cancelled"> {
+async function offer_wizard(work_dir: string, hint?: string): Promise<"written" | "cancelled"> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answers = await collect_setup_answers(work_dir, (prompt) => ask_wizard_line(rl, prompt), hint);
+    const ask = (prompt: string): Promise<string | undefined> => ask_wizard_line(rl, prompt);
+    const answers = await collect_setup_answers(work_dir, ask, hint);
     if (answers === undefined) {
       return "cancelled";
     }
-    const result = write_lich_config(work_dir, build_setup_config(answers));
-    process.stdout.write(`${result.message}\n`);
-    return result.path;
+    const save_global = await ask_save_global(ask, global_config_path());
+    if (save_global === undefined) {
+      return "cancelled";
+    }
+    const config = build_setup_config(answers);
+    if (project_config_path(work_dir) === global_config_path()) {
+      // With work_dir = home the project file is the global file: write it once. Other
+      // projects resolve its relative plugin paths against ~/.lich, so store them absolute.
+      const plugins = Array.isArray(config["plugins"]) === true ? (config["plugins"] as string[]) : [];
+      config["plugins"] = plugins.map((entry) => path.resolve(work_dir, entry));
+      process.stdout.write(`${write_lich_config(work_dir, config).message}\n`);
+      return "written";
+    }
+    if (save_global === false) {
+      process.stdout.write(`${write_lich_config(work_dir, config).message}\n`);
+      return "written";
+    }
+    // Discovered plugins are project paths (.lich/plugins/...), so they stay in the project file.
+    const { plugins, ...global_config } = config;
+    process.stdout.write(`${write_lich_config(homedir(), global_config).message}\n`);
+    if (Array.isArray(plugins) === true && plugins.length > 0) {
+      process.stdout.write(`${write_lich_config(work_dir, { plugins }).message}\n`);
+    }
+    return "written";
   } finally {
     rl.close();
   }
 }
 
 async function maybe_first_run(options: CliOptions, work_dir: string): Promise<number | undefined> {
-  if (options.config_path !== undefined) {
+  // An explicit file or a requested profile is the setup; build_config reports a missing one.
+  if (options.config_path !== undefined || options.overrides["profile"] !== undefined || (process.env.LICH_PROFILE ?? "").length > 0) {
     return undefined;
   }
   const existing = existing_config_path(work_dir);
   if (existing !== undefined) {
+    // Leave config_path unset so build_config merges the project file over the global one.
     process.stdout.write(`${skip_setup_message(existing)}\n`);
-    options.config_path = existing;
     return undefined;
   }
   const wrote = await offer_wizard(work_dir, model_hint(options));
@@ -612,7 +665,7 @@ async function maybe_first_run(options: CliOptions, work_dir: string): Promise<n
     process.stderr.write("lich: setup cancelled; nothing written\n");
     return 1;
   }
-  options.config_path = wrote;
+  // Discovery picks up what the wizard wrote, project and global alike.
   return undefined;
 }
 
@@ -644,10 +697,16 @@ function run_init(options: CliOptions): number {
   }
   const config = starter_config_object();
   apply_overrides(config, options.overrides);
-  const result = write_lich_config(work_dir_of(options), config);
+  if (options.global === true) {
+    // The global layer ignores these, so do not write them there.
+    delete config["work_dir"];
+    delete config["session_dir"];
+  }
+  // write_lich_config(home) targets ~/.lich/config.json, the global file.
+  const result = write_lich_config(options.global === true ? homedir() : work_dir_of(options), config);
   process.stdout.write(`${result.message}\n`);
   if (result.written === true && model_still_placeholder(config) === true) {
-    process.stdout.write("next: edit the model in .lich/config.json if needed, then run `lich`\n");
+    process.stdout.write(`next: edit the model in ${result.path} if needed, then run \`lich\`\n`);
   }
   return 0;
 }
@@ -758,6 +817,9 @@ export async function run_cli(argv: string[]): Promise<number> {
   }
   if (first === "mcp") {
     return run_mcp(work_dir_of(options), options.positionals, options.mcp_flags);
+  }
+  if (first === "profile") {
+    return run_profile(options.positionals);
   }
   if (first === "update") {
     if (options.positionals.length > 1) {

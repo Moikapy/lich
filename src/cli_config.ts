@@ -9,7 +9,11 @@ import { safe_json_parse } from "./util/json.js";
 
 const LICH_DIRNAME = ".lich";
 const CONFIG_RELPATH = `${LICH_DIRNAME}/config.json`;
-const DEFAULT_USER_CONFIG = ".config/lich/config.json";
+/** Read only when `~/.lich/config.json` is absent; never written. */
+const LEGACY_USER_CONFIG = ".config/lich/config.json";
+/** Keys that stay per project: a global layer never sets them. */
+const PROJECT_ONLY_KEYS = ["work_dir", "session_dir"] as const;
+const PROFILE_NAME = /^[a-z0-9][a-z0-9_-]*$/;
 
 export type ProviderKind = "openai_compat" | "anthropic" | "ollama";
 
@@ -36,12 +40,19 @@ function parse_template_kind(raw: string): ProviderKind {
   return "ollama";
 }
 
-/** Ordered absolute chain: work_dir (default cwd) first, then the user config home. */
+/** The global default config: `~/.lich/config.json`. */
+export function global_config_path(): string {
+  return path.resolve(homedir(), CONFIG_RELPATH);
+}
+
+/**
+ * Ordered absolute chain: the work_dir (default cwd) project config, the
+ * global `~/.lich/config.json`, then the legacy `~/.config/lich/config.json`.
+ */
 export function config_search_paths(work_dir?: string): string[] {
   const root = work_dir ?? process.cwd();
-  const first = path.resolve(root, CONFIG_RELPATH);
-  const second = path.resolve(homedir(), DEFAULT_USER_CONFIG);
-  return first === second ? [first] : [first, second];
+  const chain = [path.resolve(root, CONFIG_RELPATH), global_config_path(), path.resolve(homedir(), LEGACY_USER_CONFIG)];
+  return chain.filter((entry, index) => chain.indexOf(entry) === index);
 }
 
 /** Explicit path must exist (else throw); otherwise walk the chain, undefined when absent. */
@@ -61,6 +72,142 @@ export function load_config(explicit?: string): Record<string, unknown> | undefi
   if (found === undefined) {
     return undefined;
   }
+  return read_config_object(found);
+}
+
+export interface LayeredConfig {
+  config: Record<string, unknown>;
+  /** Files merged, base first. */
+  sources: string[];
+  /** One-line notices for the user (for example, the legacy location in use). */
+  notes: string[];
+  /** The profile merged in, when one was selected. */
+  profile?: string;
+}
+
+/** `~/.lich/profiles`: one `<name>.json` (and optional `<name>.md` soul) per profile. */
+export function profiles_dir(): string {
+  return path.resolve(homedir(), LICH_DIRNAME, "profiles");
+}
+
+/** The JSON and soul paths for a profile name; throws on a name that is not a plain slug. */
+export function profile_paths(name: string): { json: string; soul: string } {
+  if (PROFILE_NAME.test(name) === false) {
+    throw new Error(`invalid profile name "${name}" (use lowercase letters, digits, - and _)`);
+  }
+  return { json: path.join(profiles_dir(), `${name}.json`), soul: path.join(profiles_dir(), `${name}.md`) };
+}
+
+/**
+ * A profile as a layer: its JSON (paths resolved against `~/.lich/profiles`) with
+ * a non-empty soul file as `system_prompt`. Throws when neither file exists.
+ */
+function profile_layer(name: string): { layer: Record<string, unknown>; sources: string[] } {
+  const paths = profile_paths(name);
+  const has_json = existsSync(paths.json);
+  const has_soul = existsSync(paths.soul);
+  if (has_json === false && has_soul === false) {
+    throw new Error(`profile not found: ${name}`);
+  }
+  const layer = has_json === true ? global_layer(read_config_object(paths.json), profiles_dir()) : {};
+  delete layer["profile"];
+  const soul = has_soul === true ? readFileSync(paths.soul, "utf8").trim() : "";
+  if (soul.length > 0) {
+    layer["system_prompt"] = soul;
+  }
+  return { layer, sources: [paths.json, paths.soul].filter((file) => existsSync(file) === true) };
+}
+
+/**
+ * Project `.lich/config.json` merged over the global base (`~/.lich/config.json`,
+ * else the legacy `~/.config/lich/config.json`), with a selected profile in
+ * between. The profile is `profile_flag`, else `LICH_PROFILE`, else a `profile`
+ * key in the project file, else one in the global file. Undefined when no file exists.
+ */
+export function load_layered_config(work_dir: string, profile_flag?: string): LayeredConfig | undefined {
+  const project_path = project_config_path(work_dir);
+  const global_path = global_config_path();
+  const legacy = path.resolve(homedir(), LEGACY_USER_CONFIG);
+  const notes: string[] = [];
+  let base_path: string | undefined;
+  if (existsSync(global_path) === true) {
+    // When work_dir is home, the global file is the project file: no base layer.
+    base_path = global_path === project_path ? undefined : global_path;
+  } else if (existsSync(legacy) === true) {
+    base_path = legacy;
+    notes.push(`lich: reading ${legacy}; move it to ${global_path} (the old location is read-only)`);
+  }
+  const project = existsSync(project_path) === true ? read_config_object(project_path) : undefined;
+  const base = base_path === undefined ? undefined : global_layer(read_config_object(base_path), path.dirname(base_path));
+  const selected = first_profile_name([profile_flag, process.env.LICH_PROFILE, project?.["profile"], base?.["profile"]]);
+  const profile = selected === undefined ? undefined : profile_layer(selected);
+  if (project === undefined && base === undefined && profile === undefined) {
+    return undefined;
+  }
+  const sources = [
+    ...(base_path === undefined ? [] : [base_path]),
+    ...(profile?.sources ?? []),
+    ...(project === undefined ? [] : [project_path]),
+  ];
+  // With work_dir = home the project file is the global file, so the profile goes over it.
+  const config =
+    project_path === global_path && project !== undefined
+      ? merge_config_layers(project, profile?.layer ?? {})
+      : merge_config_layers(merge_config_layers(base ?? {}, profile?.layer ?? {}), project ?? {});
+  delete config["profile"];
+  return { config, sources, notes, ...(selected === undefined ? {} : { profile: selected }) };
+}
+
+function first_profile_name(candidates: readonly unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.length > 0) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Shallow merge, project wins per key. A project `providers` array replaces
+ * the base's; the base `models` is then dropped unless the project sets its
+ * own, since its role chains name the base's providers.
+ */
+export function merge_config_layers(
+  base: Record<string, unknown>,
+  project: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...base, ...project };
+  if (Object.hasOwn(project, "providers") === true && Object.hasOwn(project, "models") === false) {
+    delete merged["models"];
+  }
+  return merged;
+}
+
+/**
+ * A global file as a base layer: per-project keys are ignored, and relative
+ * plugin paths resolve against the file's own directory instead of the project.
+ */
+function global_layer(config: Record<string, unknown>, home: string): Record<string, unknown> {
+  const layer = { ...config };
+  for (const key of PROJECT_ONLY_KEYS) {
+    delete layer[key];
+  }
+  const plugins = layer["plugins"];
+  if (Array.isArray(plugins) === true) {
+    layer["plugins"] = plugins.map((entry: unknown) => {
+      if (typeof entry === "string") {
+        return path.resolve(home, entry);
+      }
+      if (typeof entry === "object" && entry !== null && typeof (entry as { path?: unknown }).path === "string") {
+        return { ...entry, path: path.resolve(home, (entry as { path: string }).path) };
+      }
+      return entry;
+    });
+  }
+  return layer;
+}
+
+export function read_config_object(found: string): Record<string, unknown> {
   const raw = readFileSync(found, "utf8");
   const parsed = safe_json_parse<unknown>(raw);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {

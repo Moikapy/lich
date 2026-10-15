@@ -1,10 +1,10 @@
 ---
 title: Roadmap issues map
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-10-04
 type: entity
 tags: [roadmap, process]
-sources: [raw/issues/issue-113.md, raw/issues/issue-114.md, raw/issues/issue-79.md, "#113"]
+sources: [raw/issues/issue-113.md, raw/issues/issue-114.md, raw/issues/issue-79.md, "#113", "#133", "#134", "#117", "#144", "#148", "#149"]
 confidence: high
 ---
 
@@ -15,6 +15,12 @@ This page is a **map of what each key issue is for**. It does not track status: 
 | Issue | Role | Wiki pages |
 |---|---|---|
 | **#113** | Plan of record: architecture and gap audit. **North star (Addendum 5):** idea-agnostic harness that wins on user control (plugins, tools, profiles). Games (A/B/C) and content (D / Addendum 4) are dogfood verticals. Hermes parity, reorganization, doc drafts. Addenda: 1 gateway-as-hub, 2 serve path + DRY, 3 wiki, 4 content vertical, 5 idea-agnostic / extensibility. | [[0001-gateway-as-hub]], [[0002-serve-pr-merge-path]], [[0003-subpath-exports-over-packages]], [[0004-dry-policy]], [[0006-in-repo-llm-wiki]], [[0007-content-as-fourth-goal]], [[0008-idea-agnostic-extensible-harness]] |
+| **#133** | #113 phase P0: hygiene and correctness checklist (#113 §5). | [[lich-tools-and-guardrails]], [[lich-plugins-and-hooks]] |
+| **#134** | #113 phase P1: event envelope and SessionManager. | [[event-envelope]] |
+| **#117** | Global agent identity and Hermes-style profiles under `~/.lich/**`. #133 names it as phase P2. | [[runtime-profile-session]] |
+| **#144** | Gateway hub: text adapters on SessionManager, serve as the interactive adapter (from #114 items 2–3). | [[0001-gateway-as-hub]], [[lich-serve]] |
+| **#149** | Model roles in config (`models.chat` / `models.compress`), plugin settings, host model access, `before_llm_call`. | [[lich-plugins-and-hooks]] |
+| **#148** | Ollama defaults and cloud docs, plus the decision-model plugin prototype. | [[decision-models]], [[decision-lane-example]] |
 | **#114** | Deferred work with revisit triggers: package split, adapters, file-bus, SDKs, TLS, memory, platform features, play harness, REVIEW test depth (10), media toolchains as optional vertical tooling (11) | [[subpaths-vs-packages]], [[npc-memory-namespaces]], [[0008-idea-agnostic-extensible-harness]] |
 | **#79** | Ossuary and serve epic (#80–#95). Closed after the wave landed in #123; remaining envelope/SessionManager follow-ups live under #114. | [[ossuary]], [[lich-serve]] |
 | **#46 / #47** | v0.7.0 REVIEW epic and Tests & CI tracker — **closed**. Leftover T-3/T-4 depth is #114 item 10. | [[lich-tools-and-guardrails]] |

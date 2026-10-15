@@ -4,15 +4,20 @@
  * No real network to telegram/discord/twitch — webhook binds an ephemeral
  * port (0) on loopback only.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parse_agent_config } from "../src/agent/config.js";
 import {
+  create_gateway_policy,
   DEFAULT_GATEWAY_TOOLS_ENABLED,
   gateway_tools_enabled,
   is_gateway_sender_allowed,
+  type GatewayPolicy,
 } from "../src/gateway/access.js";
+import { create_discord_adapter } from "../src/gateway/discord.js";
+import { create_twitch_adapter } from "../src/gateway/twitch.js";
+import { logger } from "../src/util/log.js";
 import { assert_bind_allowed, create_webhook_adapter, MAX_WEBHOOK_BODY_BYTES } from "../src/gateway/webhook.js";
 import { format_agent_reply, split_text } from "../src/gateway/format.js";
 import { create_telegram_adapter } from "../src/gateway/telegram.js";
@@ -21,6 +26,7 @@ import { note_partial_messages } from "../src/agent/loop.js";
 import { GatewayBus } from "../src/gateway/bus.js";
 import type { Agent, AgentRunResult } from "../src/agent/agent.js";
 import type { Message, Usage } from "../src/providers/types.js";
+import type { GatewayReply } from "../src/gateway/types.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const usage_zero: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -383,7 +389,7 @@ describe("gateway bus", () => {
     }
   });
 
-  it("releases settled promise chains so the chains map stays bounded (G-6)", async () => {
+  it("releases settled session queues so they stay bounded (G-6)", async () => {
     const work_dir = temp_work_dir();
     try {
       const bus = new GatewayBus({
@@ -392,8 +398,8 @@ describe("gateway bus", () => {
       });
       await bus.handle("webhook", "c1", "u1", "one");
       await bus.handle("webhook", "c2", "u1", "two");
-      const chains = (bus as unknown as { chains: Map<string, Promise<void>> }).chains;
-      expect(chains.size).toBe(0);
+      const sessions = (bus as unknown as { sessions: { pending_count(): number } }).sessions;
+      expect(sessions.pending_count()).toBe(0);
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
@@ -416,6 +422,73 @@ describe("gateway bus", () => {
       expect(reply?.includes("boom")).toBe(true);
       expect(reply?.includes("\n")).toBe(false);
       expect(reply?.length).toBeLessThanOrEqual("agent error: ".length + 300);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("evicts the least recently used conversation, not the oldest inserted (G-10)", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const bus = new GatewayBus(
+        { config: config_for(work_dir), agent_factory: () => recording_agent(records) },
+        { max_conversations: 2 },
+      );
+      await bus.handle("webhook", "a", "u1", "a1");
+      await bus.handle("webhook", "b", "u1", "b1");
+      await bus.handle("webhook", "a", "u1", "a2");
+      await bus.handle("webhook", "c", "u1", "c1");
+      await bus.handle("webhook", "a", "u1", "a3");
+      await bus.handle("webhook", "b", "u1", "b2");
+      const history_of = (input: string): readonly Message[] => records.find((run) => run.input === input)?.history ?? [];
+      // a was used after b, so c evicted b: a keeps its history and b starts over.
+      expect(history_of("a3").length).toBeGreaterThan(0);
+      expect(history_of("b2")).toEqual([]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rewrites only telegram's /start command to hello (G-10)", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const bus = new GatewayBus({
+        config: config_for(work_dir, { allowed_users: { telegram: ["u1"] } }),
+        agent_factory: () => recording_agent(records),
+      });
+      await bus.handle("telegram", "t1", "u1", "/start");
+      await bus.handle("telegram", "t2", "u1", "/start@lich_bot deep-link");
+      await bus.handle("telegram", "t3", "u1", "/started a thing");
+      await bus.handle("webhook", "w1", "u1", "/start");
+      expect(records.map((run) => run.input)).toEqual(["hello", "hello", "/started a thing", "/start"]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reply() carries the run's usage, and marks agent failures", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      let fail = false;
+      const bus = new GatewayBus({
+        config: config_for(work_dir),
+        agent_factory: () =>
+          ({
+            run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+              if (fail === true) {
+                throw new Error("provider down");
+              }
+              return { ...reply_result("ok", options.history ?? [], options.input), usage_total: usage_small };
+            },
+          }) as unknown as Agent,
+      });
+      expect(await bus.reply("webhook", "c1", "u1", "hi")).toEqual({ text: "ok", usage: usage_small });
+      fail = true;
+      const failed = await bus.reply("webhook", "c1", "u1", "again");
+      expect(failed?.failed).toBe(true);
+      expect(failed?.text.startsWith("agent error: provider down")).toBe(true);
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
@@ -539,6 +612,60 @@ describe("gateway access", () => {
       rmSync(work_dir, { recursive: true, force: true });
     }
   });
+
+  it("builds one GatewayPolicy from config: toolset plus the sender allowlists", () => {
+    const work_dir = temp_work_dir();
+    try {
+      const policy = create_gateway_policy(config_for(work_dir, { allowed_users: { discord: ["u1"] } }));
+      expect(policy.tools_enabled).toEqual([...DEFAULT_GATEWAY_TOOLS_ENABLED]);
+      expect(policy.allows("webhook", "c", "anyone")).toBe(true);
+      expect(policy.allows("discord", "c", "u1")).toBe(true);
+      expect(policy.allows("discord", "c", "u2")).toBe(false);
+      expect(policy.allows("telegram", "c", "u1")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets the bus use an injected policy instead of the config's", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const records: RunRecord[] = [];
+      const deny_all: GatewayPolicy = { tools_enabled: [], allows: () => false };
+      const bus = new GatewayBus({ config: config_for(work_dir), policy: deny_all, agent_factory: () => recording_agent(records) });
+      expect(await bus.handle("webhook", "c1", "u1", "hello")).toBeUndefined();
+      expect(records).toEqual([]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("adapter capabilities", () => {
+  it("declares each platform's reply cap, also on idle adapters", () => {
+    const saved = { ...process.env };
+    for (const key of ["LICH_TELEGRAM_BOT_TOKEN", "LICH_DISCORD_BOT_TOKEN", "LICH_TWITCH_OAUTH_TOKEN", "LICH_TWITCH_NICK"]) {
+      delete process.env[key];
+    }
+    const params = {
+      config: parse_agent_config({ providers: [{ kind: "openai_compat", name: "m", model: "x" }] }),
+      handle_message: async () => "",
+      get_agent: (): Agent => {
+        throw new Error("not used");
+      },
+      reply_router: () => undefined,
+    };
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      expect(create_telegram_adapter(params).capabilities).toEqual({ kind: "text", max_reply_chars: 4096 });
+      expect(create_discord_adapter(params).capabilities).toEqual({ kind: "text", max_reply_chars: 2000 });
+      expect(create_twitch_adapter(params).capabilities).toEqual({ kind: "text", max_reply_chars: TWITCH_MESSAGE_CAP });
+      expect(create_webhook_adapter({ ...params, port: 0, host: "127.0.0.1" }).capabilities).toEqual({ kind: "text" });
+    } finally {
+      vi.restoreAllMocks();
+      process.env = saved;
+    }
+  });
 });
 
 describe("webhook adapter", () => {
@@ -567,7 +694,7 @@ describe("webhook adapter", () => {
       chat_id: string,
       user_id: string,
       text: string,
-    ) => Promise<string | undefined>,
+    ) => Promise<string | GatewayReply | undefined>,
   ) {
     return create_webhook_adapter({
       config: config_for(work_dir),
@@ -583,6 +710,68 @@ describe("webhook adapter", () => {
       on_listening,
     });
   }
+
+  it("stops promptly while a keep-alive client is still connected", async () => {
+    const work_dir = temp_work_dir();
+    let port: number | undefined;
+    const adapter = make_adapter(work_dir, "echo", (seen) => {
+      port = seen;
+    });
+    try {
+      await adapter.start();
+      const { request } = await import("node:http");
+      const agent = new (await import("node:http")).Agent({ keepAlive: true });
+      await new Promise<void>((resolve, reject) => {
+        const req = request(
+          { host: "127.0.0.1", port, path: "/health", agent },
+          (response) => {
+            response.resume();
+            response.on("end", () => resolve());
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+      const started = Date.now();
+      await adapter.stop();
+      expect(Date.now() - started).toBeLessThan(1000);
+      agent.destroy();
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the run's usage, and HTTP 502 with the error when the agent fails", async () => {
+    const work_dir = temp_work_dir();
+    let port: number | undefined;
+    const adapter = make_adapter(
+      work_dir,
+      "unused",
+      (seen) => {
+        port = seen;
+      },
+      async (_platform, _chat, _user, text) =>
+        text === "fail" ? { text: "agent error: provider down", failed: true } : { text: `ok:${text}`, usage: usage_small },
+    );
+    try {
+      await adapter.start();
+      const post = (text: string) =>
+        fetch(`http://127.0.0.1:${String(port)}/message`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+      const ok = await post("hi");
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toEqual({ reply: "ok:hi", usage: usage_small });
+      const failed = await post("fail");
+      expect(failed.status).toBe(502);
+      expect(await failed.json()).toEqual({ error: "agent error: provider down" });
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
 
   it("serves POST /message, GET /health, and 404 for other paths", async () => {
     const work_dir = temp_work_dir();

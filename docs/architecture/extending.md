@@ -156,16 +156,23 @@ A platform adapter is an implementation of the `PlatformAdapter` contract
 ```ts
 export interface PlatformAdapter {
   readonly name: string;
+  readonly capabilities: AdapterCapabilities; // { kind: "text", max_reply_chars?: number }
   start(): Promise<void>;
   stop(): Promise<void>;
 }
 ```
 
+`capabilities` declares what the adapter can deliver. Every platform today is
+`kind: "text"` (one plain reply per message); set `max_reply_chars` to the
+platform's message cap and split replies to it. The runner logs it at start.
+
 Inbound flow: the adapter normalizes a platform event into
 `(platform, chat_id, user_id, text)` and calls `run_inbound_message` with the
-shared `InboundHandler`; the handler is the bus's `handle`, which resolves to
-the reply text; the adapter then sends the reply through the platform's send
-API. The bus owns history, serialization, and error sanitization - adapters
+shared `InboundHandler`; the handler is the bus's `reply`, and
+`run_inbound_message` reduces its result to the reply text; the adapter then sends the reply through the platform's send
+API. The bus owns history, serialization, and error sanitization, and checks
+each sender against the `GatewayPolicy` built from config at startup
+(`src/gateway/access.ts`: allowlists plus the gateway toolset) - adapters
 stay thin.
 
 Recipe (mirroring [`telegram.ts`](../../src/gateway/telegram.ts), the
@@ -189,7 +196,7 @@ await send_reply(reply);
 
 3. **Handle missing credentials with the idle-adapter pattern.** When the
    platform's token env var is absent, return
-   `create_idle_adapter("platform", "ENV_VAR not set")` instead of throwing.
+   `create_idle_adapter("platform", "ENV_VAR not set", CAPABILITIES)` instead of throwing.
    The adapter logs once why it is idle and no-ops on start/stop, so the
    gateway keeps serving the platforms that *do* have credentials -
    `run_gateway` only needs one valid platform.
@@ -198,7 +205,7 @@ await send_reply(reply);
    structural `RawSocket` type works on both Bun and Node runtimes),
    `sanitize_agent_error` for reply strings on failure, and the whitespace
    splitter `split_text` from `src/gateway/format.ts` for size-capped
-   transports (telegram caps at 4096, discord at 2000, twitch at 512).
+   transports (telegram caps at 4096, discord at 2000, twitch at 450 to stay under its 500-char limit).
 
 **Testing.** `test/gateway.test.ts` covers the webhook adapter over a real
 `node:http` server (a `on_listening` test hook reports the bound port), the

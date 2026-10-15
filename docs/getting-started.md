@@ -40,9 +40,9 @@ lich config > .lich/config.json
 # edit .lich/config.json and replace "<model-name>"
 ```
 
-`lich config` honors `LICH_PROVIDER_KIND` and `LICH_MODEL` when you have them set, and otherwise prints an ollama-oriented template. The file is picked up automatically from `.lich/config.json` in the working directory (or `~/.config/lich/config.json` as a fallback) — after this, plain `lich "task"` needs no env vars.
+`lich config` honors `LICH_PROVIDER_KIND` and `LICH_MODEL` when you have them set, and otherwise prints an ollama-oriented template. The file is picked up automatically from `.lich/config.json` in the working directory, merged over `~/.lich/config.json` if you keep defaults there — after this, plain `lich "task"` needs no env vars.
 
-`lich init` writes that same starter file for you (it creates `.lich/` and never overwrites an existing `.lich/config.json`). Bare `lich` on a TTY, with no config in that search chain, runs a setup wizard and writes `.lich/config.json` once before opening the TUI. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. Non-TTY stdin skips the wizard. `.lich/` is gitignored.
+`lich init` writes that same starter file for you (it creates `.lich/` and never overwrites an existing `.lich/config.json`). Bare `lich` on a TTY, with no config in that search chain, runs a setup wizard and writes `.lich/config.json` once before opening the TUI. Answer yes to its last question to save the answers as your global default in `~/.lich/config.json` (or run `lich init --global`), so new projects skip the wizard. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. Non-TTY stdin skips the wizard. `.lich/` is gitignored.
 
 ### Path C: an explicit config file
 
@@ -50,7 +50,7 @@ lich config > .lich/config.json
 lich --config ./lich.json "Reply with ok"
 ```
 
-The full schema is documented in [the CLI reference](user-guide/cli.md#config-file-reference). Search order: `--config` path first (must exist), then `./.lich/config.json`, then `~/.config/lich/config.json`.
+The full schema is documented in [the CLI reference](user-guide/cli.md#config-file-reference). Search order: a `--config` path (must exist) is used alone; otherwise `./.lich/config.json` is merged over `~/.lich/config.json` (see [Global config](user-guide/cli.md#global-config)).
 
 ## Your first one-shot
 
@@ -94,7 +94,7 @@ curl -s -X POST http://localhost:8089/message \
 Observed response shape (the `reply` text is the model's answer; `usage` is `null` on this endpoint):
 
 ```json
-{"reply":"Hello! How can I help you today? I can assist with coding, file management, running commands, web searches, and more — just let me know what you'd like to do.","usage":null}
+{"reply":"Hello! How can I help you today? I can assist with coding, file management, running commands, web searches, and more — just let me know what you'd like to do.","usage":{"prompt_tokens":812,"completion_tokens":41,"total_tokens":853}}
 ```
 
 Stop the gateway with Ctrl+C (SIGINT) or `kill` (SIGTERM); both shut down adapters cleanly.

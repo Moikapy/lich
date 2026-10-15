@@ -7,13 +7,15 @@ import { logger } from "../util/log.js";
 import { sleep } from "../util/sleep.js";
 import { platform_token_env, read_platform_token } from "./token_env.js";
 import type { AdapterParams, PlatformAdapter, RawSocket } from "./types.js";
-import { create_idle_adapter, open_socket, run_inbound_message } from "./types.js";
+import { create_idle_adapter, open_socket, run_inbound_message, type AdapterCapabilities } from "./types.js";
 
 const DISCORD_API = "https://discord.com/api/v10";
 const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
 /** Guild messages + message content + direct messages. */
 const INTENTS = 512 | 32768 | 4096;
 export const DISCORD_BACKOFF_MS = [5000, 10000, 20000, 30000] as const;
+export const DISCORD_MAX_MESSAGE_CHARS = 2000;
+export const DISCORD_CAPABILITIES: AdapterCapabilities = { kind: "text", max_reply_chars: DISCORD_MAX_MESSAGE_CHARS };
 /** Auth / sharding / API-version failures — reconnecting cannot recover. */
 const DISCORD_FATAL_CLOSE = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
 /** Live heartbeat timers keyed by socket, cleared when the session ends. */
@@ -41,13 +43,14 @@ interface DiscordSessionState {
 export function create_discord_adapter(params: AdapterParams): PlatformAdapter {
   const token = read_platform_token(params.config, "discord");
   if (token === undefined) {
-    return create_idle_adapter("discord", `${platform_token_env(params.config, "discord")} not set`);
+    return create_idle_adapter("discord", `${platform_token_env(params.config, "discord")} not set`, DISCORD_CAPABILITIES);
   }
   let running = false;
   let socket: RawSocket | undefined;
   let stop_controller = new AbortController();
   return {
     name: "discord",
+    capabilities: DISCORD_CAPABILITIES,
     start: async () => {
       running = true;
       stop_controller = new AbortController();
@@ -226,7 +229,7 @@ async function rest_send_message(params: AdapterParams, channel_id: string, text
   if (token === undefined || channel_id === "") {
     return;
   }
-  for (const chunk of split_chunks(text, 2000)) {
+  for (const chunk of split_chunks(text, DISCORD_MAX_MESSAGE_CHARS)) {
     const response = await fetch(`${DISCORD_API}/channels/${channel_id}/messages`, {
       method: "POST",
       headers: { authorization: `Bot ${token}`, "content-type": "application/json" },

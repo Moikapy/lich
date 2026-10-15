@@ -9,28 +9,17 @@ import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const writes = vi.hoisted(() => ({ calls: [] as Array<{ work_dir: string; config: Record<string, unknown> }> }));
 const wizard = vi.hoisted(() => ({ cancel: false, lines: [] as string[] }));
-const tui_run = vi.hoisted(() => ({ configs: [] as Array<{ providers?: Array<{ model?: string }> }> }));
+const tui_run = vi.hoisted(() => ({ configs: [] as Array<{ agent_name?: string; max_turns?: number; plugins?: unknown[]; providers?: Array<{ model?: string }> }> }));
 const gateway_run = vi.hoisted(() => ({
   fn: vi.fn(async (_config: unknown, _platforms: readonly string[]) => 0),
 }));
 vi.mock("../src/cli_config.js", async (import_original) => {
-  const path_mod = await import("node:path");
-  const fs_mod = await import("node:fs");
   const actual = await import_original<typeof import("../src/cli_config.js")>();
   return {
     ...actual,
-    write_lich_config: (work_dir: string, config: Record<string, unknown>) => {
+    write_lich_config: (work_dir: string, config: Record<string, unknown>, update?: boolean) => {
       writes.calls.push({ work_dir, config });
-      return actual.write_lich_config(work_dir, config);
-    },
-    existing_config_path: (work_dir: string) => {
-      const [project] = actual.config_search_paths(work_dir);
-      const found = actual.existing_config_path(work_dir);
-      if (found !== undefined && found === project) {
-        return found;
-      }
-      const absent_home = path_mod.resolve(work_dir, "missing-home-config.json");
-      return fs_mod.existsSync(absent_home) === true ? absent_home : undefined;
+      return actual.write_lich_config(work_dir, config, update);
     },
   };
 });
@@ -69,7 +58,7 @@ vi.mock("../src/gateway.js", () => ({
 }));
 
 import { parse_agent_config } from "../src/agent/config.js";
-import { config_search_paths, existing_config_path, project_config_path, write_lich_config } from "../src/cli_config.js";
+import { config_search_paths, existing_config_path, global_config_path, project_config_path, write_lich_config } from "../src/cli_config.js";
 import { read_platform_token } from "../src/gateway/token_env.js";
 import { build_setup_config, collect_setup_answers } from "../src/setup_wizard.js";
 import { run_cli } from "../src/cli.js";
@@ -122,10 +111,13 @@ beforeEach(() => {
   wizard.lines = [];
   tui_run.configs = [];
   gateway_run.fn.mockClear();
-  for (const key of ["LICH_MODEL", "LICH_PROVIDER_KIND"] as const) {
+  for (const key of ["LICH_MODEL", "LICH_PROVIDER_KIND", "LICH_PROFILE"] as const) {
     saved_env[key] = process.env[key];
     delete process.env[key];
   }
+  // An empty HOME per test, so a real ~/.lich or ~/.config/lich never leaks in.
+  saved_env["HOME"] = process.env.HOME;
+  process.env.HOME = make_temp_dir("home");
 });
 
 afterEach(() => {
@@ -373,10 +365,13 @@ describe("lich init and bare lich", () => {
     }
   });
 
-  it("pins a home-config skip into the load instead of a later discovery", async () => {
+  it("skips setup on a global ~/.lich/config.json and loads it for --work-dir, not the cwd project", async () => {
     const dir = make_temp_dir("pin-home");
-    const home = path.join(dir, "missing-home-config.json");
-    writeFileSync(home, JSON.stringify({ providers: [{ kind: "ollama", name: "main", model: "from-home" }] }));
+    const global_dir = path.join(String(process.env.HOME), ".lich");
+    mkdirSync(global_dir, { recursive: true });
+    writeFileSync(path.join(global_dir, "config.json"), JSON.stringify({
+      providers: [{ kind: "ollama", name: "main", model: "from-home" }],
+    }));
     const cwd_dir = make_temp_dir("pin-cwd");
     mkdirSync(path.join(cwd_dir, ".lich"), { recursive: true });
     writeFileSync(path.join(cwd_dir, ".lich", "config.json"), JSON.stringify({
@@ -394,6 +389,185 @@ describe("lich init and bare lich", () => {
       expect(existsSync(project_config_path(dir))).toBe(false);
     } finally {
       process.chdir(previous);
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("bare lich merges the project config over the global one", async () => {
+    const dir = make_temp_dir("merge");
+    const global_dir = path.join(String(process.env.HOME), ".lich");
+    mkdirSync(global_dir, { recursive: true });
+    writeFileSync(path.join(global_dir, "config.json"), JSON.stringify({
+      agent_name: "wight",
+      max_turns: 7,
+      providers: [{ kind: "ollama", name: "main", model: "from-home" }],
+    }));
+    mkdirSync(path.join(dir, ".lich"), { recursive: true });
+    writeFileSync(project_config_path(dir), JSON.stringify({ max_turns: 3 }));
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["--work-dir", dir])).toBe(0);
+      expect(writes.calls).toHaveLength(0);
+      const config = tui_run.configs[0];
+      expect(config?.agent_name).toBe("wight");
+      expect(config?.max_turns).toBe(3);
+      expect(config?.providers?.[0]?.model).toBe("from-home");
+    } finally {
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("wizard can save the answers as the global default and keep project plugins in the project file", async () => {
+    const dir = make_temp_dir("wizard-global");
+    mkdirSync(path.join(dir, ".lich", "plugins"), { recursive: true });
+    writeFileSync(path.join(dir, ".lich", "plugins", "demo.ts"), "export const plugin = { name: 'demo', tools: [] };\n");
+    // name, kind, model, base url, key env, gateway, plugin demo.ts, save global
+    wizard.lines = ["ada", "", "global-model", "", "", "", "y", "y"];
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["--work-dir", dir])).toBe(0);
+      const global = JSON.parse(readFileSync(global_config_path(), "utf8")) as Record<string, unknown>;
+      expect(global["agent_name"]).toBe("ada");
+      expect(global["plugins"]).toBeUndefined();
+      expect(JSON.parse(readFileSync(project_config_path(dir), "utf8"))).toEqual({ plugins: [".lich/plugins/demo.ts"] });
+      const config = tui_run.configs[0];
+      expect(config?.agent_name).toBe("ada");
+      expect(config?.providers?.[0]?.model).toBe("global-model");
+      expect(config?.plugins).toEqual([".lich/plugins/demo.ts"]);
+    } finally {
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("wizard writes the global file once, with absolute plugin paths, when the work_dir is home", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "plugins"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "plugins", "demo.ts"), "export const plugin = { name: 'demo', tools: [] };\n");
+    wizard.lines = ["", "", "home-model", "", "", "", "y", "y"];
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["--work-dir", home])).toBe(0);
+      const written = JSON.parse(readFileSync(global_config_path(), "utf8")) as Record<string, unknown>;
+      // Absolute, so other projects that load this file as their global layer find the plugin too.
+      const absolute = path.join(home, ".lich", "plugins", "demo.ts");
+      expect(written["plugins"]).toEqual([absolute]);
+      expect((written["providers"] as Array<{ model: string }>)[0]?.model).toBe("home-model");
+      expect(tui_run.configs[0]?.plugins).toEqual([absolute]);
+      tui_run.configs = [];
+      const other = make_temp_dir("other-project");
+      expect(await run_cli(["--work-dir", other])).toBe(0);
+      expect(tui_run.configs[0]?.plugins).toEqual([absolute]);
+    } finally {
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("wizard writes only the global file when saving globally with no plugins, and only the project file by default", async () => {
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const global_dir = make_temp_dir("wizard-global-only");
+      wizard.lines = ["", "", "m1", "", "", "", "yes"];
+      expect(await run_cli(["--work-dir", global_dir])).toBe(0);
+      expect(existsSync(global_config_path())).toBe(true);
+      expect(existsSync(project_config_path(global_dir))).toBe(false);
+
+      rmSync(global_config_path());
+      const project_dir = make_temp_dir("wizard-project-only");
+      wizard.lines = ["", "", "m2", "", "", ""];
+      expect(await run_cli(["--work-dir", project_dir])).toBe(0);
+      expect(existsSync(project_config_path(project_dir))).toBe(true);
+      expect(existsSync(global_config_path())).toBe(false);
+    } finally {
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("lich init --global writes ~/.lich/config.json without work_dir, and never overwrites it", async () => {
+    await without_model_env(async () => {
+      const dir = make_temp_dir("init-global");
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      try {
+        expect(await run_cli(["init", "--global", "--model", "g-model", "--work-dir", dir])).toBe(0);
+        const global = JSON.parse(readFileSync(global_config_path(), "utf8")) as Record<string, unknown>;
+        expect((global["providers"] as Array<{ model: string }>)[0]?.model).toBe("g-model");
+        expect(global["work_dir"]).toBeUndefined();
+        expect(existsSync(project_config_path(dir))).toBe(false);
+        const before = readFileSync(global_config_path(), "utf8");
+        expect(await run_cli(["init", "--global", "--model", "other"])).toBe(0);
+        expect(readFileSync(global_config_path(), "utf8")).toBe(before);
+      } finally {
+        stdout.mockRestore();
+      }
+      await expect(run_cli(["tui", "--global"])).rejects.toThrow("unknown flag: --global");
+    });
+  });
+
+  it("lich profile create runs the wizard into ~/.lich/profiles/<name>.json and never overwrites", async () => {
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      wizard.lines = ["coder", "", "code-model", "", "", ""];
+      expect(await run_cli(["profile", "create", "coder"])).toBe(0);
+      const file = path.join(String(process.env.HOME), ".lich", "profiles", "coder.json");
+      const written = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      expect(written["agent_name"]).toBe("coder");
+      expect(written["plugins"]).toEqual([]);
+      await expect(run_cli(["profile", "create", "coder"])).rejects.toThrow("already exists");
+    } finally {
+      stdout.mockRestore();
+      restore_tty();
+    }
+  });
+
+  it("lich profile use records the default in ~/.lich/config.json, keeping its other keys, and list marks it", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    writeFileSync(path.join(home, ".lich", "profiles", "bard.md"), "You are a bard.");
+    writeFileSync(global_config_path(), JSON.stringify({ max_turns: 4 }));
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "use", "coder"])).toBe(0);
+      expect(JSON.parse(readFileSync(global_config_path(), "utf8"))).toEqual({ max_turns: 4, profile: "coder" });
+      stdout.mockClear();
+      expect(await run_cli(["profile", "list"])).toBe(0);
+      expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toBe("  bard (soul)\n* coder\n");
+      await expect(run_cli(["profile", "use", "ghost"])).rejects.toThrow("profile not found: ghost");
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("bare lich --profile skips the wizard and runs with the profile; --profile with --config is rejected", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({
+      agent_name: "coder",
+      providers: [{ kind: "ollama", name: "main", model: "code-model" }],
+    }));
+    const dir = make_temp_dir("profile-run");
+    const restore_tty = set_tty(true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      wizard.lines = ["should-not-be-read"];
+      expect(await run_cli(["--work-dir", dir, "--profile", "coder"])).toBe(0);
+      expect(writes.calls).toHaveLength(0);
+      expect(tui_run.configs[0]?.agent_name).toBe("coder");
+      expect(tui_run.configs[0]?.providers?.[0]?.model).toBe("code-model");
+      await expect(run_cli(["tui", "--profile", "coder", "--config", global_config_path()])).rejects.toThrow(
+        "--profile cannot be combined with --config",
+      );
+      await expect(run_cli(["tui", "--profile", "ghost"])).rejects.toThrow("lich tui: profile not found: ghost");
+    } finally {
       stdout.mockRestore();
       restore_tty();
     }

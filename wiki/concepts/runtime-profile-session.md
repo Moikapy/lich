@@ -1,7 +1,7 @@
 ---
 title: Runtime / Profile / Session split
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-05
 type: concept
 tags: [core, runtime, npc, gateway]
 sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, "#113"]
@@ -29,5 +29,7 @@ confidence: medium
 `session.create({profile})` in [[lich-serve]] then fixes the "one Agent for every session" problem.
 
 **Prerequisites:** remove process-global state (docs root, log level, Ollama id counter), and add the [[event-envelope]].
+
+**Not the same as config profiles:** #117 shipped *config* profiles, named file layers under `~/.lich/profiles` chosen per CLI run ([[lich-config]]). The runtime Profile here is a per-session object inside one process and is not built yet.
 
 Related: [[npc-memory-namespaces]], [[embedded-safety-profile]].

@@ -7,6 +7,49 @@
   a user line that a later turn followed after the run was aborted or failed
   before any assistant reply. Adjacent user lines with nothing between them
   (a compression summary and the next question) stay.
+- `lich serve` `health` also returns `protocol_version` (`1`, bumped only on
+  breaking changes) and `capabilities: { methods, notifications }` (#144).
+  `methods` lists `prompt.*` only when the server has an Agent.
+- `lich serve` queues frames per session on each connection instead of
+  per connection (#144). A long `prompt.submit` no longer holds up other
+  sessions or session-less frames such as `health` on the same socket. Frames
+  for one session keep their order; replies across sessions may interleave,
+  so clients match them by JSON-RPC `id` (Ossuary already does).
+- Gateway (#144): sender allowlists and the gateway toolset are one
+  `GatewayPolicy`, built from config at startup (`src/gateway/access.ts`).
+  Platform adapters declare `capabilities` (`{ kind: "text", max_reply_chars }`);
+  the runner logs them. **Breaking for custom adapters:** `PlatformAdapter`
+  requires `capabilities`, and `create_idle_adapter` takes it as a third
+  argument.
+- Gateway (#144): conversations queue on the shared `SessionManager` instead of
+  their own promise chains. Beyond `max_conversations`, the least recently used
+  conversation is evicted (it was the oldest inserted). Only Telegram's `/start`
+  command (`/start`, `/start@bot`, `/start <payload>`) is rewritten to "hello";
+  `/started ...` and other platforms pass through. Shutdown waits for adapters
+  to stop (up to 5 s) before exiting.
+- **Breaking (webhook):** `POST /message` returns the run's token `usage`
+  instead of `null`, and an agent failure is `502 {"error":"agent error: ..."}`
+  instead of `200` with the error in `reply`.
+- Profiles (#117): `~/.lich/profiles/<name>.json` (plus an optional `<name>.md`
+  used as the system prompt) is merged between the global and project config.
+  Select one with `--profile`, `LICH_PROFILE`, a project `profile` key, or the
+  default set by `lich profile use`. New `lich profile list|show|create|use`.
+  File tools now refuse `.lich/profiles/`. See `docs/user-guide/profiles.md`.
+- `lich tui`, `chat`, `serve` and `gateway` now show the real config error
+  (for example `profile not found`) instead of always saying "no model
+  configured".
+- `lich init --global` writes the starter config to `~/.lich/config.json`
+  (never overwrites). The setup wizard ends with "Save as the global default?"
+  (default no); yes writes the answers to `~/.lich/config.json` and keeps
+  discovered project plugins in the project file (#117).
+- Global defaults live in `~/.lich/config.json`. A project `.lich/config.json`
+  is merged over it key by key instead of hiding it (#117). A project
+  `providers` array replaces the global one and drops the global `models`
+  unless the project sets its own. `work_dir` and `session_dir` in the global
+  file are ignored, and its relative plugin paths resolve against `~/.lich/`.
+  The old `~/.config/lich/config.json` is read only when `~/.lich/config.json`
+  is absent, with a hint to move it. **Behavior change:** before, a project
+  file hid the user file entirely; now its unset keys come from the global file.
 - Ctrl+C in a one-shot run or in `lich chat` cancels the run or turn
   through its abort signal; chat keeps the session and returns to the prompt.
   A second Ctrl+C quits at once (exit `130`). In the TUI, Esc cancels a running

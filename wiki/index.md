@@ -1,7 +1,7 @@
 ---
 title: Wiki index
 type: index
-updated: 2026-10-04
+updated: 2026-10-05
 ---
 
 # Lich Wiki: Index
@@ -15,9 +15,10 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 ## Entities: Lich subsystems
 
 - [[lich-agent-loop]]: `run_conversation` + `Agent`. A dependency-injected TAO loop. Its P0 gaps are that events aren't scoped to a run, there is no streaming, it has global state, and each agent is heavyweight.
-- [[lich-providers]]: openai_compat, anthropic and ollama clients without SDKs, plus failover and per-role chains (`models.chat` / `models.compress`, #154). They have no streaming, `tool_choice` or cache_control, and ~150 lines of their helpers are duplicated.
+- [[lich-providers]]: openai_compat, anthropic and ollama clients without SDKs, plus failover and per-role chains (`models.chat` / `models.compress`, #154). They have no streaming, `tool_choice` or cache_control; their shared HTTP/error helpers live in `providers/http.ts` (#165).
 - [[lich-tools-and-guardrails]]: builtins, an executor that never throws, and the wards. Known holes: `terminal` isn't sandboxed and hooks have no timeout; `tools_enabled` covers plugin tools since #161.
 - [[lich-plugins-and-hooks]]: tool-call hooks with veto, the gatekeeper's single gated `git_commit`, and (#157) per-plugin settings, granted model roles and a `before_llm_call` note hook. There is no `build_system_prompt` hook yet; a throwing `before_tool_call` blocks the call (#161), other hooks fail open.
+- [[lich-config]]: global `~/.lich/config.json` < named profile < project file, shallow merge; `lich init --global`, `lich profile`, and file tools barred from `.lich/profiles` (#170–#172).
 - [[lich-sessions]]: JSONL phylacteries used as combat logs. There is no search, and gateway files are supersets of each other.
 - [[lich-mcp]]: an MCP client and catalog. Redot is a real entry and Godot has none. The code is spread over 21 micro-files.
 - [[lich-gateway]]: familiars routed into one shared Agent. The per-chat bus and read-only defaults make it a good hub.
