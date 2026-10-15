@@ -455,14 +455,27 @@ describe("gateway bus", () => {
     try {
       const records: RunRecord[] = [];
       const bus = new GatewayBus({
-        config: config_for(work_dir, { allowed_users: { telegram: ["u1"] } }),
+        config: config_for(work_dir, { allowed_users: { telegram: ["u1"], discord: ["u1"] } }),
         agent_factory: () => recording_agent(records),
       });
       await bus.handle("telegram", "t1", "u1", "/start");
       await bus.handle("telegram", "t2", "u1", "/start@lich_bot deep-link");
       await bus.handle("telegram", "t3", "u1", "/started a thing");
       await bus.handle("webhook", "w1", "u1", "/start");
-      expect(records.map((run) => run.input)).toEqual(["hello", "hello", "/started a thing", "/start"]);
+      await bus.handle("telegram", "t4", "u1", "/start@lich_bot");
+      await bus.handle("telegram", "t5", "u1", "/start/foo");
+      await bus.handle("telegram", "t6", "u1", "/start@");
+      await bus.handle("discord", "d1", "u1", "/start");
+      expect(records.map((run) => run.input)).toEqual([
+        "hello",
+        "hello",
+        "/started a thing",
+        "/start",
+        "hello",
+        "/start/foo",
+        "/start@",
+        "/start",
+      ]);
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
@@ -489,6 +502,35 @@ describe("gateway bus", () => {
       const failed = await bus.reply("webhook", "c1", "u1", "again");
       expect(failed?.failed).toBe(true);
       expect(failed?.text.startsWith("agent error: provider down")).toBe(true);
+      expect(failed?.usage).toBeUndefined();
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handle() omits an empty final reply; reply() still returns the empty text", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const bus = new GatewayBus({
+        config: config_for(work_dir),
+        agent_factory: () =>
+          ({
+            run: async (): Promise<AgentRunResult> => ({
+              outcome: {
+                messages: [],
+                final: { role: "assistant", content: "" },
+                result: undefined,
+                turns_used: 1,
+                stopped_reason: "final",
+              },
+              messages: [],
+              usage_total: usage_small,
+              session_path: undefined,
+            }),
+          }) as unknown as Agent,
+      });
+      expect(await bus.handle("webhook", "c1", "u1", "hi")).toBeUndefined();
+      expect(await bus.reply("webhook", "c1", "u1", "hi")).toEqual({ text: "", usage: usage_small });
     } finally {
       rmSync(work_dir, { recursive: true, force: true });
     }
