@@ -1,9 +1,10 @@
 /**
  * Must-fix tools: symlink escape, forbidden paths, SSRF, run_tests filter, env scrub.
  */
+import dns from "node:dns/promises";
 import { mkdir, mkdtemp, symlink, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { assert_file_tool_access, resolve_safe_path } from "../src/tools/guard.js";
 import {
   is_blocked_ip,
@@ -30,6 +31,14 @@ afterAll(async () => {
 afterEach(() => {
   reset_url_guard_fetch();
 });
+
+function restore_private_url_env(saved: string | undefined): void {
+  if (saved === undefined) {
+    delete process.env["LICH_ALLOW_PRIVATE_URLS"];
+    return;
+  }
+  process.env["LICH_ALLOW_PRIVATE_URLS"] = saved;
+}
 
 async function make_temp_dir(): Promise<string> {
   await mkdir(TMP_BASE, { recursive: true });
@@ -130,6 +139,42 @@ describe("S-2 SSRF helpers", () => {
     await expect(resolve_public_ip("[::1]")).rejects.toThrow(/blocked_url/);
   });
 
+  it("rejects a host when any DNS answer is private, and local suffixes before lookup", async () => {
+    const saved = process.env["LICH_ALLOW_PRIVATE_URLS"];
+    delete process.env["LICH_ALLOW_PRIVATE_URLS"];
+    const lookup = vi.spyOn(dns, "lookup");
+    try {
+      lookup.mockImplementation(async () => [{ address: "1.1.1.1", family: 4 }] as never);
+      await expect(resolve_public_ip("cdn.example")).resolves.toBe("1.1.1.1");
+      lookup.mockImplementation(async () => [
+        { address: "1.1.1.1", family: 4 },
+        { address: "10.0.0.1", family: 4 },
+      ] as never);
+      await expect(resolve_public_ip("cdn.example")).rejects.toThrow(/blocked_url: cdn\.example/);
+      lookup.mockImplementation(async () => [] as never);
+      await expect(resolve_public_ip("cdn.example")).rejects.toThrow(/blocked_url: cdn\.example/);
+      lookup.mockClear();
+      await expect(resolve_public_ip("app.localhost")).rejects.toThrow(/blocked_url: app\.localhost/);
+      await expect(resolve_public_ip("printer.local")).rejects.toThrow(/blocked_url: printer\.local/);
+      expect(lookup).not.toHaveBeenCalled();
+    } finally {
+      lookup.mockRestore();
+      restore_private_url_env(saved);
+    }
+  });
+
+  it("allows a private literal only when LICH_ALLOW_PRIVATE_URLS is exactly 1", async () => {
+    const saved = process.env["LICH_ALLOW_PRIVATE_URLS"];
+    try {
+      process.env["LICH_ALLOW_PRIVATE_URLS"] = "true";
+      await expect(resolve_public_ip("127.0.0.1")).rejects.toThrow(/blocked_url/);
+      process.env["LICH_ALLOW_PRIVATE_URLS"] = "1";
+      await expect(resolve_public_ip("127.0.0.1")).resolves.toBe("127.0.0.1");
+    } finally {
+      restore_private_url_env(saved);
+    }
+  });
+
   it("safe_fetch keeps https hostname for the fetch seam (no IP rewrite)", async () => {
     const seen: string[] = [];
     set_url_guard_fetch(async (input) => {
@@ -174,6 +219,34 @@ describe("S-1/S-3 grep_files guards", () => {
     expect(dir.output).not.toContain("api_key");
     expect(dir.output).not.toContain("sk-test-secret");
   });
+
+  it("denies grepping .lich/profiles and still searches the rest of .lich", async () => {
+    const work = await make_temp_dir();
+    await mkdir(path.join(work, ".lich", "profiles"), { recursive: true });
+    await mkdir(path.join(work, ".lich", "skills"), { recursive: true });
+    await writeFile(path.join(work, ".lich", "profiles", "coder.md"), "profile-soul-secret\n");
+    await writeFile(path.join(work, ".lich", "skills", "note.md"), "skill-marker\n");
+    const direct = await grep_files_tool.execute(
+      { pattern: "profile-soul-secret", path: ".lich/profiles/coder.md" },
+      { work_dir: work, env: {} },
+    );
+    expect(direct.ok).toBe(false);
+    expect(direct.error).toMatch(/forbidden_path: \.lich\/profiles/);
+    expect(direct.output).not.toContain("profile-soul-secret");
+    const root = await grep_files_tool.execute(
+      { pattern: "profile-soul-secret", path: ".lich/profiles" },
+      { work_dir: work, env: {} },
+    );
+    expect(root.ok).toBe(false);
+    expect(root.error).toMatch(/forbidden_path: \.lich\/profiles/);
+    const walked = await grep_files_tool.execute(
+      { pattern: "profile-soul-secret|skill-marker", path: ".lich" },
+      { work_dir: work, env: {} },
+    );
+    expect(walked.ok).toBe(true);
+    expect(walked.output).toContain("skill-marker");
+    expect(walked.output).not.toContain("profile-soul-secret");
+  });
 });
 
 describe("S-4 terminal env scrub", () => {
@@ -193,6 +266,28 @@ describe("S-4 terminal env scrub", () => {
     expect(scrubbed.OPENAI_API_KEY).toBeUndefined();
     expect(scrubbed.LICH_GATEWAY_TOKEN).toBeUndefined();
     expect(scrubbed.MY_SECRET).toBeUndefined();
+  });
+
+  it("does not let the tool context put secret names back into the spawn env", () => {
+    const scrubbed = scrub_spawn_env(
+      { PATH: "/usr/bin" },
+      {
+        PATH: "/opt/bin",
+        ANTHROPIC_API_KEY: "sk-ant",
+        LICH_API_KEY: "lich-key",
+        LICH_DISCORD_BOT_TOKEN: "discord",
+        LICH_TELEGRAM_BOT_TOKEN: "telegram",
+        LICH_TWITCH_OAUTH_TOKEN: "twitch",
+        VISIBLE: "kept",
+      },
+    );
+    expect(scrubbed.PATH).toBe("/opt/bin");
+    expect(scrubbed.VISIBLE).toBe("kept");
+    expect(scrubbed.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(scrubbed.LICH_API_KEY).toBeUndefined();
+    expect(scrubbed.LICH_DISCORD_BOT_TOKEN).toBeUndefined();
+    expect(scrubbed.LICH_TELEGRAM_BOT_TOKEN).toBeUndefined();
+    expect(scrubbed.LICH_TWITCH_OAUTH_TOKEN).toBeUndefined();
   });
 });
 

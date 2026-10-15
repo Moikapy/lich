@@ -7,6 +7,7 @@ import { register_builtin_tools } from "../src/tools/builtin/index.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 import { ToolExecutor } from "../src/tools/executor.js";
 import { ToolRegistry } from "../src/tools/registry.js";
+import { http_request_tool } from "../src/tools/builtin/http_request.js";
 import { is_blocked_ip, reset_url_guard_fetch, safe_fetch, set_url_guard_fetch } from "../src/tools/url_guard.js";
 
 let tmp_root: string;
@@ -333,6 +334,51 @@ describe("http_request", () => {
     expect(result.error).toBe("http_404");
     expect(result.output).toContain("# status 404");
     expect(result.output).toContain('{"error":"nope"}');
+  });
+
+  it("sends no body for HEAD and drops null or non-object headers", async () => {
+    const fetch_mock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => fake_response(""));
+    stub_fetch(fetch_mock);
+    const result = await executor.execute("http_request", {
+      url: "https://api.example.com/ping",
+      method: "head",
+      headers: { "x-keep": "yes", "x-skip": null },
+      body: "should-not-send",
+    });
+    expect(result.ok).toBe(true);
+    const call = fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined;
+    const init = call?.[1];
+    expect(init?.method).toBe("HEAD");
+    expect(init?.body).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get("x-keep")).toBe("yes");
+    expect(headers.has("x-skip")).toBe(false);
+
+    fetch_mock.mockClear();
+    await executor.execute("http_request", {
+      url: "https://api.example.com/ping",
+      headers: ["x-token", "abc"],
+    });
+    expect(fetch_mock).toHaveBeenCalledTimes(1);
+    const second = fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined;
+    expect([...new Headers(second?.[1]?.headers).keys()]).toEqual([]);
+  });
+
+  it("forwards an already-aborted caller signal into the request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetch_mock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal?.aborted).toBe(true);
+      throw new DOMException("The operation was aborted", "AbortError");
+    });
+    stub_fetch(fetch_mock);
+    const result = await http_request_tool.execute(
+      { url: "https://api.example.com/ping" },
+      { work_dir: tmp_root, env: {}, signal: controller.signal },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("aborted");
+    expect(fetch_mock).toHaveBeenCalledTimes(1);
   });
 
   it("sends no body for GET and rejects invalid methods", async () => {

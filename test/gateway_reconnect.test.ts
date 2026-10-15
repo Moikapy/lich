@@ -5,8 +5,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse_agent_config } from "../src/agent/config.js";
-import { create_discord_adapter } from "../src/gateway/discord.js";
-import { create_twitch_adapter } from "../src/gateway/twitch.js";
+import { create_discord_adapter, DISCORD_CAPABILITIES } from "../src/gateway/discord.js";
+import { create_twitch_adapter, TWITCH_CAPABILITIES } from "../src/gateway/twitch.js";
 import type { AdapterParams } from "../src/gateway/types.js";
 
 const sleep_state = vi.hoisted(() => ({
@@ -131,6 +131,16 @@ function release_sleep(): void {
   next?.resolve();
 }
 
+async function wait_for(ready: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (ready() === true) {
+      return;
+    }
+    await settle();
+  }
+  throw new Error("condition not met");
+}
+
 function heartbeat_count(socket: FakeSocket): number {
   return socket.sent.filter((line) => line.includes('"op":1')).length;
 }
@@ -222,6 +232,37 @@ describe("discord reconnect", () => {
     expect(heartbeat_count(socket)).toBe(2);
     await adapter.stop();
   });
+
+  it("posts a long reply in chunks no larger than the declared cap", async () => {
+    remember_env();
+    process.env.LICH_DISCORD_BOT_TOKEN = "fixture-discord-token";
+    const cap = DISCORD_CAPABILITIES.max_reply_chars ?? 0;
+    const reply = "z".repeat(cap + 1);
+    const contents: string[] = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("fetch", async (_url: unknown, init?: RequestInit) => {
+      const raw = typeof init?.body === "string" ? init.body : "";
+      const body = JSON.parse(raw) as { content?: string };
+      if (typeof body.content === "string") {
+        contents.push(body.content);
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const adapter = create_discord_adapter({
+      ...adapter_params(),
+      handle_message: async () => reply,
+    });
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    socket.emit(JSON.stringify({
+      t: "MESSAGE_CREATE",
+      d: { channel_id: "chan-1", content: "hi", author: { id: "user-1", bot: false } },
+    }));
+    await wait_for(() => contents.length === 2);
+    expect(contents.map((chunk) => chunk.length)).toEqual([cap, 1]);
+    expect(contents.join("")).toBe(reply);
+    await adapter.stop();
+  });
 });
 
 describe("twitch reconnect", () => {
@@ -251,6 +292,34 @@ describe("twitch reconnect", () => {
     third.server_close(1006);
     await settle();
     expect(sleep_state.delays).toEqual([5000, 5000, 10000]);
+    await adapter.stop();
+  });
+
+  it("splits a long reply at the declared cap and strips a command marker the cut exposes", async () => {
+    remember_env();
+    process.env.LICH_TWITCH_OAUTH_TOKEN = "fixture-twitch-token";
+    process.env.LICH_TWITCH_NICK = "lichbot";
+    process.env.LICH_TWITCH_CHANNELS = "lobby";
+    const cap = TWITCH_CAPABILITIES.max_reply_chars ?? 0;
+    const reply = `${"a".repeat(cap)}/me pwn`;
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const adapter = create_twitch_adapter({
+      ...adapter_params(),
+      handle_message: async () => reply,
+    });
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    socket.emit(":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #lobby :hello\r\n");
+    const bodies = (): string[] =>
+      socket.sent.filter((line) => line.startsWith("PRIVMSG #")).map((line) => line.slice(line.indexOf(" :") + 2));
+    await wait_for(() => bodies().length === 1 && sleep_state.pending.length > 0);
+    release_sleep();
+    await wait_for(() => bodies().length === 2);
+    expect(bodies()[0]).toBe("a".repeat(cap));
+    expect(bodies()[1]).toBe("me pwn");
+    for (const body of bodies()) {
+      expect(body.length).toBeLessThanOrEqual(cap);
+    }
     await adapter.stop();
   });
 });

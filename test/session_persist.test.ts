@@ -6,7 +6,8 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { create_agent } from "../src/agent/agent.js";
-import { open_session, read_session_messages } from "../src/session/store.js";
+import type { Message } from "../src/providers/types.js";
+import { open_session, read_session_messages, type SessionRecord } from "../src/session/store.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const temp_dirs: string[] = [];
@@ -363,6 +364,116 @@ describe("read_session_messages resume hygiene", () => {
     ]);
   });
 
+  it("closes a missing middle call and does not let an unrelated tool row satisfy it", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "middle");
+    const rows: Array<{ ts: string; message: Message }> = [
+      {
+        ts: "2026-01-01T00:00:00.000Z",
+        message: { role: "user", content: "run three" },
+      },
+      {
+        ts: "2026-01-01T00:00:01.000Z",
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { id: "c1", name: "read_file", args: { path: "a.txt" } },
+            { id: "c2", name: "read_file", args: { path: "b.txt" } },
+            { id: "c3", name: "read_file", args: { path: "c.txt" } },
+          ],
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:02.000Z",
+        message: { role: "tool", tool_call_id: "c1", name: "read_file", content: "denied", is_error: true },
+      },
+      {
+        ts: "2026-01-01T00:00:03.000Z",
+        message: { role: "tool", tool_call_id: "stray", name: "read_file", content: "not-this-call" },
+      },
+      {
+        ts: "2026-01-01T00:00:04.000Z",
+        message: { role: "tool", tool_call_id: "c3", name: "read_file", content: "c-body" },
+      },
+    ];
+    for (const row of rows) {
+      await handle.append({ ts: row.ts, kind: "message", message: row.message });
+    }
+    const messages = await read_session_messages(handle.path);
+    // Only how each real call is answered is pinned here; whether an orphan
+    // tool row (the stray id) should survive resume is a separate question.
+    const result_for = (id: string): Message | undefined =>
+      messages.find((message) => message.role === "tool" && message.tool_call_id === id);
+    expect(result_for("c1")).toMatchObject({ content: "denied", is_error: true });
+    expect(result_for("c3")).toMatchObject({ content: "c-body" });
+    expect(result_for("c2")).toMatchObject({
+      role: "tool",
+      tool_call_id: "c2",
+      name: "read_file",
+      is_error: true,
+      content: JSON.stringify({ ok: false, output: "", error: "cancelled" }),
+    });
+  });
+
+  it("closes a later assistant's open calls after an earlier exchange and drops trailing users", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "two-groups");
+    const rows: Array<{ ts: string; message: Message }> = [
+      { ts: "2026-01-01T00:00:00.000Z", message: { role: "user", content: "go" } },
+      {
+        ts: "2026-01-01T00:00:01.000Z",
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: "c1", name: "read_file", args: { path: "a.txt" } }],
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:02.000Z",
+        message: { role: "tool", tool_call_id: "c1", name: "read_file", content: "a-body" },
+      },
+      {
+        ts: "2026-01-01T00:00:03.000Z",
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { id: "c2", name: "terminal", args: { command: "echo b" } },
+            { id: "c3", name: "terminal", args: { command: "echo c" } },
+          ],
+        },
+      },
+      {
+        ts: "2026-01-01T00:00:04.000Z",
+        message: { role: "tool", tool_call_id: "c2", name: "terminal", content: "b-body" },
+      },
+      { ts: "2026-01-01T00:00:05.000Z", message: { role: "user", content: "unanswered" } },
+    ];
+    for (const row of rows) {
+      await handle.append({ ts: row.ts, kind: "message", message: row.message });
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "assistant", "tool", "tool"]);
+    expect(messages.map((message) => (message.role === "tool" ? message.tool_call_id : ""))).toEqual([
+      "",
+      "",
+      "c1",
+      "",
+      "c2",
+      "c3",
+    ]);
+    expect(messages[2]).toMatchObject({ tool_call_id: "c1", content: "a-body" });
+    expect(messages[4]).toMatchObject({ tool_call_id: "c2", content: "b-body" });
+    expect(messages[5]).toMatchObject({
+      tool_call_id: "c3",
+      name: "terminal",
+      is_error: true,
+      content: JSON.stringify({ ok: false, output: "", error: "cancelled" }),
+    });
+    expect(JSON.stringify(messages)).not.toContain("unanswered");
+  });
+
   it("drops every trailing user message left by repeated failures", async () => {
     const work_dir = await make_temp_dir();
     const handle = await open_session(path.join(work_dir, "sessions"), "dangling-many");
@@ -381,5 +492,91 @@ describe("read_session_messages resume hygiene", () => {
     }
     const messages = await read_session_messages(handle.path);
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("drops a cancelled user seed once a later turn is appended", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "cancelled-seed");
+    const lines: SessionRecord[] = [
+      { ts: "2026-01-01T00:00:00.000Z", kind: "message", message: { role: "user", content: "do-not-replay" } },
+      { ts: "2026-01-01T00:00:01.000Z", kind: "meta", meta: { event: "run_end", stopped_reason: "aborted" } },
+      { ts: "2026-01-01T00:00:02.000Z", kind: "meta", meta: { event: "run_start", input_chars: 5 } },
+      { ts: "2026-01-01T00:00:03.000Z", kind: "message", message: { role: "user", content: "after" } },
+      { ts: "2026-01-01T00:00:04.000Z", kind: "message", message: { role: "assistant", content: "ok" } },
+    ];
+    for (const line of lines) {
+      await handle.append(line);
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      { role: "user", content: "after" },
+      { role: "assistant", content: "ok" },
+    ]);
+  });
+
+  it("keeps adjacent user lines that have no meta between them", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "summary-users");
+    const contents = ["[context summary of earlier turns]\nnotes", "the real question", "answer"];
+    const roles = ["user", "user", "assistant"] as const;
+    for (const [index, content] of contents.entries()) {
+      await handle.append({
+        ts: `2026-01-01T00:00:0${index}.000Z`,
+        kind: "message",
+        message: { role: roles[index] ?? "user", content },
+      });
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      { role: "user", content: contents[0] },
+      { role: "user", content: contents[1] },
+      { role: "assistant", content: contents[2] },
+    ]);
+  });
+
+  it("keeps a user when compress meta sits before the assistant, and drops every earlier aborted seed", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "compress-after-abort");
+    const lines: SessionRecord[] = [
+      { ts: "2026-01-01T00:00:00.000Z", kind: "message", message: { role: "system", content: "soul" } },
+      { ts: "2026-01-01T00:00:01.000Z", kind: "message", message: { role: "user", content: "aborted-1" } },
+      { ts: "2026-01-01T00:00:02.000Z", kind: "meta", meta: { event: "run_end", stopped_reason: "aborted" } },
+      { ts: "2026-01-01T00:00:03.000Z", kind: "message", message: { role: "user", content: "aborted-2" } },
+      { ts: "2026-01-01T00:00:04.000Z", kind: "meta", meta: { event: "run_end", stopped_reason: "aborted" } },
+      { ts: "2026-01-01T00:00:05.000Z", kind: "meta", meta: { event: "run_start", input_chars: 8 } },
+      { ts: "2026-01-01T00:00:06.000Z", kind: "message", message: { role: "user", content: "question" } },
+      { ts: "2026-01-01T00:00:07.000Z", kind: "meta", meta: { event: "compress_end", summary_chars: 12 } },
+      { ts: "2026-01-01T00:00:08.000Z", kind: "message", message: { role: "assistant", content: "answer" } },
+      { ts: "2026-01-01T00:00:09.000Z", kind: "meta", meta: { event: "run_end", stopped_reason: "final" } },
+    ];
+    for (const line of lines) {
+      await handle.append(line);
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      { role: "system", content: "soul" },
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]);
+  });
+
+  it("does not treat a corrupt message line as meta between adjacent users", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "corrupt-between-users");
+    const lines: SessionRecord[] = [
+      { ts: "2026-01-01T00:00:00.000Z", kind: "message", message: { role: "user", content: "summary" } },
+      { ts: "2026-01-01T00:00:01.000Z", kind: "message", message: { role: "nope" } as unknown as SessionRecord["message"] },
+      { ts: "2026-01-01T00:00:02.000Z", kind: "message", message: { role: "user", content: "question" } },
+      { ts: "2026-01-01T00:00:03.000Z", kind: "message", message: { role: "assistant", content: "answer" } },
+    ];
+    for (const line of lines) {
+      await handle.append(line);
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      { role: "user", content: "summary" },
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]);
   });
 });

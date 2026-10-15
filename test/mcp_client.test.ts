@@ -302,6 +302,23 @@ describe("mcp handshake", () => {
     expect(plan_stdio("my_redot", redot, ["--script", "evil.gd"], work_dir)).toMatch(/refused redot args/);
   });
 
+  it("pins a redot basename even under another server name", async () => {
+    const work_dir = await temp_dir("mcp-redot-pin");
+    const redot = path.join(work_dir, "redot");
+    const redot_upper = path.join(work_dir, "REDOT");
+    await writeFile(redot, "");
+    await writeFile(redot_upper, "");
+    const project = path.join(work_dir, "game");
+    const official = redot_args(project);
+    expect(plan_stdio("editor", redot, official, undefined)).toEqual({ command: redot, args: official });
+    expect(plan_stdio("editor", redot, [...official, "--editor"], undefined)).toMatch(/refused redot args/);
+    expect(plan_stdio("editor", redot, ["--mcp-server", "--headless", "--path", project], undefined)).toMatch(/refused redot args/);
+    expect(plan_stdio("editor", redot, ["--headless", "--mcp-server", "--path", ""], undefined)).toMatch(/refused project path/);
+    // catalog_by_basename lowercases, so REDOT is the pinned redot binary.
+    const upper = plan_stdio("editor", redot_upper, ["--script", "evil.gd"], undefined);
+    expect(upper).toMatch(/refused command basename 'REDOT'/);
+  });
+
   it("rejects a bad handshake and does not register tools", async () => {
     const work_dir = await temp_dir("mcp-bad-handshake");
     const binary = path.join(work_dir, "redot");
@@ -451,5 +468,50 @@ describe("mcp tool disablement", () => {
     });
     expect(config.mcp_servers?.loop).toEqual({ enabled: false, url: "http://localhost:9/mcp" });
     expect(Object.isFrozen(config.mcp_servers?.loop)).toBe(true);
+  });
+
+  it("rejects mcp env names that are not POSIX identifiers and freezes a valid map", () => {
+    const secret = "super-secret-value";
+    const bad_names = ["FOO-BAR", "1TOKEN", "HAS SPACE", ""];
+    for (const name of bad_names) {
+      let thrown = "";
+      try {
+        parse_agent_config({
+          providers,
+          mcp_servers: { lab: { command: "tool", args: ["--stdio"], env: { [name]: secret } } },
+        });
+      } catch (error) {
+        thrown = error instanceof Error ? error.message : String(error);
+      }
+      expect(thrown).toMatch(/invalid env var name/);
+      expect(thrown).not.toContain(secret);
+    }
+    expect(() =>
+      parse_agent_config({
+        providers,
+        mcp_servers: { lab: { command: "tool", args: ["--stdio"], env: { OK: 1 } } },
+      }),
+    ).toThrow(/Expected string, received number/);
+    expect(() =>
+      parse_agent_config({
+        providers,
+        mcp_servers: { loop: { url: "http://127.0.0.1:9/mcp", env: { PATH: secret } } },
+      }),
+    ).toThrow(/Unrecognized key\(s\) in object: 'env'/);
+
+    const config = parse_agent_config({
+      providers,
+      mcp_servers: {
+        lab: { command: "tool", args: ["--stdio"], env: { LICH_PROJECT: "game", _OK: "1" } },
+      },
+    });
+    const entry = config.mcp_servers?.lab;
+    expect(entry).toEqual({
+      enabled: false,
+      command: "tool",
+      args: ["--stdio"],
+      env: { LICH_PROJECT: "game", _OK: "1" },
+    });
+    expect(entry !== undefined && "env" in entry && Object.isFrozen(entry.env)).toBe(true);
   });
 });

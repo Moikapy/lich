@@ -2,7 +2,7 @@
  * First-run setup: one writer for `lich init` and the bare-`lich` wizard.
  * No network. Config discovery ignores the real user-home file.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TMP_BASE } from "./helpers/tmp_base.js";
@@ -17,9 +17,10 @@ vi.mock("../src/cli_config.js", async (import_original) => {
   const actual = await import_original<typeof import("../src/cli_config.js")>();
   return {
     ...actual,
-    write_lich_config: (work_dir: string, config: Record<string, unknown>, update?: boolean) => {
+    write_lich_config: (...args: Parameters<typeof actual.write_lich_config>) => {
+      const [work_dir, config] = args;
       writes.calls.push({ work_dir, config });
-      return actual.write_lich_config(work_dir, config, update);
+      return actual.write_lich_config(...args);
     },
   };
 });
@@ -58,7 +59,7 @@ vi.mock("../src/gateway.js", () => ({
 }));
 
 import { parse_agent_config } from "../src/agent/config.js";
-import { config_search_paths, existing_config_path, global_config_path, project_config_path, write_lich_config } from "../src/cli_config.js";
+import { config_search_paths, existing_config_path, global_config_path, load_layered_config, project_config_path, write_lich_config } from "../src/cli_config.js";
 import { read_platform_token } from "../src/gateway/token_env.js";
 import { build_setup_config, collect_setup_answers } from "../src/setup_wizard.js";
 import { run_cli } from "../src/cli.js";
@@ -511,6 +512,42 @@ describe("lich init and bare lich", () => {
     });
   });
 
+  it("lich init --global refuses to hide a legacy config", async () => {
+    const home = String(process.env.HOME);
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    const body = JSON.stringify({ agent_name: "legacy", tools_enabled: ["read_file"] });
+    writeFileSync(legacy, body);
+    await expect(run_cli(["init", "--global", "--model", "starter"])).rejects.toThrow(
+      "legacy config at ~/.config/lich/config.json is still in use",
+    );
+    expect(existsSync(global_config_path())).toBe(false);
+    await expect(run_cli(["init", "--work-dir", home, "--model", "starter"])).rejects.toThrow(
+      "legacy config at ~/.config/lich/config.json is still in use",
+    );
+    expect(existsSync(global_config_path())).toBe(false);
+    expect(readFileSync(legacy, "utf8")).toBe(body);
+  });
+
+  it("lich init --global leaves an existing global file when a legacy file is also present", async () => {
+    const home = String(process.env.HOME);
+    const global_body = `${JSON.stringify({ agent_name: "kept", max_turns: 9 })}\n`;
+    mkdirSync(path.dirname(global_config_path()), { recursive: true });
+    writeFileSync(global_config_path(), global_body);
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    const legacy_body = JSON.stringify({ agent_name: "legacy", tools_enabled: ["read_file"] });
+    writeFileSync(legacy, legacy_body);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["init", "--global", "--model", "starter"])).toBe(0);
+      expect(readFileSync(global_config_path(), "utf8")).toBe(global_body);
+      expect(readFileSync(legacy, "utf8")).toBe(legacy_body);
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
   it("lich profile create runs the wizard into ~/.lich/profiles/<name>.json and never overwrites", async () => {
     const restore_tty = set_tty(true);
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -542,6 +579,151 @@ describe("lich init and bare lich", () => {
       expect(await run_cli(["profile", "list"])).toBe(0);
       expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toBe("  bard (soul)\n* coder\n");
       await expect(run_cli(["profile", "use", "ghost"])).rejects.toThrow("profile not found: ghost");
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it("lich profile use copies a legacy config into ~/.lich/config.json instead of hiding it", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    const legacy_body = {
+      max_turns: 4,
+      tools_enabled: ["read_file"],
+      work_dir: "/should-not-stick",
+      session_dir: "/also-not",
+      plugins: ["plugin.mjs", { path: "obj.mjs", settings: { a: 1 } }],
+    };
+    writeFileSync(legacy, JSON.stringify(legacy_body));
+    chmodSync(legacy, 0o600);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "use", "coder"])).toBe(0);
+      expect(readFileSync(legacy, "utf8")).toBe(JSON.stringify(legacy_body));
+      const global = JSON.parse(readFileSync(global_config_path(), "utf8")) as Record<string, unknown>;
+      expect(global["max_turns"]).toBe(4);
+      expect(global["tools_enabled"]).toEqual(["read_file"]);
+      expect(global["profile"]).toBe("coder");
+      expect(global["work_dir"]).toBeUndefined();
+      expect(global["session_dir"]).toBeUndefined();
+      expect(global["plugins"]).toEqual([
+        path.join(home, ".config", "lich", "plugin.mjs"),
+        { path: path.join(home, ".config", "lich", "obj.mjs"), settings: { a: 1 } },
+      ]);
+      expect(statSync(global_config_path()).mode & 0o777).toBe(0o600);
+      const work = make_temp_dir("after-profile-use");
+      const layered = load_layered_config(work);
+      expect(layered?.config["agent_name"]).toBe("coder");
+      expect(layered?.config["tools_enabled"]).toEqual(["read_file"]);
+      expect(layered?.sources[0]).toBe(global_config_path());
+      expect(String(stderr.mock.calls[0]?.[0])).toContain("copied the legacy config");
+    } finally {
+      stderr.mockRestore();
+      stdout.mockRestore();
+    }
+  });
+
+  it("lich profile use keeps an existing global config when a legacy file is also present", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    const global_body = { max_turns: 9, tools_enabled: ["grep_files"] };
+    writeFileSync(global_config_path(), JSON.stringify(global_body));
+    chmodSync(global_config_path(), 0o640);
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    const legacy_body = {
+      max_turns: 1,
+      tools_enabled: ["read_file"],
+      plugins: ["plugin.mjs"],
+    };
+    writeFileSync(legacy, JSON.stringify(legacy_body));
+    chmodSync(legacy, 0o600);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "use", "coder"])).toBe(0);
+      expect(JSON.parse(readFileSync(global_config_path(), "utf8"))).toEqual({ ...global_body, profile: "coder" });
+      expect(statSync(global_config_path()).mode & 0o777).toBe(0o640);
+      expect(readFileSync(legacy, "utf8")).toBe(JSON.stringify(legacy_body));
+      expect(stderr.mock.calls.map((call) => String(call[0])).join("")).not.toContain("copied the legacy config");
+    } finally {
+      stderr.mockRestore();
+      stdout.mockRestore();
+    }
+  });
+
+  it("lich profile use does not create a global file when the legacy config is invalid", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    writeFileSync(legacy, "[");
+    await expect(run_cli(["profile", "use", "coder"])).rejects.toThrow("invalid config json");
+    expect(existsSync(global_config_path())).toBe(false);
+    expect(readFileSync(legacy, "utf8")).toBe("[");
+  });
+
+  it("rejects a bad profile command before it writes, and a non-TTY or cancelled create writes nothing", async () => {
+    const profile_file = path.join(String(process.env.HOME), ".lich", "profiles", "coder.json");
+    await expect(run_cli(["profile"])).rejects.toThrow("profile requires list, show, create, or use");
+    await expect(run_cli(["profile", "list", "extra"])).rejects.toThrow("profile list takes no name");
+    await expect(run_cli(["profile", "show", "coder", "extra"])).rejects.toThrow("profile takes one name");
+    await expect(run_cli(["profile", "show"])).rejects.toThrow("profile show requires a name");
+    await expect(run_cli(["profile", "use", "../x"])).rejects.toThrow("invalid profile name");
+    expect(existsSync(profile_file)).toBe(false);
+
+    const restore_tty = set_tty(false);
+    try {
+      await expect(run_cli(["profile", "create", "coder"])).rejects.toThrow("profile create needs a TTY");
+      expect(existsSync(profile_file)).toBe(false);
+    } finally {
+      restore_tty();
+    }
+
+    const restore_on = set_tty(true);
+    wizard.cancel = true;
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "create", "coder"])).toBe(1);
+      expect(stderr.mock.calls.map((call) => String(call[0])).join("")).toContain("profile create cancelled");
+      expect(existsSync(profile_file)).toBe(false);
+    } finally {
+      stderr.mockRestore();
+      restore_on();
+      wizard.cancel = false;
+    }
+  });
+
+  it("shows json and soul, lists only slug names, and can select a soul-only profile", async () => {
+    const home = String(process.env.HOME);
+    const dir = path.join(home, ".lich", "profiles");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "NotASlug.json"), "{}\n");
+    writeFileSync(path.join(dir, "notes.txt"), "nope\n");
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "list"])).toBe(0);
+      expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toContain("no profiles in ");
+      writeFileSync(path.join(dir, "coder.json"), "{\n  \"agent_name\": \"coder\"\n}\n");
+      writeFileSync(path.join(dir, "coder.md"), "  soul text  \n");
+      writeFileSync(path.join(dir, "bard.md"), "You are a bard.\n");
+      stdout.mockClear();
+      expect(await run_cli(["profile", "show", "coder"])).toBe(0);
+      const shown = stdout.mock.calls.map((call) => String(call[0])).join("");
+      expect(shown).toContain('"agent_name": "coder"');
+      expect(shown).toContain("(system prompt, 9 chars)");
+      stdout.mockClear();
+      expect(await run_cli(["profile", "list"])).toBe(0);
+      expect(stdout.mock.calls.map((call) => String(call[0])).join("")).toBe("  bard (soul)\n  coder (soul)\n");
+      await expect(run_cli(["profile", "show", "missing"])).rejects.toThrow(/^profile not found: missing$/);
+      expect(await run_cli(["profile", "use", "bard"])).toBe(0);
+      expect(JSON.parse(readFileSync(global_config_path(), "utf8"))).toEqual({ profile: "bard" });
     } finally {
       stdout.mockRestore();
     }

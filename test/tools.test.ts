@@ -265,6 +265,15 @@ describe("executor", () => {
     expect(Date.now() - started < 4000).toBe(true);
   });
 
+  it("ignores a non-positive or non-numeric terminal_timeout_ms instead of killing at once", async () => {
+    for (const configured of ["0", "-5", "nope", ""]) {
+      const context: ToolContext = { work_dir: tmp_root, env: { LICH_TERMINAL_TIMEOUT_MS: configured } };
+      const result = await terminal_tool.execute({ command: "sleep 0.2" }, context);
+      expect(result.ok, configured).toBe(true);
+      expect(result.error, configured).toBeUndefined();
+    }
+  });
+
   it("terminal declares a 300000ms executor timeout", () => {
     expect(terminal_tool.timeout_ms).toBe(300000);
   });
@@ -438,6 +447,73 @@ describe("symlink confinement", () => {
     expect(written.ok).toBe(false);
     expect(written.error?.startsWith("path_escape")).toBe(true);
     expect(await readFile(outside_file, "utf8")).toBe("before\n");
+  });
+
+  it("resolves an in-ward directory symlink and still refuses symlink-leaf writes", async () => {
+    await write_temp(tmp_root, "inward/note.txt", "kept\n");
+    symlinkSync(path.join(tmp_root, "inward"), path.join(tmp_root, "inward_alias"));
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const read = await executor.execute("read_file", { path: "inward_alias/note.txt" });
+    expect(read.ok).toBe(true);
+    expect(read.output).toBe("kept\n");
+    const created = await executor.execute("write_file", { path: "inward_alias/fresh.txt", content: "new\n" });
+    expect(created.ok).toBe(true);
+    expect(await read_temp(tmp_root, "inward/fresh.txt")).toBe("new\n");
+    symlinkSync(path.join(tmp_root, "inward", "note.txt"), path.join(tmp_root, "note_alias.txt"));
+    const overwritten = await executor.execute("write_file", { path: "note_alias.txt", content: "changed\n" });
+    expect(overwritten.ok).toBe(false);
+    expect(overwritten.error?.startsWith("path_escape")).toBe(true);
+    const edited = await executor.execute("edit_file", {
+      path: "note_alias.txt",
+      old_string: "kept",
+      new_string: "lost",
+    });
+    expect(edited.ok).toBe(false);
+    expect(edited.error?.startsWith("path_escape")).toBe(true);
+    expect(await read_temp(tmp_root, "inward/note.txt")).toBe("kept\n");
+  });
+
+  it("denies symlinks that resolve onto .lich identity files", async () => {
+    await write_temp(tmp_root, ".lich/config.json", '{"api_key":"sk-alias-secret"}\n');
+    await write_temp(tmp_root, ".lich/profiles/coder.md", "secret-soul\n");
+    await mkdir(path.join(tmp_root, "nest"), { recursive: true });
+    symlinkSync(path.join("..", ".lich", "config.json"), path.join(tmp_root, "nest", "config_alias.json"));
+    symlinkSync(path.join(".lich", "profiles", "coder.md"), path.join(tmp_root, "soul_alias.md"));
+    symlinkSync(path.join(".lich", "profiles"), path.join(tmp_root, "profiles_alias"));
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const config_read = await executor.execute("read_file", { path: "nest/config_alias.json" });
+    expect(config_read.ok).toBe(false);
+    expect(config_read.output).toBe("");
+    expect(config_read.error?.startsWith("forbidden_path: .lich/config.json")).toBe(true);
+    expect(config_read.error).not.toContain("sk-alias-secret");
+    const soul_read = await executor.execute("read_file", { path: "soul_alias.md" });
+    expect(soul_read.ok).toBe(false);
+    expect(soul_read.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    expect(soul_read.error).not.toContain("secret-soul");
+    const nested = await executor.execute("read_file", { path: "profiles_alias/coder.md" });
+    expect(nested.ok).toBe(false);
+    expect(nested.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    const planted = await executor.execute("write_file", { path: "profiles_alias/planted.md", content: "pwn\n" });
+    expect(planted.ok).toBe(false);
+    expect(planted.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    await expect(readFile(path.join(tmp_root, ".lich", "profiles", "planted.md"), "utf8")).rejects.toThrow();
+    const listed = await executor.execute("list_dir", { path: "profiles_alias" });
+    expect(listed.ok).toBe(false);
+    expect(listed.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    const usage = await executor.execute("disk_usage", { path: "profiles_alias" });
+    expect(usage.ok).toBe(false);
+    expect(usage.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    const grepped = await executor.execute("grep_files", { pattern: "api_key|secret-soul", path: "nest/config_alias.json" });
+    expect(grepped.ok).toBe(false);
+    expect(grepped.output).toBe("");
+    expect(grepped.error?.startsWith("forbidden_path: .lich/config.json")).toBe(true);
+    expect(grepped.error).not.toContain("sk-alias-secret");
+    expect(await read_temp(tmp_root, ".lich/config.json")).toContain("sk-alias-secret");
+    expect(await read_temp(tmp_root, ".lich/profiles/coder.md")).toBe("secret-soul\n");
   });
 });
 
