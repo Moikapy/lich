@@ -215,9 +215,50 @@ describe("gateway max_conversations", () => {
     started.find((run) => run.input === "a2")?.release();
     expect(await failed).toContain("agent error:");
 
+    const histories = (bus as unknown as { histories: Map<string, Message[]> }).histories;
+    expect([...histories.keys()]).toEqual(["webhook:c", "webhook:a"]);
+    expect(histories.get("webhook:a")?.map((message) => message.content)).toEqual(["a1", "echo:a1"]);
+    expect(histories.get("webhook:c")?.some((message) => message.content === "c1")).toBe(true);
+
     expect(await bus.handle("webhook", "a", "u", "a3")).toBe("echo:a3");
     const a3 = records.find((record) => record.input === "a3");
-    expect(a3?.history_len).toBeGreaterThan(0);
+    expect(a3?.history_len).toBe(2);
+
+    // Restoring a reinserted it as newest and evicted b, so b starts over.
+    expect(await bus.handle("webhook", "b", "u", "b2")).toBe("echo:b2");
+    const b2 = records.find((record) => record.input === "b2");
+    expect(b2?.history_len).toBe(0);
+  });
+
+  it("does not occupy a slot with an empty history when a new chat fails", async () => {
+    const work_dir = make_temp_dir();
+    const records: RunRecord[] = [];
+    const started: HeldRun[] = [];
+    const bus = new GatewayBus(
+      {
+        config: parse_agent_config({
+          providers: [{ kind: "openai_compat", name: "main", model: "mock-model" }],
+          work_dir,
+          log_level: "error",
+        }),
+        agent_factory: () => failing_held_agent(records, started, "b1"),
+      },
+      { max_conversations: 2, history_cap: 40 },
+    );
+
+    expect(await bus.handle("webhook", "a", "u", "a1")).toBe("echo:a1");
+    const failed = bus.handle("webhook", "b", "u", "b1");
+    await wait_for_start(started, "b1");
+    expect(await bus.handle("webhook", "c", "u", "c1")).toBe("echo:c1");
+    started.find((run) => run.input === "b1")?.release();
+    expect(await failed).toContain("agent error:");
+
+    const histories = (bus as unknown as { histories: Map<string, Message[]> }).histories;
+    expect([...histories.keys()]).toEqual(["webhook:a", "webhook:c"]);
+
+    expect(await bus.handle("webhook", "a", "u", "a2")).toBe("echo:a2");
+    const a2 = records.find((record) => record.input === "a2");
+    expect(a2?.history_len).toBe(2);
   });
 });
 

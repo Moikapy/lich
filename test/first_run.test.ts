@@ -529,6 +529,25 @@ describe("lich init and bare lich", () => {
     expect(readFileSync(legacy, "utf8")).toBe(body);
   });
 
+  it("lich init --global leaves an existing global file when a legacy file is also present", async () => {
+    const home = String(process.env.HOME);
+    const global_body = `${JSON.stringify({ agent_name: "kept", max_turns: 9 })}\n`;
+    mkdirSync(path.dirname(global_config_path()), { recursive: true });
+    writeFileSync(global_config_path(), global_body);
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    const legacy_body = JSON.stringify({ agent_name: "legacy", tools_enabled: ["read_file"] });
+    writeFileSync(legacy, legacy_body);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["init", "--global", "--model", "starter"])).toBe(0);
+      expect(readFileSync(global_config_path(), "utf8")).toBe(global_body);
+      expect(readFileSync(legacy, "utf8")).toBe(legacy_body);
+    } finally {
+      stdout.mockRestore();
+    }
+  });
+
   it("lich profile create runs the wizard into ~/.lich/profiles/<name>.json and never overwrites", async () => {
     const restore_tty = set_tty(true);
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -606,6 +625,48 @@ describe("lich init and bare lich", () => {
       stderr.mockRestore();
       stdout.mockRestore();
     }
+  });
+
+  it("lich profile use keeps an existing global config when a legacy file is also present", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    const global_body = { max_turns: 9, tools_enabled: ["grep_files"] };
+    writeFileSync(global_config_path(), JSON.stringify(global_body));
+    chmodSync(global_config_path(), 0o640);
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    const legacy_body = {
+      max_turns: 1,
+      tools_enabled: ["read_file"],
+      plugins: ["plugin.mjs"],
+    };
+    writeFileSync(legacy, JSON.stringify(legacy_body));
+    chmodSync(legacy, 0o600);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await run_cli(["profile", "use", "coder"])).toBe(0);
+      expect(JSON.parse(readFileSync(global_config_path(), "utf8"))).toEqual({ ...global_body, profile: "coder" });
+      expect(statSync(global_config_path()).mode & 0o777).toBe(0o640);
+      expect(readFileSync(legacy, "utf8")).toBe(JSON.stringify(legacy_body));
+      expect(stderr.mock.calls.map((call) => String(call[0])).join("")).not.toContain("copied the legacy config");
+    } finally {
+      stderr.mockRestore();
+      stdout.mockRestore();
+    }
+  });
+
+  it("lich profile use does not create a global file when the legacy config is invalid", async () => {
+    const home = String(process.env.HOME);
+    mkdirSync(path.join(home, ".lich", "profiles"), { recursive: true });
+    writeFileSync(path.join(home, ".lich", "profiles", "coder.json"), JSON.stringify({ agent_name: "coder" }));
+    const legacy = path.join(home, ".config", "lich", "config.json");
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    writeFileSync(legacy, "[");
+    await expect(run_cli(["profile", "use", "coder"])).rejects.toThrow("invalid config json");
+    expect(existsSync(global_config_path())).toBe(false);
+    expect(readFileSync(legacy, "utf8")).toBe("[");
   });
 
   it("rejects a bad profile command before it writes, and a non-TTY or cancelled create writes nothing", async () => {

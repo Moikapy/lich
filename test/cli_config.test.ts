@@ -461,6 +461,16 @@ describe("write_lich_config update", () => {
     write_lich_config(dir, { version: 1 }, true, 0o600);
     expect(statSync(project_config_path(dir)).mode & 0o777).toBe(0o600);
   });
+
+  it("keeps an existing file's mode when update is given a wider mode", () => {
+    const dir = make_temp_dir("atomic-keep-mode");
+    write_lich_config(dir, { version: 1 });
+    const file = project_config_path(dir);
+    chmodSync(file, 0o600);
+    write_lich_config(dir, { version: 2 }, true, 0o644);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ version: 2 });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe("integration shape", () => {
