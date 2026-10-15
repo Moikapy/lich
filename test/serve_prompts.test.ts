@@ -1204,6 +1204,82 @@ describe("serve prompt over websocket", () => {
     }
   });
 
+  it("waits to resume the transcript an in-flight submit is writing", async () => {
+    const work_dir = await make_temp_dir("serve-ws-resume-lane");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_hang!: () => void;
+    const hang = new Promise<void>((resolve) => {
+      release_hang = resolve;
+    });
+    let hang_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      hang_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: string }> };
+      if (body.messages.some((message) => message.content === "hang")) {
+        hang_started();
+        await hang;
+      }
+      return new Response(
+        JSON.stringify({
+          model: "mock-model",
+          choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir, agent, version: "9.9.9" });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create = async (id: number): Promise<string> =>
+        ((await request_rpc(ws, { jsonrpc: "2.0", id, method: "session.create", params: { source: "test" } })).result as {
+          session_id: string;
+        }).session_id;
+      const live = await create(1);
+      const other = await create(2);
+      const slow = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "prompt.submit",
+        params: { session_id: live, text: "hang" },
+      });
+      await started;
+      let resumed_live = false;
+      const resume_live = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "session.resume",
+        params: { id: live },
+      }).then((body) => {
+        resumed_live = true;
+        return body;
+      });
+      const resume_other = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "session.resume",
+        params: { id: other },
+      });
+      expect(resume_other.result).toMatchObject({ resumed_id: other, message_count: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(resumed_live).toBe(false);
+      release_hang();
+      const resumed = await resume_live;
+      expect((await slow).result).toMatchObject({ session_id: live, stopped_reason: "final" });
+      const result = resumed.result as { message_count: number; resumed_id: string };
+      expect(result.resumed_id).toBe(live);
+      expect(result.message_count).toBeGreaterThanOrEqual(2);
+    } finally {
+      release_hang();
+      ws.close();
+    }
+  });
+
   it("stop() aborts an in-flight prompt instead of draining the model call", async () => {
     const work_dir = await make_temp_dir("serve-stop-abort");
     const session_dir = path.join(work_dir, "sessions");
