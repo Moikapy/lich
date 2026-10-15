@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Gateway: a failed turn no longer drops a conversation's history when a new
+  chat evicted it while that turn was still in flight. The history loaded for
+  the run is written back.
 - `lich serve` `health` also returns `protocol_version` (`1`, bumped only on
   breaking changes) and `capabilities: { methods, notifications }` (#144).
   `methods` lists `prompt.*` only when the server has an Agent.
