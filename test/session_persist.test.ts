@@ -422,4 +422,50 @@ describe("read_session_messages resume hygiene", () => {
       { role: "assistant", content: contents[2] },
     ]);
   });
+
+  it("keeps a user when compress meta sits before the assistant, and drops every earlier aborted seed", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "compress-after-abort");
+    const lines: SessionRecord[] = [
+      { ts: "2026-01-01T00:00:00.000Z", kind: "message", message: { role: "system", content: "soul" } },
+      { ts: "2026-01-01T00:00:01.000Z", kind: "message", message: { role: "user", content: "aborted-1" } },
+      { ts: "2026-01-01T00:00:02.000Z", kind: "meta", meta: { event: "run_end", stopped_reason: "aborted" } },
+      { ts: "2026-01-01T00:00:03.000Z", kind: "message", message: { role: "user", content: "aborted-2" } },
+      { ts: "2026-01-01T00:00:04.000Z", kind: "meta", meta: { event: "run_end", stopped_reason: "aborted" } },
+      { ts: "2026-01-01T00:00:05.000Z", kind: "meta", meta: { event: "run_start", input_chars: 8 } },
+      { ts: "2026-01-01T00:00:06.000Z", kind: "message", message: { role: "user", content: "question" } },
+      { ts: "2026-01-01T00:00:07.000Z", kind: "meta", meta: { event: "compress_end", summary_chars: 12 } },
+      { ts: "2026-01-01T00:00:08.000Z", kind: "message", message: { role: "assistant", content: "answer" } },
+      { ts: "2026-01-01T00:00:09.000Z", kind: "meta", meta: { event: "run_end", stopped_reason: "final" } },
+    ];
+    for (const line of lines) {
+      await handle.append(line);
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      { role: "system", content: "soul" },
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]);
+  });
+
+  it("does not treat a corrupt message line as meta between adjacent users", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "corrupt-between-users");
+    const lines: SessionRecord[] = [
+      { ts: "2026-01-01T00:00:00.000Z", kind: "message", message: { role: "user", content: "summary" } },
+      { ts: "2026-01-01T00:00:01.000Z", kind: "message", message: { role: "nope" } as unknown as SessionRecord["message"] },
+      { ts: "2026-01-01T00:00:02.000Z", kind: "message", message: { role: "user", content: "question" } },
+      { ts: "2026-01-01T00:00:03.000Z", kind: "message", message: { role: "assistant", content: "answer" } },
+    ];
+    for (const line of lines) {
+      await handle.append(line);
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages).toEqual([
+      { role: "user", content: "summary" },
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ]);
+  });
 });

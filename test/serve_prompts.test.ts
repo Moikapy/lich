@@ -6,7 +6,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import type { AgentConfig } from "../src/agent/config.js";
-import { create_agent } from "../src/agent/agent.js";
+import { create_agent, type Agent, type AgentRunResult } from "../src/agent/agent.js";
+import type { Message } from "../src/providers/types.js";
 import type { AgentEvent } from "../src/agent/events.js";
 import { handle_serve_rpc_message, type ServeRpcContext } from "../src/serve/rpc.js";
 import { create_serve_prompt_service } from "../src/serve/prompts.js";
@@ -371,6 +372,88 @@ describe("serve prompt rpc", () => {
     expect(next_body).toContain("after");
     expect(next_body).toContain("earlier");
     expect(next_body).not.toContain("do-not-replay");
+  });
+
+  it("returns an assistant this aborted run wrote, and still hides a previous turn's reply", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-abort-reply");
+    const session_dir = path.join(work_dir, "sessions");
+    const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    const agent = {
+      run: async (options: { input: string; history?: readonly Message[] }): Promise<AgentRunResult> => {
+        const history = [...(options.history ?? [])];
+        if (options.input === "wrote") {
+          const written: Message = { role: "assistant", content: "wrote-this" };
+          const messages: Message[] = [...history, { role: "user", content: "wrote" }, written];
+          return {
+            outcome: { messages, final: written, result: undefined, turns_used: 1, stopped_reason: "aborted" },
+            messages,
+            usage_total: usage,
+            session_path: undefined,
+          };
+        }
+        if (options.input === "no-reply") {
+          const earlier = history.find((message) => message.role === "assistant" && message.content === "earlier");
+          const messages: Message[] = [...history, { role: "user", content: "no-reply" }];
+          return {
+            outcome: {
+              messages,
+              final: earlier?.role === "assistant" ? earlier : undefined,
+              result: undefined,
+              turns_used: 0,
+              stopped_reason: "aborted",
+            },
+            messages,
+            usage_total: usage,
+            session_path: undefined,
+          };
+        }
+        const final: Message = { role: "assistant", content: "earlier" };
+        const messages: Message[] = [...history, { role: "user", content: options.input }, final];
+        return {
+          outcome: { messages, final, result: undefined, turns_used: 1, stopped_reason: "final" },
+          messages,
+          usage_total: usage,
+          session_path: undefined,
+        };
+      },
+    } as unknown as Agent;
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+
+    const first = (await rpc(context, "prompt.submit", { session_id: created.session_id, text: "first" }, 2)).result as {
+      reply: string;
+    };
+    expect(first.reply).toBe("earlier");
+
+    const aborted = (await rpc(context, "prompt.submit", { session_id: created.session_id, text: "wrote" }, 3)).result as {
+      reply?: string;
+      stopped_reason: string;
+    };
+    expect(aborted.stopped_reason).toBe("aborted");
+    expect(aborted.reply).toBe("wrote-this");
+    expect(sessions.get(created.session_id)?.history.map((message) => message.content)).toEqual([
+      "first",
+      "earlier",
+      "wrote",
+      "wrote-this",
+    ]);
+
+    const hidden = (await rpc(context, "prompt.submit", { session_id: created.session_id, text: "no-reply" }, 4)).result as {
+      reply?: string;
+      stopped_reason: string;
+    };
+    expect(hidden.stopped_reason).toBe("aborted");
+    expect(hidden.reply).toBeUndefined();
+    expect(sessions.get(created.session_id)?.history.map((message) => message.content)).toEqual([
+      "first",
+      "earlier",
+      "wrote",
+      "wrote-this",
+    ]);
   });
 
   it("returns an aborted result for a prompt aborted while queued", async () => {
@@ -1334,18 +1417,27 @@ describe("serve prompt over websocket", () => {
         jsonrpc: "2.0",
         id: 4,
         method: "session.resume",
-        params: { id: live },
+        params: { id: live, session_id: other },
       }).then((body) => {
         resumed_live = true;
         return body;
       });
+      // id selects the lane. A resume of `other` must not wait just because
+      // params also name the hung session, and health must not follow params.id.
       const resume_other = await request_rpc(ws, {
         jsonrpc: "2.0",
         id: 5,
         method: "session.resume",
-        params: { id: other },
+        params: { id: other, session_id: live },
       });
       expect(resume_other.result).toMatchObject({ resumed_id: other, message_count: 0 });
+      const health = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "health",
+        params: { id: live },
+      });
+      expect(health.error).toMatchObject({ code: -32602 });
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(resumed_live).toBe(false);
       release_hang();
