@@ -289,8 +289,88 @@ describe("serve prompt rpc", () => {
     const abort_response = await rpc(context, "prompt.abort", { session_id: created.session_id }, 3);
     expect(abort_response.result).toEqual({ session_id: created.session_id, aborted: true });
     const submit = await submit_promise;
-    const result = submit.result as { stopped_reason: string };
+    const result = submit.result as { stopped_reason: string; reply?: string };
     expect(result.stopped_reason).toBe("aborted");
+    expect(result.reply).toBeUndefined();
+  });
+
+  it("does not replay a cancelled prompt or the previous reply", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-abort-replay");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    const bodies: string[] = [];
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_calls += 1;
+      bodies.push(String(init?.body ?? ""));
+      if (fetch_calls === 2) {
+        fetch_started();
+        const signal = init?.signal;
+        await new Promise<void>((_resolve, reject) => {
+          const fail = (): void => {
+            const error = new Error("fetch aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (signal?.aborted === true) {
+            fail();
+            return;
+          }
+          signal?.addEventListener("abort", fail, { once: true });
+        });
+        throw new Error("unreachable");
+      }
+      const content = fetch_calls === 1 ? "earlier" : "next";
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const first = (await rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "first" },
+      2,
+    )).result as { reply: string };
+    expect(first.reply).toBe("earlier");
+
+    const submit_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "do-not-replay" },
+      3,
+    );
+    await started;
+    await rpc(context, "prompt.abort", { session_id: created.session_id }, 4);
+    const aborted = (await submit_promise).result as { stopped_reason: string; reply?: string };
+    expect(aborted.stopped_reason).toBe("aborted");
+    expect(aborted.reply).toBeUndefined();
+    const history = sessions.get(created.session_id)?.history ?? [];
+    expect(history.some((message) => message.role === "user" && message.content === "do-not-replay")).toBe(false);
+    expect(history.some((message) => message.role === "assistant" && message.content === "earlier")).toBe(true);
+
+    const third = (await rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "after" },
+      5,
+    )).result as { reply: string };
+    expect(third.reply).toBe("next");
+    const next_body = bodies.at(-1) ?? "";
+    expect(next_body).toContain("after");
+    expect(next_body).toContain("earlier");
+    expect(next_body).not.toContain("do-not-replay");
   });
 
   it("returns an aborted result for a prompt aborted while queued", async () => {

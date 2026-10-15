@@ -129,17 +129,57 @@ function append_missing_tool_results(calls: readonly ToolCall[], seen: Set<strin
   }
 }
 
+/**
+ * Drop a user line that never got an assistant or tool result when a later
+ * turn appended after it (meta sits between the two user lines). Adjacent
+ * user lines stay: a compression summary is stored that way. The caller drops
+ * a trailing run of user lines.
+ */
+function drop_interrupted_user_seeds(records: readonly SessionRecord[]): Message[] {
+  const kept: Message[] = [];
+  let pending: Message | undefined;
+  let meta_since_pending = false;
+  const take_pending = (keep: boolean): void => {
+    if (pending !== undefined && keep === true) {
+      kept.push(pending);
+    }
+    pending = undefined;
+    meta_since_pending = false;
+  };
+  for (const record of records) {
+    const message = record.kind === "message" ? record.message : undefined;
+    if (message === undefined || is_message(message) === false) {
+      if (record.kind === "meta" && pending !== undefined) {
+        meta_since_pending = true;
+      }
+      continue;
+    }
+    if (message.role === "user") {
+      if (pending !== undefined) {
+        take_pending(meta_since_pending === false);
+      }
+      pending = message;
+      meta_since_pending = false;
+      continue;
+    }
+    take_pending(true);
+    kept.push(message);
+  }
+  take_pending(false);
+  return kept;
+}
+
 export async function read_session_messages(file_path: string): Promise<Message[]> {
   // Missing files rethrow (ENOENT) so callers can tell "vanished" from "empty".
   const raw = await readFile(file_path, "utf8");
-  const messages: Message[] = [];
+  const records: SessionRecord[] = [];
   for (const line of raw.split("\n")) {
     const record = safe_json_parse<SessionRecord>(line);
-    if (record?.message !== undefined && is_message(record.message)) {
-      messages.push(record.message);
+    if (record !== undefined) {
+      records.push(record);
     }
   }
-  const closed = close_dangling_tool_calls(messages);
+  const closed = close_dangling_tool_calls(drop_interrupted_user_seeds(records));
   // Provider throw / abort-before-turn can leave a dangling user seed with no
   // assistant reply, and repeated failures stack several. Drop them all so
   // resume never starts with consecutive users and the result is idempotent

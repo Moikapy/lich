@@ -4,7 +4,7 @@
  */
 import type { Agent, AgentRunResult } from "../agent/agent.js";
 import type { AgentEvent } from "../agent/events.js";
-import { history_after_run_error } from "../agent/loop.js";
+import { history_after_abort, history_after_run_error, reply_after_abort } from "../agent/loop.js";
 import { create_session_manager } from "../session/manager.js";
 import type {
   PromptAbortParams,
@@ -123,7 +123,7 @@ export function create_serve_prompt_service(
           // Write back only if clear() (or eviction) did not reset the bag mid-run.
           const bag_after = sessions.get(params.session_id);
           if (bag_after === bag_before && bag_after.epoch === epoch_before) {
-            bag_after.history = [...result.messages];
+            bag_after.history = [...history_to_keep(result)];
           }
           return map_submit_result(params.session_id, result);
         } catch (error) {
@@ -183,10 +183,29 @@ function keep_completed_turns(
   bag_after.history = kept;
 }
 
+/** Abort drops the unanswered user line; a finished run keeps every message. */
+function history_to_keep(result: AgentRunResult): AgentRunResult["messages"] {
+  if (result.outcome.stopped_reason === "aborted") {
+    return history_after_abort(result.messages);
+  }
+  return result.messages;
+}
+
+/**
+ * On abort, `outcome.final` is the last assistant in the whole history, which
+ * may be a previous turn. Return text only when this run wrote it.
+ */
+function reply_text(result: AgentRunResult): string | undefined {
+  if (result.outcome.stopped_reason === "aborted") {
+    return reply_after_abort(result.outcome)?.content;
+  }
+  return result.outcome.final?.content;
+}
+
 function map_submit_result(session_id: string, result: AgentRunResult): PromptSubmitResult {
   return {
     session_id,
-    reply: result.outcome.final?.content,
+    reply: reply_text(result),
     usage: result.usage_total,
     session_path: result.session_path,
     turns_used: result.outcome.turns_used,

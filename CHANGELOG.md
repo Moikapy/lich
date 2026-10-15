@@ -6,6 +6,11 @@
   when the global file does not exist yet, so legacy settings (including
   `tools_enabled`) stay in effect. `lich init --global` refuses to create
   `~/.lich/config.json` while that legacy file is still the live config.
+- `prompt.abort` no longer returns the previous turn's reply, and the cancelled
+  prompt is left out of the next `prompt.submit`. Resuming a session also drops
+  a user line that a later turn followed after the run was aborted or failed
+  before any assistant reply. Adjacent user lines with nothing between them
+  (a compression summary and the next question) stay.
 - Gateway: a failed turn no longer drops a conversation's history when a new
   chat evicted it while that turn was still in flight. The history loaded for
   the run is written back.
