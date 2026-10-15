@@ -1104,11 +1104,12 @@ describe("serve prompt over websocket", () => {
         return body;
       });
       await started;
+      // Same session_id, so this frame shares the submit's lane and must wait behind it.
       const health_promise = request_rpc(ws, {
         jsonrpc: "2.0",
         id: 4,
         method: "health",
-        params: { note: "prompt.abort" },
+        params: { session_id, note: "prompt.abort" },
       }).then((body) => {
         order.push(4);
         return body;
@@ -1138,6 +1139,67 @@ describe("serve prompt over websocket", () => {
       expect(health.error).toMatchObject({ code: -32602 });
       expect(order).toEqual([3, 2, 4]);
     } finally {
+      ws.close();
+    }
+  });
+
+  it("runs different sessions on one connection concurrently, and session-less frames do not wait", async () => {
+    const work_dir = await make_temp_dir("serve-ws-lanes");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_hang!: () => void;
+    const hang = new Promise<void>((resolve) => {
+      release_hang = resolve;
+    });
+    let hang_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      hang_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: string }> };
+      if (body.messages.some((message) => message.content === "hang")) {
+        hang_started();
+        await hang;
+      }
+      return new Response(
+        JSON.stringify({
+          model: "mock-model",
+          choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir, agent, version: "9.9.9" });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create = async (id: number): Promise<string> =>
+        ((await request_rpc(ws, { jsonrpc: "2.0", id, method: "session.create", params: { source: "test" } })).result as {
+          session_id: string;
+        }).session_id;
+      const a = await create(1);
+      const b = await create(2);
+      const order: string[] = [];
+      const slow = request_rpc(ws, { jsonrpc: "2.0", id: 3, method: "prompt.submit", params: { session_id: a, text: "hang" } }).then(
+        (body) => {
+          order.push("a");
+          return body;
+        },
+      );
+      await started;
+      const fast = await request_rpc(ws, { jsonrpc: "2.0", id: 4, method: "prompt.submit", params: { session_id: b, text: "hi" } });
+      order.push("b");
+      const health = await request_rpc(ws, { jsonrpc: "2.0", id: 5, method: "health" });
+      order.push("health");
+      expect(fast.result).toMatchObject({ session_id: b, stopped_reason: "final" });
+      expect(health.result).toBeDefined();
+      release_hang();
+      expect((await slow).result).toMatchObject({ session_id: a, stopped_reason: "final" });
+      expect(order).toEqual(["b", "health", "a"]);
+    } finally {
+      release_hang();
       ws.close();
     }
   });
