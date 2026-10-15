@@ -18,6 +18,7 @@ import {
   config_template,
   existing_config_path,
   global_config_path,
+  legacy_user_config_active,
   project_config_path,
   provider_kind_defaults,
   starter_config_object,
@@ -703,7 +704,15 @@ function run_init(options: CliOptions): number {
     delete config["session_dir"];
   }
   // write_lich_config(home) targets ~/.lich/config.json, the global file.
-  const result = write_lich_config(options.global === true ? homedir() : work_dir_of(options), config);
+  const target = options.global === true ? homedir() : work_dir_of(options);
+  // A new ~/.lich/config.json (via --global or a work dir of $HOME) stops the
+  // legacy file from being read at all.
+  if (project_config_path(target) === global_config_path() && legacy_user_config_active() === true) {
+    throw new Error(
+      "legacy config at ~/.config/lich/config.json is still in use; copy its settings into ~/.lich/config.json first (relative plugin paths there resolve against ~/.lich/)",
+    );
+  }
+  const result = write_lich_config(target, config);
   process.stdout.write(`${result.message}\n`);
   if (result.written === true && model_still_placeholder(config) === true) {
     process.stdout.write(`next: edit the model in ${result.path} if needed, then run \`lich\`\n`);

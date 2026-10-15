@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `lich profile use` copies `~/.config/lich/config.json` into `~/.lich/config.json`
+  when the global file does not exist yet, so legacy settings (including
+  `tools_enabled`) stay in effect. `lich init --global` refuses to create
+  `~/.lich/config.json` while that legacy file is still the live config.
 - `prompt.abort` no longer returns the previous turn's reply, and the cancelled
   prompt is left out of the next `prompt.submit`. Resuming a session also drops
   a user line that a later turn followed after the run was aborted or failed
