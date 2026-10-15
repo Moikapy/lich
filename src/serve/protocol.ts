@@ -24,6 +24,12 @@ export const SERVE_NOTIFICATION_EVENT = "event" as const;
 
 export type ServeNotificationMethod = typeof SERVE_NOTIFICATION_EVENT;
 
+/**
+ * Wire protocol version reported by `health`. Bumped only on breaking changes;
+ * additive features show up in `capabilities` instead.
+ */
+export const SERVE_PROTOCOL_VERSION = 1;
+
 export type JsonRpcId = string | number;
 
 export interface JsonRpcRequest<M extends string = string, P = unknown> {
@@ -75,7 +81,19 @@ export type HealthParams = Record<string, never>;
 
 export interface HealthResult {
   status: "ok";
+  /** Lich release (`LICH_VERSION`). */
   version: string;
+  /** `SERVE_PROTOCOL_VERSION` of this server. */
+  protocol_version: number;
+  capabilities: ServeCapabilities;
+}
+
+/** What this server answers, so clients can check before calling. */
+export interface ServeCapabilities {
+  /** Methods served; `prompt.*` only when the server has an Agent. */
+  methods: ServeMethod[];
+  /** Server → client notification methods. */
+  notifications: ServeNotificationMethod[];
 }
 
 export interface SessionCreateParams {

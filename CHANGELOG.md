@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `lich serve` `health` also returns `protocol_version` (`1`, bumped only on
+  breaking changes) and `capabilities: { methods, notifications }` (#144).
+  `methods` lists `prompt.*` only when the server has an Agent.
 - `lich serve` queues frames per session on each connection instead of
   per connection (#144). A long `prompt.submit` no longer holds up other
   sessions or session-less frames such as `health` on the same socket. Frames
