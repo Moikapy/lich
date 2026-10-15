@@ -35,6 +35,8 @@ export function create_webhook_adapter(params: WebhookAdapterParams): PlatformAd
 
   return {
     name: "webhook",
+    // One JSON reply per request; no length cap.
+    capabilities: { kind: "text" },
     start: async () => {
       assert_bind_allowed(host, token);
       server = createServer((request, response) => {

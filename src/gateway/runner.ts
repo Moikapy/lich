@@ -5,7 +5,7 @@
 import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
-import { gateway_tools_enabled } from "./access.js";
+import { create_gateway_policy } from "./access.js";
 import { GatewayBus } from "./bus.js";
 import { create_discord_adapter } from "./discord.js";
 import { create_telegram_adapter } from "./telegram.js";
@@ -15,9 +15,10 @@ import { create_webhook_adapter } from "./webhook.js";
 
 /** Preload plugins, then hand that same agent to the bus factory. */
 export async function create_gateway_bus(config: AgentConfig): Promise<{ agent: Agent; bus: GatewayBus }> {
-  const agent_config = { ...config, tools_enabled: gateway_tools_enabled(config) };
+  const policy = create_gateway_policy(config);
+  const agent_config = { ...config, tools_enabled: policy.tools_enabled };
   const agent = await create_agent_with_plugins(agent_config);
-  const bus = new GatewayBus({ config, agent_factory: () => agent, wire_tool_logging: true });
+  const bus = new GatewayBus({ config, policy, agent_factory: () => agent, wire_tool_logging: true });
   return { agent, bus };
 }
 
@@ -102,7 +103,8 @@ async function start_all_adapters(adapters: readonly PlatformAdapter[]): Promise
   for (const adapter of adapters) {
     try {
       await adapter.start();
-      logger.info(`gateway adapter started: ${adapter.name}`);
+      const cap = adapter.capabilities.max_reply_chars;
+      logger.info(`gateway adapter started: ${adapter.name} (${adapter.capabilities.kind}${cap === undefined ? "" : `, replies split at ${cap} chars`})`);
     } catch (error) {
       logger.error(`gateway adapter failed to start: ${adapter.name}`, error);
     }

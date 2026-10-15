@@ -6,6 +6,20 @@
   when the global file does not exist yet, so legacy settings (including
   `tools_enabled`) stay in effect. `lich init --global` refuses to create
   `~/.lich/config.json` while that legacy file is still the live config.
+- `lich serve` `health` also returns `protocol_version` (`1`, bumped only on
+  breaking changes) and `capabilities: { methods, notifications }` (#144).
+  `methods` lists `prompt.*` only when the server has an Agent.
+- `lich serve` queues frames per session on each connection instead of
+  per connection (#144). A long `prompt.submit` no longer holds up other
+  sessions or session-less frames such as `health` on the same socket. Frames
+  for one session keep their order; replies across sessions may interleave,
+  so clients match them by JSON-RPC `id` (Ossuary already does).
+- Gateway (#144): sender allowlists and the gateway toolset are one
+  `GatewayPolicy`, built from config at startup (`src/gateway/access.ts`).
+  Platform adapters declare `capabilities` (`{ kind: "text", max_reply_chars }`);
+  the runner logs them. **Breaking for custom adapters:** `PlatformAdapter`
+  requires `capabilities`, and `create_idle_adapter` takes it as a third
+  argument.
 - Gateway (#144): conversations queue on the shared `SessionManager` instead of
   their own promise chains. Beyond `max_conversations`, the least recently used
   conversation is evicted (it was the oldest inserted). Only Telegram's `/start`
