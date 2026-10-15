@@ -59,6 +59,26 @@ function text(content: string): Record<string, unknown> {
   return { role: "assistant", content };
 }
 
+/** Hangs until `signal` aborts. The timer fails the test if cancel never arrives. */
+function hang_until_abort(signal: AbortSignal | undefined, started: () => void, on_abort: () => void): Promise<Response> {
+  return new Promise((_resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("fetch was not aborted")), 400);
+    const fail = (): void => {
+      clearTimeout(timer);
+      on_abort();
+      const error = new Error("aborted");
+      error.name = "AbortError";
+      reject(error);
+    };
+    if (signal?.aborted === true) {
+      fail();
+      return;
+    }
+    signal?.addEventListener("abort", fail, { once: true });
+    started();
+  });
+}
+
 function tool_call(name: string): Record<string, unknown> {
   return {
     role: "assistant",
@@ -257,6 +277,77 @@ describe("before_llm_call", () => {
     expect(rejected).toBe(1);
     // The router refuses an already-aborted signal before any request goes out.
     expect(seen).toEqual([]);
+  });
+
+  it("aborts an in-flight plugin model call when the run is aborted", async () => {
+    const controller = new AbortController();
+    let saw_abort = false;
+    let started!: () => void;
+    const started_gate = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const plugin: Plugin = {
+      name: "lane",
+      hooks: {
+        before_llm_call: async (_info, ctx) => {
+          const pending = ctx.models?.chat("chat", [{ role: "user", content: "side" }]);
+          await started_gate;
+          controller.abort();
+          await pending?.catch(() => undefined);
+        },
+      },
+    };
+    const fetch_fn: typeof fetch = (_url, init) => hang_until_abort(init?.signal ?? undefined, started, () => {
+      saw_abort = true;
+    });
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane", models: ["chat"] }]);
+    const run = await agent.run({ input: "go", signal: controller.signal });
+    expect(saw_abort).toBe(true);
+    expect(run.outcome.stopped_reason).toBe("aborted");
+  });
+
+  it("cancels a plugin model call on its own signal and still finishes the run", async () => {
+    const plugin_abort = new AbortController();
+    let saw_abort = false;
+    let started!: () => void;
+    const started_gate = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const plugin: Plugin = {
+      name: "lane",
+      hooks: {
+        before_llm_call: async (_info, ctx) => {
+          const pending = ctx.models?.chat(
+            "chat",
+            [{ role: "user", content: "side" }],
+            { signal: plugin_abort.signal },
+          );
+          await started_gate;
+          plugin_abort.abort();
+          await pending?.catch(() => undefined);
+        },
+      },
+    };
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: string }> };
+      const side = body.messages.some((message) => message.content === "side");
+      if (side === true) {
+        return hang_until_abort(init?.signal ?? undefined, started, () => {
+          saw_abort = true;
+        });
+      }
+      const payload = {
+        model: "m",
+        choices: [{ message: text("done"), finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      };
+      return new Response(JSON.stringify(payload), { status: 200 });
+    };
+    const agent = await make_agent(fetch_fn, [{ plugin, entry: "lane", models: ["chat"] }]);
+    const run = await agent.run({ input: "go" });
+    expect(saw_abort).toBe(true);
+    expect(run.outcome.stopped_reason).toBe("final");
+    expect(run.outcome.final?.content).toBe("done");
   });
 
   it("fails open when the hook throws", async () => {
