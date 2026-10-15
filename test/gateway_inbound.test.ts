@@ -218,13 +218,15 @@ describe("discord inbound", () => {
     };
     // A bare mention strips to "" and must not start an agent turn.
     emit({ channel_id: "c1", content: "<@999>", author: { id: "u0", bot: false } });
+    emit({ channel_id: "c1", content: "<@!999>", author: { id: "u0", bot: false } });
     emit({ channel_id: "c1", content: "<@999> hello", author: { id: "u1", bot: false } });
+    emit({ channel_id: "c1", content: "<@!999> hey", author: { id: "u4", bot: false } });
     emit({ channel_id: "c1", content: "hi <@999>", author: { id: "u2", bot: false } });
     emit({ channel_id: "c1", content: "from bot", author: { id: "b1", bot: true } });
     emit({ channel_id: "c1", content: "no author" });
-    await wait_for(() => seen.length === 2 && posts.length === 2);
-    expect(seen).toEqual(["u1:hello", "u2:hi <@999>"]);
-    expect(posts.map((post) => post.content)).toEqual(["echo hello", "echo hi <@999>"]);
+    await wait_for(() => seen.length === 3 && posts.length === 3);
+    expect(seen).toEqual(["u1:hello", "u4:hey", "u2:hi <@999>"]);
+    expect(posts.map((post) => post.content)).toEqual(["echo hello", "echo hey", "echo hi <@999>"]);
     expect(posts[0]?.allowed_mentions).toEqual({ parse: [] });
     expect(posts[0]?.authorization).toBe("Bot fixture-discord-token");
     expect(socket.close_count).toBe(0);
