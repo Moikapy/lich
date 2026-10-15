@@ -45,6 +45,42 @@ export function global_config_path(): string {
   return path.resolve(homedir(), CONFIG_RELPATH);
 }
 
+/** True when the legacy file is the live user config (no `~/.lich/config.json` yet). */
+export function legacy_user_config_active(): boolean {
+  if (existsSync(global_config_path()) === true) {
+    return false;
+  }
+  return existsSync(path.resolve(homedir(), LEGACY_USER_CONFIG));
+}
+
+export interface GlobalConfigSeed {
+  config: Record<string, unknown>;
+  /** True when `config` was read from the legacy file, not `~/.lich/config.json`. */
+  from_legacy: boolean;
+  /** Permission bits of the legacy file, when it seeded `config`. */
+  mode?: number;
+}
+
+/**
+ * Object to write into `~/.lich/config.json`. An existing global file is
+ * returned unchanged. Otherwise the legacy file seeds the write, with plugin
+ * paths already resolved, so creating the global file does not drop it.
+ */
+export function global_config_seed(): GlobalConfigSeed {
+  if (existsSync(global_config_path()) === true) {
+    return { config: read_config_object(global_config_path()), from_legacy: false };
+  }
+  const legacy = path.resolve(homedir(), LEGACY_USER_CONFIG);
+  if (existsSync(legacy) === false) {
+    return { config: {}, from_legacy: false };
+  }
+  return {
+    config: global_layer(read_config_object(legacy), path.dirname(legacy)),
+    from_legacy: true,
+    mode: statSync(legacy).mode & 0o777,
+  };
+}
+
 /**
  * Ordered absolute chain: the work_dir (default cwd) project config, the
  * global `~/.lich/config.json`, then the legacy `~/.config/lich/config.json`.
@@ -272,12 +308,14 @@ export function starter_config_object(): Record<string, unknown> {
 /**
  * The only writer of `.lich/config.json`. Create leaves an existing file
  * untouched. `update` replaces that file with the object the caller built,
- * so a caller must keep unrelated keys itself.
+ * so a caller must keep unrelated keys itself. `mode` sets the permission
+ * bits when `update` creates the file; an existing file keeps its own.
  */
 export function write_lich_config(
   work_dir: string,
   config: Record<string, unknown>,
   update = false,
+  mode?: number,
 ): LichConfigWriteResult {
   ensure_lich_config_dir(work_dir);
   const file = project_config_path(work_dir);
@@ -286,7 +324,7 @@ export function write_lich_config(
   }
   const text = `${JSON.stringify(config, null, 2)}\n`;
   if (update === true) {
-    replace_file(file, text);
+    replace_file(file, text, mode);
     return { path: file, written: true, message: `updated ${file}` };
   }
   try {
@@ -302,11 +340,12 @@ export function write_lich_config(
 
 /**
  * Write a sibling temp file, then rename it over `file`, so readers never see
- * a partial config. The temp file takes the existing file's mode.
+ * a partial config. The temp file takes the existing file's mode, or
+ * `new_mode` when there is no file yet.
  */
-function replace_file(file: string, text: string): void {
+function replace_file(file: string, text: string, new_mode?: number): void {
   const temp = `${file}.${process.pid}.tmp`;
-  const mode = statSync(file, { throwIfNoEntry: false })?.mode;
+  const mode = statSync(file, { throwIfNoEntry: false })?.mode ?? new_mode;
   try {
     // Create it with the old mode so a 0600 config is never briefly wider.
     writeFileSync(temp, text, { encoding: "utf8", mode: mode === undefined ? undefined : mode & 0o777 });
