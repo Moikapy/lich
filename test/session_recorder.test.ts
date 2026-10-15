@@ -36,12 +36,14 @@ async function read_records(file_path: string): Promise<SessionRecord[]> {
   return records;
 }
 
-function llm_end(content: string): AgentEventBody {
+/** `with_call` adds the read_file call that `tool_call_end` answers, as a real run records it. */
+function llm_end(content: string, with_call = false): AgentEventBody {
+  const tool_calls = with_call === true ? [{ id: "c1", name: "read_file", args: { path: "a.txt" } }] : undefined;
   return {
     type: "llm_end",
     turn: 1,
     result: {
-      message: { role: "assistant", content },
+      message: tool_calls === undefined ? { role: "assistant", content } : { role: "assistant", content, tool_calls },
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
       finish_reason: "stop",
       model: "mock",
@@ -72,7 +74,7 @@ describe("session recorder", () => {
       system_prompt: "sys",
       owned: true,
     });
-    recorder.on_event(llm_end("thinking"));
+    recorder.on_event(llm_end("thinking", true));
     recorder.on_event(tool_call_end(true));
     recorder.on_event(llm_end("done"));
     recorder.on_event({ type: "budget_exhausted", turns_used: 2 });
@@ -122,7 +124,7 @@ describe("session recorder", () => {
       owned: true,
     });
     const events: AgentEventBody[] = [
-      llm_end("one"),
+      llm_end("one", true),
       tool_call_end(false),
       llm_end("two"),
       { type: "compress_end", summary_chars: 12 },
