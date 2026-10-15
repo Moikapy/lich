@@ -1058,6 +1058,8 @@ describe("gateway format", () => {
 describe("telegram splitting", () => {
   it("splits a 5000-char message into two chunks within the declared cap", () => {
     const limit = TELEGRAM_MAX_MESSAGE_CHARS;
+    // Telegram Bot API sendMessage limit.
+    expect(limit).toBe(4096);
     expect(TELEGRAM_CAPABILITIES.max_reply_chars).toBe(limit);
     const long = "word ".repeat(1000).trimEnd();
     expect(long.length).toBeGreaterThan(limit);
