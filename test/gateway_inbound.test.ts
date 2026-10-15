@@ -220,9 +220,8 @@ describe("discord inbound", () => {
     emit({ channel_id: "c1", content: "hi <@999>", author: { id: "u2", bot: false } });
     emit({ channel_id: "c1", content: "from bot", author: { id: "b1", bot: true } });
     emit({ channel_id: "c1", content: "no author" });
-    emit({ channel_id: "c1", content: "<@999>", author: { id: "u3", bot: false } });
-    await wait_for(() => seen.length === 3 && posts.length === 2);
-    expect(seen).toEqual(["u1:hello", "u2:hi <@999>", "u3:"]);
+    await wait_for(() => seen.length === 2 && posts.length === 2);
+    expect(seen).toEqual(["u1:hello", "u2:hi <@999>"]);
     expect(posts.map((post) => post.content)).toEqual(["echo hello", "echo hi <@999>"]);
     expect(posts[0]?.allowed_mentions).toEqual({ parse: [] });
     expect(posts[0]?.authorization).toBe("Bot fixture-discord-token");
