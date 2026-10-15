@@ -42,13 +42,20 @@ method `event` (no `id`).
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `health` | `{}` | `{ status: "ok", version }` (`LICH_VERSION`) |
+| `health` | `{}` | `{ status: "ok", version, protocol_version, capabilities }` |
 | `session.create` | `{ label?, source }` | `{ session_id }` |
 | `session.list` | `{}` | `{ sessions: [{ id, mtime_ms }, ...] }` |
 | `session.clear` | `{ session_id }` | `{ session_id }` |
 | `session.resume` | `{ id, source? }` | `{ session_id, resumed_id, message_count }` |
 | `prompt.submit` | `{ session_id, text }` | reply, usage, `session_path`, `stopped_reason`, … |
 | `prompt.abort` | `{ session_id }` | `{ session_id, aborted }` |
+
+`health` reports `version` (`LICH_VERSION`), `protocol_version`
+(`SERVE_PROTOCOL_VERSION`, currently `1`) and
+`capabilities: { methods, notifications }`. `protocol_version` changes only
+on breaking changes; new features are added to `capabilities`, so clients
+check it before calling a method. `methods` lists `prompt.submit` and
+`prompt.abort` only when the server has an Agent.
 
 `health` and `session.list` have no param fields. Typed clients still send
 `params: {}`, because `ServeRequest` requires `params`. JSON-RPC 2.0 also
@@ -113,11 +120,13 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
 - Origin allowlisting is deferred until Electron’s page origin policy is decided;
   do not assume `file://` / `app://` behavior here.
 - Frame size capped at ~1 MiB (`maxPayload`).
-- `health` returns `{ status: "ok", version }` (`LICH_VERSION` from `src/version.ts`).
 - Frames are queued per session within a connection: frames whose
   `params.session_id` match are handled in arrival order and get in-order
   replies, while other sessions, and frames that name no session (such as
   `health`, `session.list` or `session.create`), do not wait behind them.
+  `session.resume` is queued by `params.id` instead, so resuming the transcript
+  an in-flight `prompt.submit` is still writing waits for that run. A resume
+  of a different id does not.
   Replies from different sessions can therefore interleave; match them by
   JSON-RPC `id`.
   `prompt.abort` is dispatched immediately so it can cancel an in-flight
