@@ -2,6 +2,7 @@
  * `lich mcp` edits work-dir config through write_lich_config.
  * No network and no Godot/Redot process.
  */
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -104,6 +105,99 @@ describe("lich mcp", () => {
     ])).rejects.toThrow(/loopback/);
     const after = await readFile(path.join(work_dir, ".lich", "config.json"), "utf8");
     expect(after).toBe(before);
+  });
+
+  it("adds a disabled loopback url when no config exists and lists it as http", async () => {
+    const work_dir = await temp_dir("mcp-add-url");
+    const added = await capture([
+      "--work-dir", work_dir, "mcp", "add", "notes", "--url", "http://127.0.0.1:9/mcp",
+    ]);
+    expect(added).toEqual({ code: 0, out: "added notes disabled\n" });
+    const saved = await read_config(work_dir);
+    expect(saved).toEqual({
+      mcp_servers: { notes: { enabled: false, url: "http://127.0.0.1:9/mcp" } },
+    });
+    const listed = await capture(["--work-dir", work_dir, "mcp", "list"]);
+    expect(listed).toEqual({ code: 0, out: "notes http false\n" });
+  });
+
+  it("refuses conflicting add flags and does not create a config", async () => {
+    const work_dir = await temp_dir("mcp-add-conflict");
+    const config_file = path.join(work_dir, ".lich", "config.json");
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "notes",
+      "--command", "echo", "--url", "http://127.0.0.1:9/mcp",
+    ])).rejects.toThrow(/not both/);
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "notes",
+      "--url", "http://127.0.0.1:9/mcp", "--arg", "extra",
+    ])).rejects.toThrow(/does not take --arg/);
+    expect(existsSync(config_file)).toBe(false);
+  });
+
+  it("does not replace an existing server or persist a refused url", async () => {
+    const work_dir = await temp_dir("mcp-add-guard");
+    await write_config(work_dir, {
+      ...base_config(),
+      mcp_servers: {
+        lab: { enabled: false, command: "echo", args: ["hi"], env: { LICH_SECRET: SECRET } },
+      },
+    });
+    const file = path.join(work_dir, ".lich", "config.json");
+    const before = await readFile(file, "utf8");
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "lab", "--command", "echo",
+    ])).rejects.toThrow(/already exists/);
+    const secret_url = `http://user:${SECRET}@127.0.0.1/mcp`;
+    const credentialed = await run_cli([
+      "--work-dir", work_dir, "mcp", "add", "remote", "--url", secret_url,
+    ]).catch((error: unknown) => error);
+    expect(credentialed).toBeInstanceOf(Error);
+    expect(String(credentialed)).toMatch(/credentials/);
+    expect(String(credentialed)).not.toContain(SECRET);
+    const mapped = await run_cli([
+      "--work-dir", work_dir, "mcp", "add", "mapped", "--url", "http://[::1]/mcp",
+    ]).catch((error: unknown) => error);
+    expect(mapped).toBeInstanceOf(Error);
+    expect(String(mapped)).toMatch(/loopback/);
+    const after = await readFile(file, "utf8");
+    expect(after).toBe(before);
+    expect(after).toContain(SECRET);
+  });
+
+  it("refuses a bad name, a missing catalog, and extra positionals without rewriting", async () => {
+    const work_dir = await temp_dir("mcp-add-shape");
+    await write_config(work_dir, base_config());
+    const file = path.join(work_dir, ".lich", "config.json");
+    const before = await readFile(file, "utf8");
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "not_a_server",
+    ])).rejects.toThrow(/unknown mcp catalog/);
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "redot",
+    ])).rejects.toThrow(/needs a substitute/);
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "Redot", "--command", "echo",
+    ])).rejects.toThrow(/snake_case/);
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "list", "lab",
+    ])).rejects.toThrow(/takes no name/);
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "lab", "extra",
+    ])).rejects.toThrow(/takes one name/);
+    expect(await readFile(file, "utf8")).toBe(before);
+  });
+
+  it("refuses a non-object mcp_servers value and leaves the file", async () => {
+    const work_dir = await temp_dir("mcp-bad-map");
+    await write_config(work_dir, { ...base_config(), mcp_servers: ["lab"] });
+    const file = path.join(work_dir, ".lich", "config.json");
+    const before = await readFile(file, "utf8");
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "list"])).rejects.toThrow(/mcp_servers must be an object/);
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "notes", "--url", "http://127.0.0.1:9/mcp",
+    ])).rejects.toThrow(/mcp_servers must be an object/);
+    expect(await readFile(file, "utf8")).toBe(before);
   });
 
   it("enables, disables, and removes one entry without logging env", async () => {
