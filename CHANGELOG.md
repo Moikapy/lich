@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Telegram long-poll confirms an update only after that update is delivered.
+  A gateway restart or crash during the agent turn no longer drops the message;
+  Telegram redelivers it on the next poll.
 - `lich profile use` copies `~/.config/lich/config.json` into `~/.lich/config.json`
   when the global file does not exist yet, so legacy settings (including
   `tools_enabled`) stay in effect. `lich init --global` refuses to create

@@ -49,9 +49,13 @@ async function poll_loop(params: AdapterParams, token: string, keep_running: () 
     try {
       const updates = await fetch_updates(token, offset);
       backoff_index = 0;
+      // The next getUpdates confirms every id below `offset`. Advance only
+      // after delivery, or a restart mid-turn drops the message for good.
       for (const update of updates) {
-        offset = update.update_id !== undefined ? update.update_id + 1 : offset;
-        void deliver_update(params, token, update);
+        await deliver_update(params, token, update);
+        if (update.update_id !== undefined) {
+          offset = update.update_id + 1;
+        }
       }
     } catch (error) {
       logger.warn("gateway telegram poll failed; backing off", error);
