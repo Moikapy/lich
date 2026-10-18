@@ -1,7 +1,9 @@
 /**
  * Server-owned session bags for `lich serve`: one SessionHandle + history per id.
- * In-memory bags are capped (LRU): the oldest is evicted first. Evicted
- * transcripts stay on disk and can be resumed again.
+ * In-memory bags are capped (LRU): the oldest idle bag is evicted first.
+ * `pin` holds a bag for an in-flight prompt so a create cannot drop it before
+ * the turn writes its history back. The map may sit above the cap until those
+ * pins release. Evicted transcripts stay on disk and can be resumed again.
  */
 import path from "node:path";
 import { writeFile } from "node:fs/promises";
@@ -99,6 +101,10 @@ export interface ServeSessionStore {
   list(): Promise<SessionListResult>;
   resume(params: SessionResumeParams): Promise<SessionResumeResult>;
   get(session_id: string): ServeSessionBag | undefined;
+  /** Hold `session_id` against LRU eviction (one hold per in-flight submit). */
+  pin(session_id: string): void;
+  /** Release one hold from `pin`. Idle bags over the cap are evicted. */
+  unpin(session_id: string): void;
   /** Drop every in-memory bag (transcripts on disk are untouched). */
   dispose(): void;
 }
@@ -111,6 +117,8 @@ export function create_serve_session_store(
   max_bags: number = DEFAULT_SERVE_SESSION_LIMIT,
 ): ServeSessionStore {
   const bags = new Map<string, ServeSessionBag>();
+  /** session_id → in-flight submits that must survive LRU eviction. */
+  const pins = new Map<string, number>();
 
   /** Map#set re-inserts at the end, so the first key is the least recently used. */
   function touch(id: string): void {
@@ -121,15 +129,40 @@ export function create_serve_session_store(
     }
   }
 
+  function is_pinned(id: string): boolean {
+    return (pins.get(id) ?? 0) > 0;
+  }
+
+  /**
+   * Drop oldest idle bags until `bags` fits the cap. A bag just inserted
+   * (`spare_id`) is left in place when every older bag is pinned, so
+   * `session.create` does not hand back an id that this same call evicted.
+   * The map stays over the cap until a pin releases.
+   */
+  function evict_overflow(spare_id?: string): void {
+    if (max_bags <= 0) {
+      return;
+    }
+    while (bags.size > max_bags) {
+      let oldest_idle: string | undefined;
+      for (const candidate of bags.keys()) {
+        if (is_pinned(candidate) === true || candidate === spare_id) {
+          continue;
+        }
+        oldest_idle = candidate;
+        break;
+      }
+      if (oldest_idle === undefined) {
+        return;
+      }
+      bags.delete(oldest_idle);
+      logger.info(`serve session bag evicted (LRU): ${oldest_idle}`);
+    }
+  }
+
   function put(id: string, bag: ServeSessionBag): void {
     bags.set(id, bag);
-    if (max_bags > 0 && bags.size > max_bags) {
-      const oldest = bags.keys().next().value;
-      if (oldest !== undefined) {
-        bags.delete(oldest);
-        logger.info(`serve session bag evicted (LRU): ${oldest}`);
-      }
-    }
+    evict_overflow(id);
   }
 
   return {
@@ -208,8 +241,21 @@ export function create_serve_session_store(
       touch(session_id);
       return bags.get(session_id);
     },
+    pin: (session_id) => {
+      pins.set(session_id, (pins.get(session_id) ?? 0) + 1);
+    },
+    unpin: (session_id) => {
+      const next = (pins.get(session_id) ?? 0) - 1;
+      if (next <= 0) {
+        pins.delete(session_id);
+      } else {
+        pins.set(session_id, next);
+      }
+      evict_overflow();
+    },
     dispose: () => {
       bags.clear();
+      pins.clear();
     },
   };
 }

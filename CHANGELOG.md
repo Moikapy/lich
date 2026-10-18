@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `lich serve` keeps a session in memory while its `prompt.submit` is in
+  flight. A `session.create` that overflows the bag cap evicts an idle
+  session instead, and the live turn still writes its history back. The cap
+  may be exceeded until those turns finish. `ServeSessionStore` gained
+  `pin` / `unpin` for that hold.
 - `lich profile use` copies `~/.config/lich/config.json` into `~/.lich/config.json`
   when the global file does not exist yet, so legacy settings (including
   `tools_enabled`) stay in effect. `lich init --global` refuses to create
