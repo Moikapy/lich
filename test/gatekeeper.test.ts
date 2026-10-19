@@ -296,16 +296,18 @@ describe("gatekeeper plugin", () => {
     expect(files.out).toContain("committed.txt");
   });
 
-  it("commits a dotenv template, which is not a secret", async () => {
+  it("commits dotenv templates, which are not secrets", async () => {
     const executor = commit_executor();
-    await writeFile(path.join(tmp_root, ".env.example"), "API_KEY=\n");
-    const result = await executor.execute(
-      "git_commit",
-      { message: "add env template", paths: [".env.example"] },
-      { work_dir: tmp_root, env: {} },
-    );
-    expect(result.ok).toBe(true);
-    expect(result.output).toMatch(/^[0-9a-f]{7,} \.env\.example$/);
+    for (const template of [".env.example", ".env.sample", ".env.template"]) {
+      await writeFile(path.join(tmp_root, template), "API_KEY=\n");
+      const result = await executor.execute(
+        "git_commit",
+        { message: `add ${template}`, paths: [template] },
+        { work_dir: tmp_root, env: {} },
+      );
+      expect(result.ok).toBe(true);
+      expect(result.output.endsWith(` ${template}`)).toBe(true);
+    }
   });
 
   it("refuses to commit when HEAD is unreachable (unborn branch, A3)", async () => {
@@ -360,6 +362,7 @@ describe("gatekeeper plugin", () => {
       { rel: "keys/id_ecdsa", marker: "ECDSA-SECRET-MARKER" },
       { rel: "keys/ID_RSA", marker: "UPPER-RSA-SECRET-MARKER" },
       { rel: "keys/Server.PEM", marker: "UPPER-PEM-SECRET-MARKER" },
+      { rel: "keys/id_rsa2", marker: "RSA2-SECRET-MARKER" },
     ];
     for (const secret of secrets) {
       await writeFile(path.join(tmp_root, secret.rel), `${secret.marker}\n`);

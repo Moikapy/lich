@@ -29,8 +29,8 @@ const PATHSPEC_MAGIC = /[:*?[]/;
 /** Committed dotenv templates; every other `.env` / `.env.*` basename is a secret. */
 const DOTENV_TEMPLATES: readonly string[] = [".env.example", ".env.sample", ".env.template"];
 
-/** SSH key basenames (`.pub` included: the agent has no reason to commit keys). */
-const SSH_KEY = /^id_(?:rsa|dsa|ecdsa|ed25519)(?:[._-]|$)/;
+/** SSH key basenames, any suffix (`.pub`, `id_rsa2`): the agent has no reason to commit keys. */
+const SSH_KEY = /^id_(?:rsa|dsa|ecdsa|ed25519)/;
 
 /** Basenames never committable by the agent (secret-ish, hardcoded, case-insensitive). */
 function is_secret_path(file_path: string): boolean {
