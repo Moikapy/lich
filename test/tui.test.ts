@@ -224,11 +224,19 @@ describe("format_message_block", () => {
   it("names a tool row by the main arg of the call it answers, clipping long args", () => {
     const call = { id: "1", name: "read_file", args: { path: "x".repeat(120) } };
     const block = format_message_block(
-      { role: "tool", tool_call_id: "1", name: "read_file", content: JSON.stringify({ ok: true, output: "body\nmore" }) },
+      { role: "tool", tool_call_id: "1", name: "read_file", content: "body\nmore" },
       LICH_THEME,
       call,
     );
     expect(block).toEqual({ role: "tool", lines: [`✓ read_file  ${"x".repeat(79)}… · body`] });
+  });
+
+  it("keeps a successful result that is itself JSON with an output key as raw output", () => {
+    const block = format_message_block(
+      { role: "tool", tool_call_id: "1", name: "read_file", content: '{"output":""}' },
+      LICH_THEME,
+    );
+    expect(block.lines).toEqual(['✓ read_file · {"output":""}']);
   });
 
   it("formats tool messages as ok/error result rows", () => {

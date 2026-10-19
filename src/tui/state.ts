@@ -209,13 +209,21 @@ export function result_preview_text(result: { output: string; error?: string }):
   return result.output.length > 0 ? result.output : (result.error ?? "");
 }
 
-/** `result_preview_text` for a stored tool message (`{ok, output, error}` JSON, or plain text). */
+/**
+ * `result_preview_text` for a stored tool message. Only failures are stored
+ * as `{ok: false, output, error}` JSON (`format_tool_result_content`); any
+ * other content, JSON-looking or not, is the raw output.
+ */
 function stored_result_text(content: string): string {
-  const parsed = safe_json_parse<{ ok?: unknown; output?: unknown; error?: unknown }>(content);
-  if (parsed === undefined || typeof parsed.output !== "string") {
+  const parsed = safe_json_parse<unknown>(content);
+  if (typeof parsed !== "object" || parsed === null) {
     return content;
   }
-  return result_preview_text({ output: parsed.output, error: typeof parsed.error === "string" ? parsed.error : undefined });
+  const record = parsed as { ok?: unknown; output?: unknown; error?: unknown };
+  if (record.ok !== false || typeof record.output !== "string") {
+    return content;
+  }
+  return result_preview_text({ output: record.output, error: typeof record.error === "string" ? record.error : undefined });
 }
 
 /** `✓ name  summary  0.2s · first output line` (summary, duration and preview are optional). */
