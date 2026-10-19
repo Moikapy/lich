@@ -1,7 +1,7 @@
 ---
 title: Game transports (library vs webhook vs file bus vs serve vs stdio)
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-19
 type: comparison
 tags: [games, serve, gateway, engines, npc, play]
 sources: [raw/audits/2026-09-23-game-surface-audit.md, raw/issues/issue-113.md]
@@ -37,7 +37,7 @@ This page compares how a game, engine or harness can talk to Lich. The findings 
 
 The webhook has three problems for games:
 - It is text in, text out, so it can't push, stream or ask the game to run a tool.
-- It returns `usage: null`, and a failed run still returns HTTP 200.
+- It returns only the final reply and usage. Since #174 usage is real and a failed run returns HTTP 502, but there is still no event stream.
 - It pushes the action channel onto the racy file bus.
 
 It stays as a *text adapter* under the gateway hub ([[0001-gateway-as-hub]]), and it remains fine for turn-based "once per round" prototypes.
