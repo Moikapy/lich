@@ -156,7 +156,7 @@ describe("lich mcp", () => {
     expect(String(credentialed)).toMatch(/credentials/);
     expect(String(credentialed)).not.toContain(SECRET);
     const mapped = await run_cli([
-      "--work-dir", work_dir, "mcp", "add", "mapped", "--url", "http://[::1]/mcp",
+      "--work-dir", work_dir, "mcp", "add", "ipv6", "--url", "http://[::1]/mcp",
     ]).catch((error: unknown) => error);
     expect(mapped).toBeInstanceOf(Error);
     expect(String(mapped)).toMatch(/loopback/);

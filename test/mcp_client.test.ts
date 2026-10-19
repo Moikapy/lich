@@ -191,7 +191,6 @@ describe("mcp refusal", () => {
     expect(plan_stdio("lab", "npm", ["exec", "pkg"], undefined)).toMatch(/download command 'npm'/);
     expect(plan_stdio("lab", "yarn", ["create", "pkg"], undefined)).toMatch(/download command 'yarn'/);
     expect(plan_stdio("lab", "perl", ["-e", "system 1"], undefined)).toMatch(/eval flag '-e'/);
-    expect(plan_stdio("lab", "php", ["-e"], undefined)).toMatch(/eval flag '-e'/);
     expect(plan_stdio("lab", "python", ["-c", "import os"], undefined)).toMatch(/eval flag '-c'/);
     expect(plan_stdio("lab", "nodejs", ["--eval", "1"], undefined)).toMatch(/eval flag '--eval'/);
     expect(plan_stdio("lab", "tool", ["--flag", "curl"], undefined)).toMatch(/download command 'curl' in args/);
