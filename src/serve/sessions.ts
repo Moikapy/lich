@@ -134,10 +134,10 @@ export function create_serve_session_store(
   }
 
   /**
-   * Drop oldest idle bags until `bags` fits the cap. A bag just inserted
-   * (`spare_id`) is left in place when every older bag is pinned, so
-   * `session.create` does not hand back an id that this same call evicted.
-   * The map stays over the cap until a pin releases.
+   * Drop oldest idle bags until `bags` fits the cap. `spare_id` is never
+   * dropped: the bag just inserted, so `session.create` does not hand back an
+   * id this same call evicted, or the bag whose turn just finished. The map
+   * stays over the cap until a pin releases.
    */
   function evict_overflow(spare_id?: string): void {
     if (max_bags <= 0) {
@@ -251,7 +251,9 @@ export function create_serve_session_store(
       } else {
         pins.set(session_id, next);
       }
-      evict_overflow();
+      // Spare the bag whose turn just finished: it is in active use, even if
+      // it is the oldest idle bag while the others are still pinned.
+      evict_overflow(session_id);
     },
     dispose: () => {
       bags.clear();

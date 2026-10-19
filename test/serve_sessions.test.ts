@@ -307,6 +307,20 @@ describe("serve session rpc", () => {
     expect(sessions.get(after.session_id)?.source).toBe("after");
   });
 
+  it("keeps the bag whose turn just finished when every other bag is still pinned", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-pin-spare"), "sessions");
+    const sessions = create_serve_session_store(session_dir, 2);
+    const first = await sessions.create({ source: "first" });
+    const second = await sessions.create({ source: "second" });
+    sessions.pin(first.session_id);
+    sessions.pin(second.session_id);
+    const extra = await sessions.create({ source: "extra" });
+    sessions.unpin(first.session_id);
+    expect(sessions.get(first.session_id)?.source).toBe("first");
+    expect(sessions.get(second.session_id)?.source).toBe("second");
+    expect(sessions.get(extra.session_id)).toBeUndefined();
+  });
+
   it("evicts the least recently used bag beyond the cap", async () => {
     const session_dir = path.join(await make_temp_dir("serve-lru"), "sessions");
     const context = rpc_context(session_dir, 2);
