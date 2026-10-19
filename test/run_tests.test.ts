@@ -130,7 +130,7 @@ describe("run_tests", () => {
     const probed = spawnSync("bash", ["-lc", command], { cwd: tmp_root });
     expect(probed.status).toBe(0);
     expect(existsSync(marker)).toBe(false);
-    expect(command).not.toBe(naive);
+    expect(command).toBe(`true 'x'\\''; touch ${marker}; echo '\\''y'`);
   });
 
   it("runs in context.work_dir, not process.cwd()", async () => {
