@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 0.10.0
 
 - Twitch: a chat message containing `001` or `GLOBALUSERSTATE` is no longer
