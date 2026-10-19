@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- TUI: a status line too long for the terminal now wraps as one line of text
+  instead of splitting into side-by-side columns.
 - TUI layout cleanup: your turns sit under a rule as `● mortal  text`, replies
   under a `⚱ lich` header, and each tool call is one `┊ ✓ name  arg  0.2s ·
   output` row. The input row now sits above the status line, which shows the
