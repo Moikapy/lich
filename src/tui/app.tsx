@@ -30,6 +30,7 @@ import {
   resume_banner_count,
   resume_banner_line,
   resume_missing_args_block,
+  result_preview_text,
   run_notice_blocks,
   session_list_block,
   split_history_blocks,
@@ -75,7 +76,7 @@ function event_blocks(event: AgentEvent, theme: ThemeSpec, tool_starts: Map<stri
       return [];
     }
     const duration_ms = started === undefined ? undefined : Math.max(0, event.ts - started);
-    return [tool_result_block(event.call, event.result.ok === true, event.result.output, duration_ms)];
+    return [tool_result_block(event.call, event.result.ok === true, result_preview_text(event.result), duration_ms)];
   }
   if (event.type === "compress_end") {
     return [compress_notice_block(event.summary_chars, theme)];

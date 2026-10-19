@@ -21,6 +21,7 @@ import {
   session_list_block,
   split_history_blocks,
   format_duration,
+  result_preview_text,
   tool_args_preview,
   tool_args_summary,
   tool_result_block,
@@ -295,7 +296,7 @@ describe("split_history_blocks", () => {
     const blocks = split_history_blocks(history, 50, LICH_THEME);
     expect(blocks.map((block) => [block.role, block.lines[0]])).toEqual([
       ["user", "list it"],
-      ["error", "✗ terminal  ls -la"],
+      ["error", "✗ terminal  ls -la · denied"],
       ["lich", "it was denied"],
     ]);
   });
@@ -488,6 +489,8 @@ describe("notice blocks", () => {
 
     const failure = tool_result_block({ id: "1", name: "shell", args: {} }, false, "denied");
     expect(failure).toEqual({ role: "error", lines: ["✗ shell · denied"] });
+    expect(result_preview_text({ output: "", error: "path escapes work_dir" })).toBe("path escapes work_dir");
+    expect(result_preview_text({ output: "partial", error: "exit 1" })).toBe("partial");
 
     const no_preview = tool_result_block({ id: "1", name: "x", args: { depth: 2 } }, true, "");
     expect(no_preview.lines).toEqual(['✓ x  {"depth":2}']);

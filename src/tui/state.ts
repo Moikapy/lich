@@ -201,6 +201,23 @@ function output_preview(output: string): string {
   return clip(first.trim(), TOOL_OUTPUT_PREVIEW_CHARS);
 }
 
+/**
+ * What a row previews: the output, or the error when a failure left output
+ * empty (read_file, the guard and unknown tools put the reason only there).
+ */
+export function result_preview_text(result: { output: string; error?: string }): string {
+  return result.output.length > 0 ? result.output : (result.error ?? "");
+}
+
+/** `result_preview_text` for a stored tool message (`{ok, output, error}` JSON, or plain text). */
+function stored_result_text(content: string): string {
+  const parsed = safe_json_parse<{ ok?: unknown; output?: unknown; error?: unknown }>(content);
+  if (parsed === undefined || typeof parsed.output !== "string") {
+    return content;
+  }
+  return result_preview_text({ output: parsed.output, error: typeof parsed.error === "string" ? parsed.error : undefined });
+}
+
 /** `✓ name  summary  0.2s · first output line` (summary, duration and preview are optional). */
 function tool_row(name: string, summary: string, ok: boolean, output: string, duration_ms?: number): string {
   const parts = [`${ok === true ? "\u2713" : "\u2717"} ${name}`];
@@ -221,9 +238,8 @@ function tool_row(name: string, summary: string, ok: boolean, output: string, du
 export function format_message_block(message: Message, theme: ThemeSpec, call?: ToolCall): HistoryBlock {
   if (message.role === "tool") {
     const ok = message.is_error !== true;
-    const { output } = parse_tool_message_content(message.content);
     const summary = call === undefined ? "" : tool_args_summary(call.args);
-    return { role: ok === true ? "tool" : "error", lines: [tool_row(message.name, summary, ok, output)] };
+    return { role: ok === true ? "tool" : "error", lines: [tool_row(message.name, summary, ok, stored_result_text(message.content))] };
   }
   if (message.role === "user") {
     return { role: "user", label: theme.user_label, lines: [message.content] };
