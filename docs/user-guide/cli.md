@@ -23,7 +23,7 @@ lich mcp enable <name> # set enabled true
 lich mcp disable <name>
 lich mcp remove <name>
 lich --help            # usage text
-lich --version         # package.json version (published package and this tree: 0.8.0)
+lich --version         # package.json version (published package and this tree: 0.10.0)
 ```
 
 - **Bare `lich`** opens the same TUI as `lich tui`. It does not print usage. On a TTY, if none of `.lich/config.json`, `~/.lich/config.json` or the legacy `~/.config/lich/config.json` exists, a setup wizard runs first (name, provider, optional gateway env-var names, optional plugins) and writes `.lich/config.json` once. Its last question, "Save as the global default?" (default no), writes the answers to `~/.lich/config.json` instead, so later projects skip the wizard; plugins found under the project's `.lich/plugins` still go to the project file. `LICH_MODEL` / `--model` prefills the model prompt; it does not skip the wizard. An existing config in that chain skips the wizard and is not replaced. Non-TTY stdin skips the wizard and prints guidance instead of hanging. `lich --help` still prints usage.
@@ -37,7 +37,7 @@ lich --version         # package.json version (published package and this tree: 
 - **Update** compares the installed version to the npm registry and, when a newer release exists, runs `npm install -g @moikapy/lich@latest`. Exit any running TUI or gateway first; npm cannot replace the package while those processes are running. A git clone is told to `git pull`. See [Updating](../getting-started.md#updating).
 - **MCP** (`lich mcp`) edits only `mcp_servers` in `<work-dir>/.lich/config.json` through the same writer as `lich init` (`update` mode, so other keys stay). A missing file lists as empty; `add` creates the file if needed. New entries stay disabled until `enable`. Names must match `^[a-z][a-z0-9_]*$`. Catalog names use `optional-mcps/`; otherwise pass `--command` and repeatable `--arg`, or `--url` (loopback only), not both. Redot still needs `--project-path` for the catalog args, and the command basename must be `redot`. No prompts. See the [Redot guide](redot.md).
 
-A repository clone's `bun src/cli.ts` matches that checkout. The published 0.8.0 binary includes `lich mcp`.
+A repository clone's `bun src/cli.ts` matches that checkout. The published 0.10.0 binary includes `lich mcp`.
 
 ## Flags
 
