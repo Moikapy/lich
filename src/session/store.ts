@@ -80,7 +80,11 @@ function is_message(value: unknown): value is Message {
   return typeof role === "string" && MESSAGE_ROLES.has(role);
 }
 
-/** Crash between llm_end and tool_call_end: tool_use with no result breaks the next provider call. */
+/**
+ * Crash between llm_end and tool_call_end: tool_use with no result breaks the
+ * next provider call. A tool result that answers no call breaks it too, so
+ * those are dropped.
+ */
 function close_dangling_tool_calls(messages: readonly Message[]): Message[] {
   const closed: Message[] = [];
   let index = 0;
@@ -89,13 +93,18 @@ function close_dangling_tool_calls(messages: readonly Message[]): Message[] {
     if (message === undefined) {
       break;
     }
-    closed.push(message);
     index += 1;
+    // Results that follow an assistant's calls are consumed below; any other
+    // tool row answers no call.
+    if (message.role === "tool") {
+      continue;
+    }
+    closed.push(message);
     const calls = message.role === "assistant" ? message.tool_calls : undefined;
     if (calls === undefined || calls.length === 0) {
       continue;
     }
-    const seen = collect_following_tool_ids(messages, index, closed);
+    const seen = collect_following_tool_ids(messages, index, calls, closed);
     index += seen.consumed;
     append_missing_tool_results(calls, seen.ids, closed);
   }
@@ -105,13 +114,15 @@ function close_dangling_tool_calls(messages: readonly Message[]): Message[] {
 function collect_following_tool_ids(
   messages: readonly Message[],
   start: number,
+  calls: readonly ToolCall[],
   closed: Message[],
 ): { ids: Set<string>; consumed: number } {
+  const call_ids = new Set(calls.map((call) => call.id));
   const ids = new Set<string>();
   let consumed = 0;
   while (start + consumed < messages.length && messages[start + consumed]?.role === "tool") {
     const tool_message = messages[start + consumed];
-    if (tool_message?.role === "tool") {
+    if (tool_message?.role === "tool" && call_ids.has(tool_message.tool_call_id) === true) {
       ids.add(tool_message.tool_call_id);
       closed.push(tool_message);
     }

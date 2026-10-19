@@ -6,6 +6,7 @@
  */
 import { useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { USER_ACCENT } from "./message_view.js";
 
 const INPUT_HISTORY_CAP = 20;
 
@@ -88,9 +89,10 @@ export function CommandBar({ busy, on_submit, on_cancel }: CommandBarProps): Rea
 
   return (
     <Box>
-      <Text dimColor>{busy ? "  … " : "› "}</Text>
+      {busy ? <Text dimColor>{"· "}</Text> : <Text color={USER_ACCENT}>{"› "}</Text>}
       <Text>{buffer}</Text>
       <Text dimColor>▌</Text>
+      {busy && buffer.length === 0 ? <Text dimColor>{" esc to cancel"}</Text> : null}
     </Box>
   );
 }

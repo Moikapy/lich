@@ -30,6 +30,7 @@ import {
   resume_banner_count,
   resume_banner_line,
   resume_missing_args_block,
+  result_preview_text,
   run_notice_blocks,
   session_list_block,
   split_history_blocks,
@@ -59,13 +60,23 @@ interface AgentRunControls {
   readonly set_history: SetHistory;
 }
 
-/** Map one agent event to optional transcript blocks (tool rows, notices). */
-function event_blocks(event: AgentEvent, theme: ThemeSpec): readonly HistoryBlock[] {
+/**
+ * Map one agent event to optional transcript blocks (tool rows, notices).
+ * `tool_starts` holds each running call's start `ts`, for the row's duration.
+ */
+function event_blocks(event: AgentEvent, theme: ThemeSpec, tool_starts: Map<string, number>): readonly HistoryBlock[] {
+  if (event.type === "tool_call_start") {
+    tool_starts.set(event.call.id, event.ts);
+    return [];
+  }
   if (event.type === "tool_call_end") {
+    const started = tool_starts.get(event.call.id);
+    tool_starts.delete(event.call.id);
     if (event.cancelled === true) {
       return [];
     }
-    return [tool_result_block(event.call, event.result.ok === true, event.result.output)];
+    const duration_ms = started === undefined ? undefined : Math.max(0, event.ts - started);
+    return [tool_result_block(event.call, event.result.ok === true, result_preview_text(event.result), duration_ms)];
   }
   if (event.type === "compress_end") {
     return [compress_notice_block(event.summary_chars, theme)];
@@ -143,13 +154,17 @@ function use_agent_run(
 
   const start_message_run = useCallback(
     (text: string): void => {
-      add_blocks([{ role: "user", lines: [`${theme.user_label} › ${text}`] }]);
+      add_blocks([{ role: "user", label: theme.user_label, lines: [text] }]);
       set_state((current) => ({ ...current, phase: "thinking", active_tool: undefined }));
       const controller = new AbortController();
       controller_ref.current = controller;
+      const tool_starts = new Map<string, number>();
       const on_event = (event: AgentEvent): void => {
         set_state((current) => apply_event(current, event));
-        set_blocks((current) => [...current, ...event_blocks(event, theme)].slice(-HISTORY_CAP));
+        const added = event_blocks(event, theme, tool_starts);
+        if (added.length > 0) {
+          set_blocks((current) => [...current, ...added].slice(-HISTORY_CAP));
+        }
       };
       void run_agent_turn(agent, history_ref.current, text, on_event, finish_run, controller.signal, session)
         .catch((error: unknown) => {
@@ -338,9 +353,19 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
   return (
     <Box flexDirection="column" minHeight={8}>
       <Text dimColor>{resume_line === undefined ? banner : `${banner}\n${resume_line}`}</Text>
-      <MessageView blocks={blocks} state={state} />
-      <StatusBar state={state} model={provider?.model ?? "unknown"} theme={theme} />
-      <CommandBar busy={state.phase !== "idle" || resume_loading} on_submit={submit} on_cancel={cancel_run} />
+      <MessageView blocks={blocks} state={state} theme={theme} />
+      <Box
+        flexDirection="column"
+        borderStyle="single"
+        borderTop
+        borderBottom={false}
+        borderLeft={false}
+        borderRight={false}
+        borderDimColor
+      >
+        <CommandBar busy={state.phase !== "idle" || resume_loading} on_submit={submit} on_cancel={cancel_run} />
+        <StatusBar state={state} model={provider?.model ?? "unknown"} theme={theme} />
+      </Box>
     </Box>
   );
 }

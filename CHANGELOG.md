@@ -7,6 +7,16 @@
   session instead, and the live turn still writes its history back. The cap
   may be exceeded until those turns finish. `ServeSessionStore` gained
   `pin` / `unpin` for that hold.
+- TUI: a status line too long for the terminal now wraps as one line of text
+  instead of splitting into side-by-side columns.
+- TUI layout cleanup: your turns sit under a rule as `● mortal  text`, replies
+  under a `⚱ lich` header, and each tool call is one `┊ ✓ name  arg  0.2s ·
+  output` row. The input row now sits above the status line, which shows the
+  phase first and the session id instead of its full path.
+- Discord: a message that is only the bot mention no longer starts an agent
+  turn with an empty prompt. Resume (CLI `--resume`, TUI `/sessions`,
+  `session.resume`) drops tool results that answer no tool call, which
+  providers reject (#193).
 - `lich profile use` copies `~/.config/lich/config.json` into `~/.lich/config.json`
   when the global file does not exist yet, so legacy settings (including
   `tools_enabled`) stay in effect. `lich init --global` refuses to create
