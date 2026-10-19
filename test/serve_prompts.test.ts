@@ -753,7 +753,7 @@ describe("serve prompt rpc", () => {
     expect(JSON.stringify(history_after)).not.toContain("clear-me");
   });
 
-  it("does not resurrect a session bag evicted while its run is in flight", async () => {
+  it("keeps an in-flight session when newer creates overflow the bag cap", async () => {
     const work_dir = await make_temp_dir("serve-prompt-evict-race");
     const session_dir = path.join(work_dir, "sessions");
     let fetch_started!: () => void;
@@ -793,14 +793,18 @@ describe("serve prompt rpc", () => {
     const third = (await rpc(context, "session.create", { source: "test" }, 4)).result as {
       session_id: string;
     };
-    expect(sessions.get(created.session_id)).toBeUndefined();
+    // The running session stays; the idle one created just before the overflow is dropped.
+    expect(sessions.get(created.session_id)).toBeDefined();
+    expect(sessions.get(second.session_id)).toBeUndefined();
+    expect(sessions.get(third.session_id)?.history).toEqual([]);
 
     release_first();
     const submit = (await submit_promise).result as { stopped_reason: string; reply: string };
     expect(submit.stopped_reason).toBe("final");
     expect(submit.reply).toBe("evicted-reply");
-    expect(sessions.get(created.session_id)).toBeUndefined();
-    expect(sessions.get(second.session_id)?.history).toEqual([]);
+    const kept = sessions.get(created.session_id);
+    expect(kept?.history.some((message) => message.role === "assistant" && message.content === "evicted-reply")).toBe(true);
+    expect(kept?.history.some((message) => message.role === "user" && message.content === "evict-me")).toBe(true);
     expect(sessions.get(third.session_id)?.history).toEqual([]);
   });
 

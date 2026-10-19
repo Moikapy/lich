@@ -290,6 +290,37 @@ describe("serve session rpc", () => {
     expect(ok.result).toHaveProperty("session_id");
   });
 
+  it("does not evict a pinned bag, and keeps a create that lands while every older bag is pinned", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-pin"), "sessions");
+    const sessions = create_serve_session_store(session_dir, 1);
+    const live = await sessions.create({ source: "live" });
+    sessions.pin(live.session_id);
+    const created_during = await sessions.create({ source: "during" });
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(created_during.session_id)?.source).toBe("during");
+    sessions.get(live.session_id);
+    sessions.unpin(live.session_id);
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(created_during.session_id)).toBeUndefined();
+    const after = await sessions.create({ source: "after" });
+    expect(sessions.get(live.session_id)).toBeUndefined();
+    expect(sessions.get(after.session_id)?.source).toBe("after");
+  });
+
+  it("keeps the bag whose turn just finished when every other bag is still pinned", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-pin-spare"), "sessions");
+    const sessions = create_serve_session_store(session_dir, 2);
+    const first = await sessions.create({ source: "first" });
+    const second = await sessions.create({ source: "second" });
+    sessions.pin(first.session_id);
+    sessions.pin(second.session_id);
+    const extra = await sessions.create({ source: "extra" });
+    sessions.unpin(first.session_id);
+    expect(sessions.get(first.session_id)?.source).toBe("first");
+    expect(sessions.get(second.session_id)?.source).toBe("second");
+    expect(sessions.get(extra.session_id)).toBeUndefined();
+  });
+
   it("evicts the least recently used bag beyond the cap", async () => {
     const session_dir = path.join(await make_temp_dir("serve-lru"), "sessions");
     const context = rpc_context(session_dir, 2);
