@@ -95,7 +95,7 @@ commit per run, hardcoded.
 
 `git_commit` args are `{message, paths}` with 1–50 paths relative to
 `work_dir`. It rejects `""`, `.`, anything resolving to `work_dir`, and
-secret-ish basenames (`.env`, `.env.local`, `*.pem`, `*.p12`, `id_rsa*`).
+secret-ish basenames, matched case-insensitively: `.env` and every `.env.*` except the `.env.example` / `.env.sample` / `.env.template` templates, SSH keys (`id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`, `.pub` included), `*.pem` and `*.p12`.
 Unreachable `HEAD` is fail-closed. Recipe: scoped `git add -- <paths>`, then
 `git commit --only` with explicit identity `-c` flags. `timeout_ms` is 60000.
 It never pushes.

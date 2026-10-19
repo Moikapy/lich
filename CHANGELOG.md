@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Twitch: a chat message containing `001` or `GLOBALUSERSTATE` is no longer
+  mistaken for the server welcome (which dropped it and reset the reconnect
+  backoff); only the command position counts (#203).
+- Gatekeeper `git_commit` refuses more secret files, case-insensitively: every
+  `.env.*` except the `.env.example` / `.env.sample` / `.env.template`
+  templates, and `id_dsa`, `id_ecdsa`, `id_ed25519` keys besides `id_rsa`
+  (#203).
 - `lich serve` keeps a session in memory while its `prompt.submit` is in
   flight. A `session.create` that overflows the bag cap evicts an idle
   session instead, and the live turn still writes its history back. The cap

@@ -199,7 +199,7 @@ boundary is a human reviewing the local repo. Push is human-only.
 
 `git_commit` takes `{message, paths}` — 1 to 50 paths relative to `work_dir`.
 It rejects `""`, `.`, a path that resolves to `work_dir` itself, and
-secret-ish basenames (`.env`, `.env.local`, `*.pem`, `*.p12`, `id_rsa*`).
+secret-ish basenames, matched case-insensitively: `.env` and every `.env.*` except the `.env.example` / `.env.sample` / `.env.template` templates, SSH keys (`id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`, `.pub` included), `*.pem` and `*.p12`.
 It refuses an unreachable `HEAD`. It stages exactly the named paths
 (`git add -- <paths>`) and commits with `git commit --only`. It never pushes.
 

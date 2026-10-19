@@ -208,11 +208,18 @@ export function sanitize_twitch_outbound(text: string): string {
   return cleaned;
 }
 
+/**
+ * `001` or `GLOBALUSERSTATE` in the command position (after optional tags and
+ * the prefix). Matching anywhere in the line would also hit chat text, and a
+ * real line has no trailing space after the command (lines split on CRLF).
+ */
+const WELCOME_LINE = /^(?:@\S+ )?:\S+ (?:001|GLOBALUSERSTATE)(?: |$)/;
+
 export function parse_irc_line(line: string): ParsedLine {
   if (line.startsWith("PING") === true) {
     return { kind: "ping", channel: "", user: "", text: "" };
   }
-  if (/:\S+ 001 /.test(line) === true || line.includes(" GLOBALUSERSTATE ") === true) {
+  if (WELCOME_LINE.test(line) === true) {
     return { kind: "welcome", channel: "", user: "", text: "" };
   }
   const privmsg = match_privmsg(line);
