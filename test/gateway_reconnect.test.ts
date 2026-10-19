@@ -145,6 +145,10 @@ function heartbeat_count(socket: FakeSocket): number {
   return socket.sent.filter((line) => line.includes('"op":1')).length;
 }
 
+function json_frames(socket: FakeSocket): Array<Record<string, unknown>> {
+  return socket.sent.map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 afterEach(() => {
   vi.useRealTimers();
   for (const entry of sleep_state.pending.splice(0)) {
@@ -263,6 +267,49 @@ describe("discord reconnect", () => {
     expect(contents.join("")).toBe(reply);
     await adapter.stop();
   });
+
+  it("identifies on hello, heartbeats the latest seq, and closes on op 7 and op 9", async () => {
+    remember_env();
+    process.env.LICH_DISCORD_BOT_TOKEN = "fixture-discord-token";
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const adapter = create_discord_adapter(adapter_params());
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+
+    socket.emit(JSON.stringify({ op: 10, d: { heartbeat_interval: "2000" } }));
+    socket.onmessage?.({ data: { nope: true } });
+    socket.emit("{");
+    socket.emit(JSON.stringify({ op: 4 }));
+    expect(socket.close_count).toBe(0);
+    expect(json_frames(socket).filter((frame) => frame.op === 2)).toEqual([]);
+
+    socket.emit(JSON.stringify({ op: 10, d: { heartbeat_interval: 2000 } }));
+    const identify = json_frames(socket).filter((frame) => frame.op === 2);
+    expect(identify).toHaveLength(1);
+    const body = identify[0]?.d as { token?: string; intents?: number; properties?: { browser?: string } };
+    expect(body.token).toBe("fixture-discord-token");
+    expect(body.intents).toBe(512 | 32768 | 4096);
+    expect(body.properties?.browser).toBe("lich");
+
+    socket.emit(JSON.stringify({ op: 4, s: 3 }));
+    socket.emit(JSON.stringify({ op: 1 }));
+    expect(json_frames(socket).filter((frame) => frame.op === 1).map((frame) => frame.d)).toEqual([3]);
+    expect(socket.close_count).toBe(0);
+
+    socket.emit(JSON.stringify({ op: 7 }));
+    await settle();
+    expect(socket.close_count).toBe(1);
+    expect(sleep_state.delays).toEqual([5000]);
+    release_sleep();
+
+    const next = await wait_for_socket(1);
+    next.emit(JSON.stringify({ op: 9 }));
+    await settle();
+    expect(next.close_count).toBe(1);
+    expect(sleep_state.delays).toEqual([5000, 10000]);
+    await adapter.stop();
+  });
 });
 
 describe("twitch reconnect", () => {
@@ -320,6 +367,31 @@ describe("twitch reconnect", () => {
     for (const body of bodies()) {
       expect(body.length).toBeLessThanOrEqual(cap);
     }
+    await adapter.stop();
+  });
+
+  it("answers PING with a fixed PONG and does not run the agent", async () => {
+    remember_env();
+    process.env.LICH_TWITCH_OAUTH_TOKEN = "fixture-twitch-token";
+    process.env.LICH_TWITCH_NICK = "lichbot";
+    process.env.LICH_TWITCH_CHANNELS = "lobby";
+    let calls = 0;
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const adapter = create_twitch_adapter({
+      ...adapter_params(),
+      handle_message: async () => {
+        calls += 1;
+        return "should-not-send";
+      },
+    });
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    socket.emit("PING :injected\r\n");
+    await settle();
+    expect(socket.sent).toContain("PONG :tmi.twitch.tv");
+    expect(socket.sent.some((line) => line.includes("injected"))).toBe(false);
+    expect(socket.sent.some((line) => line.startsWith("PRIVMSG"))).toBe(false);
+    expect(calls).toBe(0);
     await adapter.stop();
   });
 });
