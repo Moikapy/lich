@@ -205,7 +205,8 @@ function identify_body(token: string): Record<string, unknown> {
 async function on_message_create(params: AdapterParams, data: Record<string, unknown> | undefined): Promise<void> {
   try {
     const message = normalize_message(data);
-    if (message === undefined) {
+    // A bare bot mention strips to "", which would start a turn with no input.
+    if (message === undefined || message.content.length === 0) {
       return;
     }
     const reply = await run_inbound_message(
@@ -264,8 +265,13 @@ function strip_mention(content: string): string {
   if (bot_id === undefined) {
     return content.trim();
   }
-  const mention = `<@${bot_id}>`;
-  return content.startsWith(mention) === true ? content.slice(mention.length).trim() : content.trim();
+  // `<@!id>` is the nickname form of the same mention.
+  for (const mention of [`<@${bot_id}>`, `<@!${bot_id}>`]) {
+    if (content.startsWith(mention) === true) {
+      return content.slice(mention.length).trim();
+    }
+  }
+  return content.trim();
 }
 
 function is_hello(d: Record<string, unknown> | undefined): d is { heartbeat_interval: number } {

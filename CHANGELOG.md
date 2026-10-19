@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Discord: a message that is only the bot mention no longer starts an agent
+  turn with an empty prompt. Resume (CLI `--resume`, TUI `/sessions`,
+  `session.resume`) drops tool results that answer no tool call, which
+  providers reject (#193).
 - `lich profile use` copies `~/.config/lich/config.json` into `~/.lich/config.json`
   when the global file does not exist yet, so legacy settings (including
   `tools_enabled`) stay in effect. `lich init --global` refuses to create
