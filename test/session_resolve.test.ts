@@ -123,8 +123,9 @@ describe("resolve_session_path", () => {
     } catch (error) {
       expect(error).toMatchObject({ name: "SessionResolveError", kind: "ambiguous" });
       const message = error instanceof Error ? error.message : String(error);
-      expect(message).toContain("matches: a6, a5, a4, a3, a2");
-      expect(message).not.toContain("a1");
+      // Check only the listed ids: the message also carries the directory path,
+      // which may contain "a1" by chance.
+      expect(message.split("matches: ")[1]).toBe("a6, a5, a4, a3, a2");
     }
   });
 });
