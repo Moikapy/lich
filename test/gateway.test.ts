@@ -1250,6 +1250,18 @@ describe("twitch irc parsing", () => {
     expect(parsed.kind).toBe("ping");
   });
 
+  it("treats 001 or GLOBALUSERSTATE as the welcome only in the command position", () => {
+    expect(parse_irc_line(":tmi.twitch.tv GLOBALUSERSTATE").kind).toBe("welcome");
+    expect(parse_irc_line("@badge-info=;badges=;user-id=1 :tmi.twitch.tv GLOBALUSERSTATE").kind).toBe("welcome");
+    const in_text = [
+      "@badges= :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #chan :hi GLOBALUSERSTATE there",
+      ":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #chan :lol :) 001 points",
+    ];
+    for (const line of in_text) {
+      expect(parse_irc_line(line).kind).toBe("privmsg");
+    }
+  });
+
   it("recognizes IRC welcome and ignores other noise", () => {
     expect(parse_irc_line(":tmi.twitch.tv 001 nick :Welcome").kind).toBe("welcome");
     expect(parse_irc_line("@tags :nick!nick@nick.tmi.twitch.tv JOIN #chan").kind).toBe("other");

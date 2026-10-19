@@ -296,6 +296,20 @@ describe("gatekeeper plugin", () => {
     expect(files.out).toContain("committed.txt");
   });
 
+  it("commits dotenv templates, which are not secrets", async () => {
+    const executor = commit_executor();
+    for (const template of [".env.example", ".env.sample", ".env.template"]) {
+      await writeFile(path.join(tmp_root, template), "API_KEY=\n");
+      const result = await executor.execute(
+        "git_commit",
+        { message: `add ${template}`, paths: [template] },
+        { work_dir: tmp_root, env: {} },
+      );
+      expect(result.ok).toBe(true);
+      expect(result.output.endsWith(` ${template}`)).toBe(true);
+    }
+  });
+
   it("refuses to commit when HEAD is unreachable (unborn branch, A3)", async () => {
     const fresh = await fixture_dir("unborn-");
     await git(fresh, ["init"]);
@@ -342,6 +356,13 @@ describe("gatekeeper plugin", () => {
       { rel: "keys/client.p12", marker: "P12-SECRET-MARKER" },
       { rel: ".env.local", marker: "ENV-LOCAL-SECRET-MARKER" },
       { rel: "id_rsa.pub", marker: "RSA-PUB-SECRET-MARKER" },
+      { rel: ".env.production", marker: "ENV-PROD-SECRET-MARKER" },
+      { rel: "keys/.env.development.local", marker: "ENV-DEV-SECRET-MARKER" },
+      { rel: "keys/id_ed25519", marker: "ED25519-SECRET-MARKER" },
+      { rel: "keys/id_ecdsa", marker: "ECDSA-SECRET-MARKER" },
+      { rel: "keys/ID_RSA", marker: "UPPER-RSA-SECRET-MARKER" },
+      { rel: "keys/Server.PEM", marker: "UPPER-PEM-SECRET-MARKER" },
+      { rel: "keys/id_rsa2", marker: "RSA2-SECRET-MARKER" },
     ];
     for (const secret of secrets) {
       await writeFile(path.join(tmp_root, secret.rel), `${secret.marker}\n`);

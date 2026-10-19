@@ -26,15 +26,19 @@ const HOOKS_OFF: readonly string[] = ["-c", "core.hooksPath=/dev/null"];
 /** Pathspec magic that must never reach git (glob, magic signatures). */
 const PATHSPEC_MAGIC = /[:*?[]/;
 
-/** Basenames never committable by the agent (secret-ish, hardcoded). */
-const SECRET_BASENAMES: readonly string[] = [".env", ".env.local", "id_rsa"];
+/** Committed dotenv templates; every other `.env` / `.env.*` basename is a secret. */
+const DOTENV_TEMPLATES: readonly string[] = [".env.example", ".env.sample", ".env.template"];
 
+/** SSH key basenames, any suffix (`.pub`, `id_rsa2`): the agent has no reason to commit keys. */
+const SSH_KEY = /^id_(?:rsa|dsa|ecdsa|ed25519)/;
+
+/** Basenames never committable by the agent (secret-ish, hardcoded, case-insensitive). */
 function is_secret_path(file_path: string): boolean {
-  const base = path.basename(file_path);
-  if (SECRET_BASENAMES.includes(base) === true) {
+  const base = path.basename(file_path).toLowerCase();
+  if (base === ".env" || (base.startsWith(".env.") === true && DOTENV_TEMPLATES.includes(base) === false)) {
     return true;
   }
-  return base.endsWith(".pem") === true || base.endsWith(".p12") === true || base.startsWith("id_rsa") === true;
+  return SSH_KEY.test(base) === true || base.endsWith(".pem") === true || base.endsWith(".p12") === true;
 }
 
 /** Read a boolean flag from the plugin's per-run state sub-map. */
