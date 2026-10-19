@@ -90,6 +90,10 @@ export function create_serve_prompt_service(
         register_controller(params.session_id, controller);
       }
 
+      // Hold the bag across the run-queue wait and the model call. A create
+      // that overflows the LRU cap must not drop this session before the
+      // turn writes its history back.
+      sessions.pin(params.session_id);
       return runs.enqueue(params.session_id, async () => {
         // Aborted while queued: return without starting the run.
         if (controller.signal.aborted === true) {
@@ -132,6 +136,8 @@ export function create_serve_prompt_service(
         } finally {
           unregister_controller(params.session_id, controller);
         }
+      }).finally(() => {
+        sessions.unpin(params.session_id);
       });
     },
     abort: (params) => {

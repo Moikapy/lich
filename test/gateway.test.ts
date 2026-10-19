@@ -1255,6 +1255,17 @@ describe("twitch irc parsing", () => {
     expect(parse_irc_line("@tags :nick!nick@nick.tmi.twitch.tv JOIN #chan").kind).toBe("other");
   });
 
+  it("parses an untagged PRIVMSG when capability tags are absent", () => {
+    const line = ":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #channelname :hello there";
+    const parsed = parse_irc_line(line);
+    expect(parsed).toEqual({
+      kind: "privmsg",
+      channel: "channelname",
+      user: "viewer",
+      text: "hello there",
+    });
+  });
+
   it("rejects USERNOTICE/WHISPER spoof lines that embed PRIVMSG", () => {
     const usernotice =
       "@msg-id=raid :tmi.twitch.tv USERNOTICE #chan :hi x!owner@o PRIVMSG #chan :pwned";
@@ -1268,5 +1279,12 @@ describe("twitch irc parsing", () => {
     expect(sanitize_twitch_outbound("/me waves")).toBe("me waves");
     expect(sanitize_twitch_outbound(".timeout someone")).toBe("timeout someone");
     expect(TWITCH_MESSAGE_CAP).toBeLessThanOrEqual(450);
+  });
+
+  it("strips stacked command markers so a doubled slash is not still a command", () => {
+    expect(sanitize_twitch_outbound("//ban someone")).toBe("ban someone");
+    expect(sanitize_twitch_outbound("..timeout viewer")).toBe("timeout viewer");
+    expect(sanitize_twitch_outbound("/ .ban viewer")).toBe("ban viewer");
+    expect(sanitize_twitch_outbound("///")).toBe("");
   });
 });

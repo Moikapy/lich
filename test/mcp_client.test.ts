@@ -184,6 +184,22 @@ describe("mcp refusal", () => {
     }
   });
 
+  it("refuses the other shells, package runners, eval flags, and downloaders in args", () => {
+    for (const shell of ["zsh", "dash", "csh", "tcsh", "ksh", "cmd"]) {
+      expect(plan_stdio("lab", shell, ["-c", "id"], undefined), shell).toMatch(new RegExp(`shell '${shell}'`));
+    }
+    expect(plan_stdio("lab", "npm", ["exec", "pkg"], undefined)).toMatch(/download command 'npm'/);
+    expect(plan_stdio("lab", "yarn", ["create", "pkg"], undefined)).toMatch(/download command 'yarn'/);
+    expect(plan_stdio("lab", "perl", ["-e", "system 1"], undefined)).toMatch(/eval flag '-e'/);
+    expect(plan_stdio("lab", "python", ["-c", "import os"], undefined)).toMatch(/eval flag '-c'/);
+    expect(plan_stdio("lab", "nodejs", ["--eval", "1"], undefined)).toMatch(/eval flag '--eval'/);
+    expect(plan_stdio("lab", "tool", ["--flag", "curl"], undefined)).toMatch(/download command 'curl' in args/);
+    expect(plan_stdio("lab", "tool", ["ok", "x", "bash"], undefined)).toMatch(/shell 'bash' in args/);
+    expect(plan_stdio("lab", "tool$(id)", [], undefined)).toMatch(/shell metacharacters/);
+    expect(plan_stdio("lab", "tool|id", [], undefined)).toMatch(/shell metacharacters/);
+    expect(plan_stdio("lab", "", [], undefined)).toMatch(/refused mcp command/);
+  });
+
   it("names the official install when redot is missing and never spawns", async () => {
     const work_dir = await temp_dir("mcp-missing");
     const missing = path.join(work_dir, "missing", "redot");

@@ -19,6 +19,8 @@ function untouched_store(): { store: ServeSessionStore; calls: string[] } {
     list: async () => note("list"),
     resume: async () => note("resume"),
     get: () => note("get"),
+    pin: () => note("pin"),
+    unpin: () => note("unpin"),
     dispose: () => {
       calls.push("dispose");
     },

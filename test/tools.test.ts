@@ -358,6 +358,28 @@ describe("list_dir", () => {
     expect(result.output.includes("- alpha.txt")).toBe(true);
     expect(result.output.includes("node_modules")).toBe(false);
   });
+
+  it("skips .git, dist, and .cursor so their contents stay out of the listing and grep", async () => {
+    await write_temp(tmp_root, "skip/keep.txt", "keep-marker\n");
+    await write_temp(tmp_root, "skip/.git/config", "git-token-marker\n");
+    await write_temp(tmp_root, "skip/dist/bundle.js", "dist-marker\n");
+    await write_temp(tmp_root, "skip/.cursor/rules.md", "cursor-marker\n");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const listed = await executor.execute("list_dir", { path: "skip", depth: 3 });
+    expect(listed.ok).toBe(true);
+    expect(listed.output).toContain("keep.txt");
+    expect(listed.output).not.toContain(".git");
+    expect(listed.output).not.toContain("dist");
+    expect(listed.output).not.toContain(".cursor");
+    const grepped = await executor.execute("grep_files", { pattern: "marker", path: "skip" });
+    expect(grepped.ok).toBe(true);
+    expect(grepped.output).toContain("keep-marker");
+    expect(grepped.output).not.toContain("git-token-marker");
+    expect(grepped.output).not.toContain("dist-marker");
+    expect(grepped.output).not.toContain("cursor-marker");
+  });
 });
 
 describe("terminal", () => {

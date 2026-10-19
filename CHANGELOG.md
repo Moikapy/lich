@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `lich serve` keeps a session in memory while its `prompt.submit` is in
+  flight. A `session.create` that overflows the bag cap evicts an idle
+  session instead, and the live turn still writes its history back. The cap
+  may be exceeded until those turns finish. `ServeSessionStore` gained
+  `pin` / `unpin` for that hold.
 - TUI: a status line too long for the terminal now wraps as one line of text
   instead of splitting into side-by-side columns.
 - TUI layout cleanup: your turns sit under a rule as `● mortal  text`, replies

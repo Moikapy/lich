@@ -335,6 +335,81 @@ describe("gatekeeper plugin", () => {
     expect(staged.out).not.toContain(".env");
   });
 
+  it("refuses certificate and dotenv basenames, a whole-tree path, and an oversized path list", async () => {
+    const executor = commit_executor();
+    await mkdir(path.join(tmp_root, "keys"));
+    const secrets = [
+      { rel: "keys/client.p12", marker: "P12-SECRET-MARKER" },
+      { rel: ".env.local", marker: "ENV-LOCAL-SECRET-MARKER" },
+      { rel: "id_rsa.pub", marker: "RSA-PUB-SECRET-MARKER" },
+    ];
+    for (const secret of secrets) {
+      await writeFile(path.join(tmp_root, secret.rel), `${secret.marker}\n`);
+    }
+    for (const secret of secrets) {
+      const result = await executor.execute(
+        "git_commit",
+        { message: "add secret", paths: [secret.rel] },
+        { work_dir: tmp_root, env: {} },
+      );
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe(`secret_path: ${secret.rel}`);
+    }
+    const tree = await executor.execute(
+      "git_commit",
+      { message: "add tree", paths: ["./"] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(tree.ok).toBe(false);
+    expect(tree.error).toBe("invalid_path: ./");
+    const dotted = await executor.execute(
+      "git_commit",
+      { message: "add dot", paths: ["."] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(dotted.error).toBe("invalid_path: .");
+    const empty = await executor.execute(
+      "git_commit",
+      { message: "add empty", paths: [""] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(empty.error).toBe("invalid_path: (empty)");
+    const coerced = await executor.execute(
+      "git_commit",
+      { message: "add mixed", paths: ["good.txt", 1] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(coerced.ok).toBe(false);
+    expect(coerced.error).toContain("invalid_path");
+    const missing_message = await executor.execute(
+      "git_commit",
+      { message: "", paths: ["good.txt"] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(missing_message.error).toBe("invalid_args");
+    const not_array = await executor.execute(
+      "git_commit",
+      { message: "m", paths: "good.txt" },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(not_array.error).toBe("invalid_args");
+    const too_many = await executor.execute(
+      "git_commit",
+      { message: "m", paths: Array.from({ length: 51 }, () => "notes.txt") },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(too_many.ok).toBe(false);
+    expect(too_many.error).toBe("paths_must_have_1_to_50_entries");
+    const count = await git(tmp_root, ["rev-list", "--count", "HEAD"]);
+    expect(count.out.trim()).toBe("1");
+    const staged = await git(tmp_root, ["diff", "--cached", "--name-only"]);
+    expect(staged.out).toBe("");
+    const shown = await git(tmp_root, ["show", "--format=", "HEAD"]);
+    expect(shown.out).not.toContain("P12-SECRET-MARKER");
+    expect(shown.out).not.toContain("ENV-LOCAL-SECRET-MARKER");
+    expect(shown.out).not.toContain("RSA-PUB-SECRET-MARKER");
+  });
+
   it("does not run an executable post-commit hook", async () => {
     const marker = path.join(tmp_root, "hook-ran");
     const hook = path.join(tmp_root, ".git", "hooks", "post-commit");
