@@ -156,53 +156,103 @@ export function format_usage(total_tokens: number): string {
 
 export type BlockRole = "user" | "lich" | "tool" | "meta" | "error";
 
+/**
+ * One transcript entry. `label` is the speaker (theme user/response label) on
+ * user and lich blocks; the view draws it, so `lines` hold only the content.
+ * Tool blocks are one `✓`/`✗` row each; the view adds the `┊` guide.
+ */
 export interface HistoryBlock {
   readonly role: BlockRole;
   readonly lines: readonly string[];
+  readonly label?: string;
 }
 
-function assistant_tool_line(call: ToolCall): string {
-  const args_json = JSON.stringify(call.args) ?? "{}";
-  return `  \u23bf ${truncate_text(args_json, TOOL_ARGS_PREVIEW_CHARS)}`;
+/** Cut to `max_chars` on one line, ending in `…`; rows must not wrap onto a truncation notice. */
+function clip(text: string, max_chars: number): string {
+  return text.length <= max_chars ? text : `${text.slice(0, max_chars - 1)}\u2026`;
 }
 
-function format_message_lines(message: Message, theme: ThemeSpec): string[] {
-  if (message.role === "user") {
-    return [`${theme.user_label} \u203a ${message.content}`];
-  }
-  if (message.role === "assistant") {
-    const lines = [`${theme.response_label} \u203a ${message.content}`];
-    for (const call of message.tool_calls ?? []) {
-      lines.push(assistant_tool_line(call));
+/** Args most tools are identified by, in the order they are tried. */
+const PRIMARY_ARG_KEYS: readonly string[] = ["path", "file_path", "command", "cmd", "url", "query", "pattern", "name"];
+
+/** The one arg that identifies a call (`src/app.ts`, `npm test`), else compact JSON; "" for no args. */
+export function tool_args_summary(args: Record<string, unknown>): string {
+  for (const key of PRIMARY_ARG_KEYS) {
+    const value = args[key];
+    if (typeof value === "string" && value.length > 0) {
+      return clip(value.replaceAll("\n", " "), TOOL_ARGS_PREVIEW_CHARS);
     }
-    return lines;
   }
-  if (message.role === "tool") {
-    const flag = message.is_error === true ? "error" : "ok";
-    return [`  \u23bf ${message.name}: ${flag} (${truncate_text(message.content, TOOL_OUTPUT_PREVIEW_CHARS)})`];
-  }
-  return [`\u00b7 system: ${message.content}`];
+  return Object.keys(args).length === 0 ? "" : clip(JSON.stringify(args) ?? "{}", TOOL_ARGS_PREVIEW_CHARS);
 }
 
-/** Map one transcript Message to display lines with its role tag. */
-export function format_message_block(message: Message, theme: ThemeSpec): HistoryBlock {
+/** 240 -> "0.2s", 65_000 -> "1m 5s". */
+export function format_duration(ms: number): string {
+  if (ms < 60_000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+  const seconds = Math.round(ms / 1000);
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+/** First non-empty line of a tool result, truncated for a one-row preview. */
+function output_preview(output: string): string {
+  const first = output.split("\n").find((line) => line.trim().length > 0) ?? "";
+  return clip(first.trim(), TOOL_OUTPUT_PREVIEW_CHARS);
+}
+
+/** `✓ name  summary  0.2s · first output line` (summary, duration and preview are optional). */
+function tool_row(name: string, summary: string, ok: boolean, output: string, duration_ms?: number): string {
+  const parts = [`${ok === true ? "\u2713" : "\u2717"} ${name}`];
+  if (summary.length > 0) {
+    parts.push(summary);
+  }
+  if (duration_ms !== undefined) {
+    parts.push(format_duration(duration_ms));
+  }
+  const preview = output_preview(output);
+  return preview.length > 0 ? `${parts.join("  ")} \u00b7 ${preview}` : parts.join("  ");
+}
+
+/**
+ * Map one transcript Message to a block. Pass the assistant `call` a tool
+ * message answers so its row can name the call's main arg.
+ */
+export function format_message_block(message: Message, theme: ThemeSpec, call?: ToolCall): HistoryBlock {
   if (message.role === "tool") {
     const ok = message.is_error !== true;
-    return { role: ok === true ? "tool" : "error", lines: format_message_lines(message, theme) };
+    const { output } = parse_tool_message_content(message.content);
+    const summary = call === undefined ? "" : tool_args_summary(call.args);
+    return { role: ok === true ? "tool" : "error", lines: [tool_row(message.name, summary, ok, output)] };
   }
-  const roles: Record<Exclude<Message["role"], "tool">, BlockRole> = {
-    system: "meta",
-    user: "user",
-    assistant: "lich",
-  };
-  return { role: roles[message.role], lines: format_message_lines(message, theme) };
+  if (message.role === "user") {
+    return { role: "user", label: theme.user_label, lines: [message.content] };
+  }
+  if (message.role === "assistant") {
+    return { role: "lich", label: theme.response_label, lines: [message.content] };
+  }
+  return { role: "meta", lines: [`\u00b7 system: ${message.content}`] };
 }
 
-/** Keep the newest `cap` non-system messages as renderable blocks. */
+/**
+ * Keep the newest `cap` non-system messages as renderable blocks. An assistant
+ * turn that only calls tools shows no reply block; its calls appear on the
+ * tool rows that answer them.
+ */
 export function split_history_blocks(messages: readonly Message[], cap: number, theme: ThemeSpec): HistoryBlock[] {
-  const visible = messages.filter((message) => message.role !== "system");
+  const calls = new Map<string, ToolCall>();
+  for (const message of messages) {
+    for (const call of message.role === "assistant" ? (message.tool_calls ?? []) : []) {
+      calls.set(call.id, call);
+    }
+  }
+  const visible = messages.filter(
+    (message) => message.role !== "system" && (message.role !== "assistant" || message.content.length > 0),
+  );
   const start = Math.max(0, visible.length - cap);
-  return visible.slice(start).map((message) => format_message_block(message, theme));
+  return visible
+    .slice(start)
+    .map((message) => format_message_block(message, theme, message.role === "tool" ? calls.get(message.tool_call_id) : undefined));
 }
 
 /** Meta notice + transcript blocks after a successful in-TUI `/resume`. */
@@ -227,7 +277,7 @@ function assistant_result_block(message: AssistantMessage, theme: ThemeSpec): Hi
   if (message.content.length === 0) {
     return undefined;
   }
-  return { role: "lich", lines: [`${theme.response_label} \u203a ${message.content}`] };
+  return { role: "lich", label: theme.response_label, lines: [message.content] };
 }
 
 /** Post-run meta blocks: compression notices, budget, errors, final answer. */
@@ -249,18 +299,12 @@ export function run_notice_blocks(result: AgentRunResult, theme: ThemeSpec): His
   return blocks;
 }
 
-function truncate_tool_preview(result_content: string, ok: boolean): string {
-  return `  \u23bf ${ok === true ? "ok" : "error"} (${truncate_text(result_content, TOOL_OUTPUT_PREVIEW_CHARS)})`;
-}
-
-/** One finalized live tool row; falls back to the transcript copy when absent. */
-export function tool_result_block(call: ToolCall, ok: boolean, result_content: string): HistoryBlock {
-  const args_json = JSON.stringify(call.args) ?? "{}";
-  const lines = [
-    `\u23fa ${call.name}(${truncate_text(args_json, TOOL_ARGS_PREVIEW_CHARS)})`,
-    truncate_tool_preview(result_content, ok),
-  ];
-  return { role: ok === true ? "tool" : "error", lines };
+/** One finished live tool call as a single row, with its run time when known. */
+export function tool_result_block(call: ToolCall, ok: boolean, result_content: string, duration_ms?: number): HistoryBlock {
+  return {
+    role: ok === true ? "tool" : "error",
+    lines: [tool_row(call.name, tool_args_summary(call.args), ok, result_content, duration_ms)],
+  };
 }
 
 export function parse_tool_message_content(content: string): { ok: boolean; output: string } {

@@ -20,7 +20,9 @@ import {
   run_notice_blocks,
   session_list_block,
   split_history_blocks,
+  format_duration,
   tool_args_preview,
+  tool_args_summary,
   tool_result_block,
   unknown_command_block,
   usage_notice_block,
@@ -210,33 +212,28 @@ describe("format_usage", () => {
 });
 
 describe("format_message_block", () => {
-  it("formats user and assistant lines with role tags", () => {
+  it("labels user and assistant blocks with the theme and keeps only the content in lines", () => {
     const user = format_message_block({ role: "user", content: "hi there" }, LICH_THEME);
-    expect(user.role).toBe("user");
-    expect(user.lines).toEqual(["mortal › hi there"]);
+    expect(user).toEqual({ role: "user", label: "mortal", lines: ["hi there"] });
 
     const assistant = format_message_block({ role: "assistant", content: "hello" }, LICH_THEME);
-    expect(assistant.role).toBe("lich");
-    expect(assistant.lines[0]).toBe("lich › hello");
+    expect(assistant).toEqual({ role: "lich", label: "lich", lines: ["hello"] });
   });
 
-  it("appends assistant tool-call lines with truncated args", () => {
-    const long_args = { path: "x".repeat(120) };
-    const block = format_message_block({
-      role: "assistant",
-      content: "",
-      tool_calls: [{ id: "1", name: "read_file", args: long_args }],
-    }, LICH_THEME);
-    expect(block.role).toBe("lich");
-    expect(block.lines).toHaveLength(2);
-    expect(block.lines[1]?.startsWith("  ⎿ {")).toBe(true);
-    expect(block.lines[1]?.includes("chars omitted")).toBe(true);
+  it("names a tool row by the main arg of the call it answers, clipping long args", () => {
+    const call = { id: "1", name: "read_file", args: { path: "x".repeat(120) } };
+    const block = format_message_block(
+      { role: "tool", tool_call_id: "1", name: "read_file", content: JSON.stringify({ ok: true, output: "body\nmore" }) },
+      LICH_THEME,
+      call,
+    );
+    expect(block).toEqual({ role: "tool", lines: [`✓ read_file  ${"x".repeat(79)}… · body`] });
   });
 
-  it("formats tool messages as ok/error result lines", () => {
+  it("formats tool messages as ok/error result rows", () => {
     const ok = format_message_block({ role: "tool", tool_call_id: "1", name: "shell", content: "listed files" }, LICH_THEME);
     expect(ok.role).toBe("tool");
-    expect(ok.lines[0]).toBe("  ⎿ shell: ok (listed files)");
+    expect(ok.lines[0]).toBe("✓ shell · listed files");
 
     const failure = format_message_block({
       role: "tool",
@@ -246,7 +243,7 @@ describe("format_message_block", () => {
       is_error: true,
     }, LICH_THEME);
     expect(failure.role).toBe("error");
-    expect(failure.lines[0]).toBe("  ⎿ shell: error (not found)");
+    expect(failure.lines[0]).toBe("✗ shell · not found");
   });
 
   it("maps system messages to meta blocks", () => {
@@ -266,8 +263,8 @@ describe("split_history_blocks", () => {
     messages.push({ role: "system", content: "prompt" });
     const blocks = split_history_blocks(messages, 50, LICH_THEME);
     expect(blocks).toHaveLength(50);
-    expect(blocks[0]?.lines[0]).toBe("mortal › msg 10");
-    expect(blocks[49]?.lines[0]).toBe("mortal › msg 59");
+    expect(blocks[0]?.lines[0]).toBe("msg 10");
+    expect(blocks[49]?.lines[0]).toBe("msg 59");
   });
 
   it("returns fewer blocks when under the cap and drops system messages", () => {
@@ -284,8 +281,23 @@ describe("split_history_blocks", () => {
     ];
     const blocks = split_history_blocks(history, 50, LICH_THEME);
     expect(blocks).toHaveLength(2);
-    expect(blocks[0]?.lines[0]).toBe("mortal › hello");
-    expect(blocks[1]?.lines[0]).toBe("lich › hi");
+    expect(blocks[0]).toEqual({ role: "user", label: "mortal", lines: ["hello"] });
+    expect(blocks[1]).toEqual({ role: "lich", label: "lich", lines: ["hi"] });
+  });
+
+  it("drops tool-only assistant turns and shows each call's arg on the row that answers it", () => {
+    const history: Message[] = [
+      { role: "user", content: "list it" },
+      { role: "assistant", content: "", tool_calls: [{ id: "c1", name: "terminal", args: { command: "ls -la" } }] },
+      { role: "tool", tool_call_id: "c1", name: "terminal", content: JSON.stringify({ ok: false, output: "", error: "denied" }), is_error: true },
+      { role: "assistant", content: "it was denied" },
+    ];
+    const blocks = split_history_blocks(history, 50, LICH_THEME);
+    expect(blocks.map((block) => [block.role, block.lines[0]])).toEqual([
+      ["user", "list it"],
+      ["error", "✗ terminal  ls -la"],
+      ["lich", "it was denied"],
+    ]);
   });
 });
 
@@ -309,8 +321,8 @@ describe("resume_session_view", () => {
     expect(view.banner_line).toBe("resumed m1abc-1-tui (2 messages)");
     expect(view.blocks[0]).toEqual({ role: "meta", lines: ["· resumed m1abc-1-tui (2 messages)"] });
     expect(view.blocks).toHaveLength(3);
-    expect(view.blocks[1]?.lines[0]).toBe("mortal › hello");
-    expect(view.blocks[2]?.lines[0]).toBe("lich › hi");
+    expect(view.blocks[1]?.lines[0]).toBe("hello");
+    expect(view.blocks[2]?.lines[0]).toBe("hi");
   });
 
   it("returns only the notice when the transcript has no visible messages", () => {
@@ -415,7 +427,7 @@ describe("notice blocks", () => {
     expect(blocks[0]?.role).toBe("error");
     expect(blocks[0]?.lines[0]).toContain("budget exhausted");
     expect(blocks[0]?.lines[0]).toContain("the ritual is spent");
-    expect(blocks[1]?.lines[0]).toBe(`${LICH_THEME.response_label} › partial`);
+    expect(blocks[1]).toEqual({ role: "lich", label: LICH_THEME.response_label, lines: ["partial"] });
   });
 
   it("shows only a cancelled notice for an aborted run, not the earlier reply", () => {
@@ -436,7 +448,7 @@ describe("notice blocks", () => {
       usage_total: usage(0),
       session_path: undefined,
     }, LICH_THEME);
-    expect(blocks.map((block) => block.lines[0])).toEqual([`${LICH_THEME.response_label} › partial`, "\u00b7 run cancelled"]);
+    expect(blocks.map((block) => block.lines[0])).toEqual(["partial", "\u00b7 run cancelled"]);
   });
 
   it("omits the final block when content is empty", () => {
@@ -470,15 +482,24 @@ describe("notice blocks", () => {
     expect(model_label_block(config).lines[0]).toContain("model: chosen");
   });
 
-  it("formats tool result blocks with ok and error styling flags", () => {
-    const ok = tool_result_block({ id: "1", name: "shell", args: { cmd: "ls" } }, true, "file.txt");
-    expect(ok.role).toBe("tool");
-    expect(ok.lines[0]).toBe("⏺ shell({\"cmd\":\"ls\"})");
-    expect(ok.lines[1]).toBe("  ⎿ ok (file.txt)");
+  it("formats a live tool call as one row with its main arg, duration and first output line", () => {
+    const ok = tool_result_block({ id: "1", name: "shell", args: { cmd: "ls" } }, true, "\nfile.txt\nother.txt", 240);
+    expect(ok).toEqual({ role: "tool", lines: ["✓ shell  ls  0.2s · file.txt"] });
 
     const failure = tool_result_block({ id: "1", name: "shell", args: {} }, false, "denied");
-    expect(failure.role).toBe("error");
-    expect(failure.lines[1]).toBe("  ⎿ error (denied)");
+    expect(failure).toEqual({ role: "error", lines: ["✗ shell · denied"] });
+
+    const no_preview = tool_result_block({ id: "1", name: "x", args: { depth: 2 } }, true, "");
+    expect(no_preview.lines).toEqual(['✓ x  {"depth":2}']);
+  });
+
+  it("formats durations and picks a call's main arg", () => {
+    expect(format_duration(240)).toBe("0.2s");
+    expect(format_duration(59_940)).toBe("59.9s");
+    expect(format_duration(65_000)).toBe("1m 5s");
+    expect(tool_args_summary({ path: "src/a.ts", content: "..." })).toBe("src/a.ts");
+    expect(tool_args_summary({ url: "https://x.test", method: "GET" })).toBe("https://x.test");
+    expect(tool_args_summary({})).toBe("");
   });
 
   it("parses tool message content back into ok/output", () => {
