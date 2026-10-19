@@ -15,18 +15,23 @@ The TUI needs a TTY and a resolvable provider (same resolution as every mode). O
 
 ```
 ⚱ lich v0.8.0 — the agent that will not stay dead · qwen3:8b (ollama)
-mortal › list the files here           <- your input, echoed into the transcript
-⏺ list_dir({})                        <- live tool-call row (name + args preview)
-  ⏷ list_dir: ok (d src/ d test/ ...)  <- result row (ok/error + output preview)
-lich › Here is what I found ...        <- the agent's reply (`response_label`)
-model qwen3:8b · turns 2 · tokens 1,204 · [dormant] · /path/.lich/sessions/...jsonl
-› ▌                                    <- input row (cursor block)
+
+──────────────────────────────────────────────────
+● mortal  list the files here                   <- your input, under a rule
+┊ ✓ list_dir  0.0s · d src/                     <- one row per tool call
+┊ ✗ read_file  missing.txt  0.0s · not found    <- failed calls are red
+
+⚱ lich                                          <- the agent's reply (`response_label`)
+  Here is what I found ...
+──────────────────────────────────────────────────
+› ▌                                             <- input row (cursor block)
+dormant · qwen3:8b · turn 2 · 1,204 tokens · m1x9k-2-tui
 ```
 
 - **Header** — theme welcome string (version, model, provider kind). The tagline appears only here.
-- **Transcript** — user lines (`mortal ›` by default), replies (`lich ›`, or the theme `response_label`), tool rows (`⏺ name(args)` with a result line), and meta notices (`· context compressed — memories distilled ...`, `· error: ...`). The view keeps the newest 50 blocks; older lines scroll out of the transcript (session JSONLs still hold everything — see [limitations](#known-limitations)).
-- **Input row** — `› ` when idle, `… ` while the agent works; Enter submits, Backspace edits, pasted newlines collapse to spaces, and Esc cancels a running turn (a `· run cancelled` notice follows).
-- **Status bar** — see below.
+- **Transcript** — your turns (`● ` plus the theme `user_label`, `mortal` by default) under a dim rule; replies under a `glyph response_label` header (`⚱ lich`), indented; and meta notices (`· context compressed — memories distilled ...`, `· error: ...`). Each tool call is one `┊`-guided row: `✓`/`✗`, the tool name, its main argument (path, command, url, ...; compact JSON otherwise), its run time, and the first line of its output, cut to the terminal width. A running call shows a spinner on the same row. Resumed transcripts show tool rows without run times. The view keeps the newest 50 blocks; older lines scroll out of the transcript (session JSONLs still hold everything — see [limitations](#known-limitations)).
+- **Input row** — `› ` when idle, `· ` with an `esc to cancel` hint while the agent works; Enter submits, Backspace edits, pasted newlines collapse to spaces, and Esc cancels a running turn (a `· run cancelled` notice follows).
+- **Status bar** — the line under the input; see below.
 
 ## Slash commands
 
@@ -52,12 +57,12 @@ The bottom line shows, left to right:
 
 | Segment | Meaning |
 | --- | --- |
-| `model <name>` | First provider's model from config. |
-| `turns N` | Turns used by the most recent run (resets each message). |
-| `tokens N` | Cumulative session token usage (prompt + completion, across all turns). |
-| `[dormant]` / `[deliberating]` / `[casting]` | Current phase: waiting for input, calling the model, or executing a tool. Labels come from the theme. |
+| `dormant` / `deliberating` / `casting` | Current phase (colored): waiting for input, calling the model, or executing a tool. Labels come from the theme. |
+| `<model>` | First provider's model from config. |
+| `turn N` | Turns used by the most recent run (resets each message). |
+| `N tokens` | Cumulative session token usage (prompt + completion, across all turns). |
 | `compressed N` | How many times context compression fired this session (hidden when 0). |
-| `<session path>` | Path of the newest persisted transcript (appears after the first run). |
+| `<session id>` | Id (file name without `.jsonl`) of the newest persisted transcript (appears after the first run); use it with `/resume`. |
 | `· budget exhausted — the ritual is spent (turn cap reached)` | Red notice when a run hit the turn cap. The keyword stays; the flavor comes from the theme. |
 
 ## Multi-turn memory
