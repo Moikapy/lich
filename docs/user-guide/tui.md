@@ -9,12 +9,12 @@ lich         # front door: TUI, plus a first-run setup wizard when no config exi
 lich tui     # same TUI, no wizard. From a clone: bun src/cli.ts tui
 ```
 
-The TUI needs a TTY and a resolvable provider (same resolution as every mode). On startup it prints a dim header from the active theme welcome string, e.g. `⚱ lich v0.8.0 — the agent that will not stay dead · qwen3:8b (ollama)`. `{version}` is `LICH_VERSION` from `package.json`. That banner is the only tagline placement. Quit with `/exit`, `/quit`, `/q`, or Ctrl+C. Esc cancels a running turn.
+The TUI needs a TTY and a resolvable provider (same resolution as every mode). On startup it prints a dim header from the active theme welcome string, e.g. `⚱ lich v0.10.0 — the agent that will not stay dead · qwen3:8b (ollama)`. `{version}` is `LICH_VERSION` from `package.json`. That banner is the only tagline placement. Quit with `/exit`, `/quit`, `/q`, or Ctrl+C. Esc cancels a running turn.
 
 ## Anatomy
 
 ```
-⚱ lich v0.8.0 — the agent that will not stay dead · qwen3:8b (ollama)
+⚱ lich v0.10.0 — the agent that will not stay dead · qwen3:8b (ollama)
 
 ──────────────────────────────────────────────────
 ● mortal  list the files here                   <- your input, under a rule

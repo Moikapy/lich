@@ -10,7 +10,7 @@
 
 ```sh
 npm install -g @moikapy/lich
-lich --version   # -> 0.8.0 (reads package.json)
+lich --version   # -> 0.10.0 (reads package.json)
 ```
 
 ## Choose a configuration path
@@ -153,7 +153,7 @@ To hack on Lich itself, run the CLI straight from a clone instead of the npm pac
 ```sh
 git clone https://github.com/Moikapy/lich.git && cd lich
 bun install
-bun src/cli.ts --version   # -> 0.8.0 (package.json)
+bun src/cli.ts --version   # -> 0.10.0 (package.json)
 ```
 
 `bun src/cli.ts` accepts the same arguments as the installed `lich` binary, so every command on this page works unchanged.

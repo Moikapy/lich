@@ -296,7 +296,7 @@ waits for the MCP answer instead of exiting while the child is still
 working; `agent.close()` (which every CLI mode calls) kills the child.
 
 `lich mcp list|add|enable|disable|remove` ships in this package (since
-0.7.0; current release **0.8.0**). From a clone: `bun src/cli.ts mcp list`.
+0.7.0; current release **0.10.0**). From a clone: `bun src/cli.ts mcp list`.
 Redot is a catalog entry (`redot --headless --mcp-server`), not a fork
 inside lich. Godot has no official MCP server; lich does not download a
 community addon. See [docs/user-guide/redot.md](docs/user-guide/redot.md).

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.10.0
+
 - Twitch: a chat message containing `001` or `GLOBALUSERSTATE` is no longer
   mistaken for the server welcome (which dropped it and reset the reconnect
   backoff); only the command position counts (#203).
@@ -137,8 +139,6 @@
   has no user turn. It keeps the window from the owning assistant turn and
   prepends a stub user turn so providers that require user-first history (Anthropic)
   still accept it. The persona orchestrator example mirrors the fix.
-
-## 0.10.0
 
 - **Breaking:** `AgentEvent` is always enveloped with `{ run_id, session_id, seq, ts }`
   plus the payload. `error` is JSON-safe `{ kind, message }` (was `unknown` /
