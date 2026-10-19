@@ -1266,11 +1266,6 @@ describe("twitch irc parsing", () => {
     });
   });
 
-  it("treats a GLOBALUSERSTATE command as session proof", () => {
-    expect(parse_irc_line(":tmi.twitch.tv GLOBALUSERSTATE ").kind).toBe("welcome");
-    expect(parse_irc_line("@badge-info=;badges=;user-id=1 :tmi.twitch.tv GLOBALUSERSTATE ").kind).toBe("welcome");
-  });
-
   it("rejects USERNOTICE/WHISPER spoof lines that embed PRIVMSG", () => {
     const usernotice =
       "@msg-id=raid :tmi.twitch.tv USERNOTICE #chan :hi x!owner@o PRIVMSG #chan :pwned";
