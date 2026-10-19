@@ -115,6 +115,24 @@ describe("run_tests", () => {
     expect(existsSync(marker)).toBe(false);
   });
 
+  it("keeps a single quote inside the filter from closing the shell quote", async () => {
+    const marker = path.join(tmp_root, "quote-breakout");
+    const filter = `x'; touch ${marker}; echo 'y`;
+    const { calls, runner } = recording_runner({ exit_code: 0 });
+    set_test_command_runner(runner);
+    await executor.execute("run_tests", { filter }, { work_dir: tmp_root, env: { LICH_TEST_COMMAND: "true" } });
+    const command = calls[0]?.command ?? "";
+    const naive = `true '${filter}'`;
+    const naive_run = spawnSync("bash", ["-lc", naive], { cwd: tmp_root });
+    expect(naive_run.status).toBe(0);
+    expect(existsSync(marker)).toBe(true);
+    await rm(marker, { force: true });
+    const probed = spawnSync("bash", ["-lc", command], { cwd: tmp_root });
+    expect(probed.status).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+    expect(command).not.toBe(naive);
+  });
+
   it("runs in context.work_dir, not process.cwd()", async () => {
     const { calls, runner } = recording_runner({ exit_code: 0 });
     set_test_command_runner(runner);

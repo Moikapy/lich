@@ -1,10 +1,10 @@
 /**
  * resolve_session_path: latest by mtime, exact id, unique prefix, errors.
  */
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolve_session_path } from "../src/session/resolve.js";
+import { resolve_session_path, SessionResolveError } from "../src/session/resolve.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const created: string[] = [];
@@ -91,5 +91,40 @@ describe("resolve_session_path", () => {
     const not_a_dir = path.join(dir, "plain-file");
     await writeFile(not_a_dir, "x", "utf8");
     await expect(resolve_session_path(not_a_dir, "latest")).rejects.toMatchObject({ code: "ENOTDIR" });
+  });
+
+  it("picks latest from real transcripts and skips directories, other files, and broken symlinks", async () => {
+    const dir = await make_session_dir();
+    await mkdir(path.join(dir, "decoy.jsonl"));
+    await writeFile(path.join(dir, "notes.txt"), "nope", "utf8");
+    await symlink(path.join(dir, "missing.jsonl"), path.join(dir, "gone.jsonl"));
+    await touch_jsonl(dir, "real", 100);
+    await expect(resolve_session_path(dir, "latest")).resolves.toBe(path.join(dir, "real.jsonl"));
+    await expect(resolve_session_path(dir, "gone")).rejects.toBeInstanceOf(SessionResolveError);
+  });
+
+  it("reports a missing directory as session not found", async () => {
+    const dir = await make_session_dir();
+    const missing = path.join(dir, "no-such");
+    await expect(resolve_session_path(missing, "latest")).rejects.toMatchObject({
+      name: "SessionResolveError",
+      kind: "missing",
+    });
+  });
+
+  it("lists only the five newest candidates when a prefix is ambiguous", async () => {
+    const dir = await make_session_dir();
+    for (let index = 1; index <= 6; index += 1) {
+      await touch_jsonl(dir, `a${index}`, index * 10);
+    }
+    try {
+      await resolve_session_path(dir, "a");
+      expect.unreachable("expected an ambiguous prefix");
+    } catch (error) {
+      expect(error).toMatchObject({ name: "SessionResolveError", kind: "ambiguous" });
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).toContain("matches: a6, a5, a4, a3, a2");
+      expect(message).not.toContain("a1");
+    }
   });
 });

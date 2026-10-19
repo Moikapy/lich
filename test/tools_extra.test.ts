@@ -466,4 +466,62 @@ describe("env_get", () => {
     expect(direct.ok).toBe(true);
     expect(direct.output.includes("hush-hush")).toBe(false);
   });
+
+  it("prefers explicit keys over a prefix and ignores a non-boolean reveal", async () => {
+    const named = ["LICH_TEST_PASSWORD", "LICH_TEST_CREDENTIAL", "LICH_TEST_AUTH"] as const;
+    process.env.LICH_TEST_PASSWORD = "pw-value";
+    process.env.LICH_TEST_CREDENTIAL = "cred-value";
+    process.env.LICH_TEST_AUTH = "auth-value";
+    process.env.LICH_TEST_EMPTY = "";
+    const long_tail = "TAIL-SHOULD-NOT-LEAK";
+    process.env.LICH_TEST_PLAIN = `${"p".repeat(2000)}${long_tail}`;
+    try {
+      const keys_win = await executor.execute("env_get", {
+        keys: ["LICH_TEST_PLAIN"],
+        prefix: "LICH_TEST_SECRET",
+        reveal: true,
+      });
+      expect(keys_win.output.startsWith("LICH_TEST_PLAIN=")).toBe(true);
+      expect(keys_win.output).not.toContain("LICH_TEST_SECRET_1");
+      expect(keys_win.output).not.toContain("hush-hush");
+      expect(keys_win.output).not.toContain(long_tail);
+      expect(keys_win.output).toBe(`LICH_TEST_PLAIN=${"p".repeat(2000)}`);
+      const string_reveal = await executor.execute("env_get", {
+        keys: ["LICH_TEST_PLAIN"],
+        reveal: "true",
+      });
+      expect(string_reveal.output).toBe(`LICH_TEST_PLAIN=set (${process.env.LICH_TEST_PLAIN?.length} chars)`);
+      expect(string_reveal.output).not.toContain(long_tail);
+      const redacted = await executor.execute("env_get", { keys: [...named], reveal: true });
+      expect(redacted.output).toBe(
+        [
+          "LICH_TEST_PASSWORD=<redacted: 8 chars>",
+          "LICH_TEST_CREDENTIAL=<redacted: 10 chars>",
+          "LICH_TEST_AUTH=<redacted: 10 chars>",
+        ].join("\n"),
+      );
+      expect(redacted.output).not.toContain("pw-value");
+      expect(redacted.output).not.toContain("cred-value");
+      expect(redacted.output).not.toContain("auth-value");
+      const empty = await executor.execute("env_get", { keys: ["LICH_TEST_EMPTY"] });
+      expect(empty.output).toBe("LICH_TEST_EMPTY=set (0 chars)");
+    } finally {
+      delete process.env.LICH_TEST_PASSWORD;
+      delete process.env.LICH_TEST_CREDENTIAL;
+      delete process.env.LICH_TEST_AUTH;
+      delete process.env.LICH_TEST_EMPTY;
+      process.env.LICH_TEST_PLAIN = "plain-value";
+    }
+  });
+
+  it("drops empty, non-string, and past-the-cap keys", async () => {
+    const names = Array.from({ length: 50 }, (_unused, index) => `LICH_TEST_ABSENT_${index}`);
+    const result = await executor.execute("env_get", {
+      keys: ["", 4, ...names, "LICH_TEST_PLAIN"],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.output.split("\n")).toHaveLength(50);
+    expect(result.output).not.toContain("LICH_TEST_PLAIN");
+    expect(result.output.endsWith("LICH_TEST_ABSENT_49=<unset>")).toBe(true);
+  });
 });

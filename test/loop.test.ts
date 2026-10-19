@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { AgentEmitter, type AgentEventBody } from "../src/agent/events.js";
 import type { ChatFn } from "../src/context/compressor.js";
 import {
+  history_after_abort,
   history_after_run_error,
   partial_messages_of,
+  reply_after_abort,
   run_conversation,
   type LoopDeps,
+  type LoopOutcome,
   type ToolRunner,
 } from "../src/agent/loop.js";
 import { ProviderError, type ChatResult, type Message, type ToolCall } from "../src/providers/types.js";
@@ -587,6 +590,39 @@ describe("run_conversation", () => {
     const kept = history_after_run_error(caught);
     expect(kept?.some((message) => message.role === "tool" && message.content.includes("file-body"))).toBe(true);
     expect(kept?.at(-1)?.role).not.toBe("user");
+  });
+
+  it("drops every trailing user on abort and returns only the reply this run wrote", () => {
+    const earlier: Message = { role: "assistant", content: "old" };
+    const fresh: Message = { role: "assistant", content: "new" };
+    const pending: Message[] = [
+      { role: "user", content: "first" },
+      earlier,
+      { role: "user", content: "second" },
+      fresh,
+      { role: "user", content: "unanswered" },
+      { role: "user", content: "also unanswered" },
+    ];
+    expect(history_after_abort(pending)).toEqual([
+      { role: "user", content: "first" },
+      earlier,
+      { role: "user", content: "second" },
+      fresh,
+    ]);
+    const aborted = (messages: Message[], final: Message | undefined): LoopOutcome => ({
+      messages,
+      final: final?.role === "assistant" ? final : undefined,
+      result: undefined,
+      turns_used: 1,
+      stopped_reason: "aborted",
+    });
+    expect(reply_after_abort(aborted(pending, earlier))).toBeUndefined();
+    expect(reply_after_abort(aborted(pending, fresh))).toBeUndefined();
+    const settled: Message[] = [{ role: "user", content: "go" }, fresh];
+    expect(reply_after_abort(aborted(settled, fresh))).toBe(fresh);
+    const clone: Message = { role: "assistant", content: "new" };
+    expect(reply_after_abort(aborted(settled, clone))).toBeUndefined();
+    expect(reply_after_abort(aborted(settled, undefined))).toBeUndefined();
   });
 
   it("drops a failed first turn that never reached an assistant", async () => {
