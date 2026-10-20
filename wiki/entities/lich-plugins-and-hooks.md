@@ -1,10 +1,10 @@
 ---
 title: Lich plugins, hooks and the gatekeeper
 created: 2026-09-23
-updated: 2026-10-04
+updated: 2026-10-19
 type: entity
 tags: [plugins, security, runtime]
-sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#149", "#157", "#161"]
+sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, raw/audits/2026-10-02-hermes-models-memory-decisions.md, "#149", "#157", "#161", "#204"]
 confidence: high
 ---
 
@@ -31,10 +31,9 @@ Hook state was a module-global WeakMap in v0.8.0. It is **per run via AsyncLocal
 
 The gatekeeper is Lich's "self-improvement loop". It allows one `git_commit` per run, and only when all of these hold:
 - `LICH_ALLOW_SELF_COMMIT=1`
-- `run_tests` passed
-- the tree was clean
+- a full (unfiltered) `run_tests` passed, and no writing tool ran after it (`src/plugins/builtin/gatekeeper.plugin.ts:248-265@0826623`)
 
-It also denies certain git operations. It is **not** Hermes-style learning (compare [[memory-vs-skills]]).
+`git_commit` also refuses secret-looking paths, by basename and case-insensitively (`is_secret_path`, `src/plugins/builtin/gatekeeper.plugin.ts:36@0826623`, #204): `.env` and every `.env.*` except `.env.example`, `.env.sample` and `.env.template`; anything starting `id_rsa`, `id_dsa`, `id_ecdsa` or `id_ed25519` (so `.pub` too); and `*.pem`, `*.p12`. It also denies certain git operations through `terminal`. It is **not** Hermes-style learning (compare [[memory-vs-skills]]).
 
 ## Holes
 

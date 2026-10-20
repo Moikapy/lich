@@ -1,7 +1,7 @@
 ---
 title: Runtime / Profile / Session split
 created: 2026-09-23
-updated: 2026-10-05
+updated: 2026-10-19
 type: concept
 tags: [core, runtime, npc, gateway]
 sources: [raw/audits/2026-09-23-core-engine-audit.md, raw/audits/2026-09-23-game-surface-audit.md, "#113"]
@@ -23,8 +23,8 @@ confidence: medium
 **Examples of Profiles:** `goblin_shaman`, `game_master`, `godot_coder`.
 
 **Where it goes:** under [[0001-gateway-as-hub]], this split becomes the gateway core:
-- `bus.ts` grows into the SessionManager.
-- `access.ts` grows into Profiles and Policy.
+- `bus.ts` already queues on the shared `SessionManager` (#174); per-session history and Profiles are what is left.
+- `access.ts` grows into Profiles and Policy. `GatewayPolicy` (#178) is the first step: one policy per process, not per session.
 
 `session.create({profile})` in [[lich-serve]] then fixes the "one Agent for every session" problem.
 

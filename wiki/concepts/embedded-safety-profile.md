@@ -1,7 +1,7 @@
 ---
 title: Embedded (game-safe) safety profile
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-19
 type: concept
 tags: [security, games, npc]
 sources: [raw/audits/2026-09-23-game-surface-audit.md, raw/audits/2026-09-23-core-engine-audit.md]
@@ -23,7 +23,7 @@ A coding agent needs file and shell access. An NPC shipped inside a game build n
 - **Hooks fail closed** and have timeouts.
 - **Output caps** (length), with an optional content filter.
 - **Player text tagged as untrusted.** It goes in a delimited block, and the system prompt says it is data, not instructions. Hermes' smart approval handles untrusted command text in a similar way.
-- **Per-session limits:** token and rate budgets, with real `usage` reported. The webhook currently returns `usage: null`.
+- **Per-session limits:** token and rate budgets, with real `usage` reported. The webhook has returned real `usage` since #174 ([[lich-gateway]]); budgets themselves do not exist yet.
 - **Loopback plus a token** by default.
 
 **Checklist for users shipping today** (from the drafted doc "choosing a game integration" in #113 §7):

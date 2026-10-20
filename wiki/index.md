@@ -1,12 +1,12 @@
 ---
 title: Wiki index
 type: index
-updated: 2026-10-05
+updated: 2026-10-19
 ---
 
 # Lich Wiki: Index
 
-Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md) for recent activity. There are 40 pages.
+Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md) for recent activity. There are 42 pages.
 
 **New to the codebase?** Read [[tao-loop]], then [[lich-agent-loop]], [[lich-vs-hermes]], [[0008-idea-agnostic-extensible-harness]] and [[roadmap-issues]].
 **Working on the game features?** Read [[game-transports]], then [[action-terminal-mode]], [[client-executed-tools]] and [[embedded-safety-profile]].
@@ -18,12 +18,12 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[lich-providers]]: openai_compat, anthropic and ollama clients without SDKs, plus failover and per-role chains (`models.chat` / `models.compress`, #154). They have no streaming, `tool_choice` or cache_control; their shared HTTP/error helpers live in `providers/http.ts` (#165).
 - [[lich-tools-and-guardrails]]: builtins, an executor that never throws, and the wards. Known holes: `terminal` isn't sandboxed and hooks have no timeout; `tools_enabled` covers plugin tools since #161.
 - [[lich-plugins-and-hooks]]: tool-call hooks with veto, the gatekeeper's single gated `git_commit`, and (#157) per-plugin settings, granted model roles and a `before_llm_call` note hook. There is no `build_system_prompt` hook yet; a throwing `before_tool_call` blocks the call (#161), other hooks fail open.
-- [[lich-config]]: global `~/.lich/config.json` < named profile < project file, shallow merge; `lich init --global`, `lich profile`, and file tools barred from `.lich/profiles` (#170–#172).
-- [[lich-sessions]]: JSONL phylacteries used as combat logs. There is no search, and gateway files are supersets of each other.
+- [[lich-config]]: global `~/.lich/config.json` < named profile < project file, shallow merge; `lich init --global`, `lich profile`, and file tools barred from `.lich/profiles` (#170–#172); creating the global file no longer hides legacy settings (#176).
+- [[lich-sessions]]: JSONL phylacteries used as combat logs; resume drops interrupted user seeds and orphan tool rows (#168, #194). There is no search, and gateway files are supersets of each other.
 - [[lich-mcp]]: an MCP client and catalog. Redot is a real entry and Godot has none. The code is spread over 21 micro-files.
-- [[lich-gateway]]: familiars routed into one shared Agent. The per-chat bus and read-only defaults make it a good hub.
-- [[lich-serve]]: WebSocket JSON-RPC for Ossuary, fully merged (#99–#103). It still has one global queue, one Agent per process, and no event envelope.
-- [[ossuary]]: the Electron + Dockview desktop app (#79 closed after #123). It renders from serve events; the event envelope is still #114 item 2.
+- [[lich-gateway]]: familiars routed into one shared Agent, queued per chat on the shared SessionManager with LRU history (#174), a `GatewayPolicy` and declared adapter capabilities (#178). Still text-only, one persona per process.
+- [[lich-serve]]: WebSocket JSON-RPC for Ossuary. Enveloped events (#134), per-session run queues and per-connection frame lanes (#183, #186), pinned in-flight bags (#199), `protocol_version` in `health` (#184). Still one Agent per process.
+- [[ossuary]]: the Electron + Dockview desktop app (#79 closed after #123). It renders from serve's enveloped events (#134).
 
 ## Entities: the ecosystem and games
 
@@ -39,7 +39,7 @@ Start here. Read [SCHEMA.md](SCHEMA.md) for the conventions and [log.md](log.md)
 - [[tao-loop]]: the think-act-observe loop and the invariants every harness has to keep.
 - [[action-terminal-mode]]: one LLM call per decision, using `stop_on_tools`, `tool_choice` and deadlines with a fallback action.
 - [[client-executed-tools]]: the game owns its tools through `tool.invoke`/`tool.result`, which replaces the file bus.
-- [[event-envelope]]: events scoped by run and session, JSON-safe, with a per-run `on_event`. Landed in #134 (0.10.0); gateway adapter adoption still #114.
+- [[event-envelope]]: events scoped by run and session, JSON-safe, with a per-run `on_event`. Landed in #134 (0.10.0); the gateway is text-only and consumes no events yet.
 - [[runtime-profile-session]]: one Runtime per process, cheap Profiles, and a Session per NPC.
 - [[prompt-cache-tiers]]: a byte-stable system prompt built in tiers, plus `cache_control` breakpoints (the Hermes approach).
 - [[memory-vs-skills]]: declarative memory vs procedural skills, loaded by progressive disclosure. Lich has neither yet.

@@ -32,7 +32,7 @@ It also:
 
 ## Guardrails (the "wards")
 
-- **File tools:** realpath confinement to `work_dir`. `.lich/config.json` and `.lich/profiles/` are denied for reads and writes, and `list_dir`/`disk_usage` skip them (`src/tools/guard.ts:83@ab0f508`, #172; see [[lich-config]]).
+- **File tools:** realpath confinement to `work_dir`. `.lich/config.json` and `.lich/profiles/` are denied for reads and writes, and `list_dir`/`disk_usage` skip them (`src/tools/guard.ts:83@0826623`, #172; see [[lich-config]]).
 - **Network tools:** an SSRF guard blocks private and loopback URLs unless `LICH_ALLOW_PRIVATE_URLS=1`, and redirects are re-checked.
 - **`terminal` is not sandboxed.** It runs `bash -lc` in `work_dir` with secret env vars scrubbed. The docs say this plainly.
 
