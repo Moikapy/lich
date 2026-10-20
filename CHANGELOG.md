@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
+  of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
+  clients (#144).
+
 ## 0.10.0
 
 - Twitch: a chat message containing `001` or `GLOBALUSERSTATE` is no longer

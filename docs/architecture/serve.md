@@ -38,6 +38,13 @@ Standard JSON-RPC 2.0 envelopes (`jsonrpc: "2.0"`, `id` on requests/responses).
 Requests use the locked method names below. Server → client notifications use
 method `event` (no `id`).
 
+The npm package ships a JSON Schema (draft-07) of every params, result and
+notification type at `schemas/serve-protocol.schema.json`, for clients not
+written in TypeScript. Its root accepts any serve frame (request, success,
+error or `event` notification), and a request's `method` pins its `params`.
+It is generated from `src/serve/protocol.ts`
+(`bun scripts/serve_schema.ts`), and a test fails if it is stale.
+
 ## Methods (locked names)
 
 | Method | Params | Result |

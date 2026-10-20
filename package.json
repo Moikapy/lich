@@ -22,6 +22,7 @@
     "!docs/.vitepress/dist",
     "!docs/.vitepress/cache",
     "examples/game_bridge",
+    "schemas",
     "optional-mcps",
     "README.md",
     "CHANGELOG.md"
@@ -54,6 +55,7 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/ws": "^8.18.1",
+    "ts-json-schema-generator": "2.9.0",
     "tsup": "^8.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
