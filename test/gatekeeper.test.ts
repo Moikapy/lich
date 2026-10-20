@@ -298,7 +298,7 @@ describe("gatekeeper plugin", () => {
 
   it("commits dotenv templates, which are not secrets", async () => {
     const executor = commit_executor();
-    for (const template of [".env.example", ".env.sample", ".env.template"]) {
+    for (const template of [".env.example", ".env.sample", ".env.template", ".ENV.EXAMPLE", ".Env.Sample", ".ENV.TEMPLATE"]) {
       await writeFile(path.join(tmp_root, template), "API_KEY=\n");
       const result = await executor.execute(
         "git_commit",
@@ -363,6 +363,11 @@ describe("gatekeeper plugin", () => {
       { rel: "keys/ID_RSA", marker: "UPPER-RSA-SECRET-MARKER" },
       { rel: "keys/Server.PEM", marker: "UPPER-PEM-SECRET-MARKER" },
       { rel: "keys/id_rsa2", marker: "RSA2-SECRET-MARKER" },
+      { rel: ".ENV", marker: "UPPER-ENV-SECRET-MARKER" },
+      { rel: "keys/.Env.Production", marker: "MIXED-ENV-SECRET-MARKER" },
+      { rel: ".env.example.bak", marker: "ENV-BACKUP-SECRET-MARKER" },
+      { rel: "keys/id_dsa", marker: "DSA-SECRET-MARKER" },
+      { rel: "keys/id_ed25519.pub", marker: "ED25519-PUB-SECRET-MARKER" },
     ];
     for (const secret of secrets) {
       await writeFile(path.join(tmp_root, secret.rel), `${secret.marker}\n`);

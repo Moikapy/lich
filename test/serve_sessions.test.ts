@@ -307,6 +307,38 @@ describe("serve session rpc", () => {
     expect(sessions.get(after.session_id)?.source).toBe("after");
   });
 
+  it("holds a bag until every overlapping pin is released", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-pin-count"), "sessions");
+    const sessions = create_serve_session_store(session_dir, 1);
+    const live = await sessions.create({ source: "live" });
+    sessions.pin(live.session_id);
+    sessions.pin(live.session_id);
+    sessions.unpin(live.session_id);
+    const during = await sessions.create({ source: "during" });
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(during.session_id)?.source).toBe("during");
+    sessions.unpin(live.session_id);
+    sessions.unpin(live.session_id);
+    const after = await sessions.create({ source: "after" });
+    expect(sessions.get(live.session_id)).toBeUndefined();
+    expect(sessions.get(during.session_id)).toBeUndefined();
+    expect(sessions.get(after.session_id)?.source).toBe("after");
+  });
+
+  it("does not evict when the bag cap is disabled", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-unlimited"), "sessions");
+    const sessions = create_serve_session_store(session_dir, 0);
+    const ids: string[] = [];
+    for (const source of ["a", "b", "c"]) {
+      const created = await sessions.create({ source });
+      ids.push(created.session_id);
+    }
+    for (const id of ids) {
+      expect(sessions.get(id)?.source).toBeDefined();
+    }
+    expect(new Set(ids.map((id) => sessions.get(id)?.source))).toEqual(new Set(["a", "b", "c"]));
+  });
+
   it("keeps the bag whose turn just finished when every other bag is still pinned", async () => {
     const session_dir = path.join(await make_temp_dir("serve-pin-spare"), "sessions");
     const sessions = create_serve_session_store(session_dir, 2);
