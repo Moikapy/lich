@@ -14,5 +14,18 @@ describe("serve protocol JSON Schema", () => {
     expect(Object.keys(definitions.ServeMethodMap.properties)).toEqual([...SERVE_METHODS]);
     expect(definitions).toHaveProperty("ServeEventNotification");
     expect(definitions).toHaveProperty("AgentEvent");
+    expect(definitions.ServeRequest.anyOf.map((r: any) => r.properties.method.const)).toEqual([...SERVE_METHODS]);
+    expect(definitions.ServeSuccess.anyOf).toHaveLength(SERVE_METHODS.length);
+  });
+
+  it("constrains the root to a serve frame", () => {
+    const schema = JSON.parse(readFileSync(serve_schema_path, "utf8"));
+    expect(schema.$ref).toBe("#/definitions/ServeFrame");
+    expect(schema.definitions.ServeFrame.anyOf.map((r: any) => r.$ref)).toEqual([
+      "#/definitions/ServeRequest",
+      "#/definitions/ServeSuccess",
+      "#/definitions/JsonRpcError",
+      "#/definitions/ServeEventNotification",
+    ]);
   });
 });

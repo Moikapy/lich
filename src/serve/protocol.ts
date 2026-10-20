@@ -75,7 +75,7 @@ export const SERVE_ERROR_CODES = {
   INTERNAL_ERROR: -32603,
 } as const;
 
-/** Params / results per locked method. */
+// Params / results per locked method.
 
 export type HealthParams = Record<string, never>;
 
