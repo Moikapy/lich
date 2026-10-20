@@ -806,6 +806,15 @@ describe("serve prompt rpc", () => {
     expect(kept?.history.some((message) => message.role === "assistant" && message.content === "evicted-reply")).toBe(true);
     expect(kept?.history.some((message) => message.role === "user" && message.content === "evict-me")).toBe(true);
     expect(sessions.get(third.session_id)?.history).toEqual([]);
+
+    // The pin drops when the submit settles, so the finished session is evictable again.
+    sessions.get(third.session_id);
+    const fourth = (await rpc(context, "session.create", { source: "test" }, 5)).result as {
+      session_id: string;
+    };
+    expect(sessions.get(created.session_id)).toBeUndefined();
+    expect(sessions.get(third.session_id)?.history).toEqual([]);
+    expect(sessions.get(fourth.session_id)?.history).toEqual([]);
   });
 
   it("reuses one SessionHandle transcript across multi-turn submits", async () => {

@@ -417,6 +417,47 @@ describe("read_session_messages resume hygiene", () => {
     });
   });
 
+  it("drops a tool row that reuses a later call id, and does not let a later result answer across a user turn", async () => {
+    const work_dir = await make_temp_dir();
+    const handle = await open_session(path.join(work_dir, "sessions"), "reuse-id");
+    const rows: Message[] = [
+      { role: "user", content: "hi" },
+      { role: "tool", tool_call_id: "c1", name: "read_file", content: "early-orphan" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: "c1", name: "read_file", args: { path: "a.txt" } }],
+      },
+      { role: "tool", tool_call_id: "c1", name: "read_file", content: "real-body" },
+      { role: "user", content: "interrupt" },
+      { role: "tool", tool_call_id: "c2", name: "read_file", content: "too-late" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: "c2", name: "read_file", args: { path: "b.txt" } }],
+      },
+      { role: "user", content: "between" },
+      { role: "tool", tool_call_id: "c2", name: "read_file", content: "after-user" },
+      { role: "assistant", content: "done" },
+    ];
+    for (const message of rows) {
+      await handle.append({ ts: "2026-01-01T00:00:00.000Z", kind: "message", message });
+    }
+    const messages = await read_session_messages(handle.path);
+    expect(messages.map((message) => message.content)).not.toContain("early-orphan");
+    expect(messages.map((message) => message.content)).not.toContain("too-late");
+    expect(messages.map((message) => message.content)).not.toContain("after-user");
+    const result_for = (id: string): Message | undefined =>
+      messages.find((message) => message.role === "tool" && message.tool_call_id === id);
+    expect(result_for("c1")).toMatchObject({ content: "real-body" });
+    expect(result_for("c2")).toMatchObject({
+      is_error: true,
+      content: JSON.stringify({ ok: false, output: "", error: "cancelled" }),
+    });
+    expect(messages.some((message) => message.role === "user" && message.content === "between")).toBe(true);
+    expect(messages.at(-1)).toMatchObject({ role: "assistant", content: "done" });
+  });
+
   it("drops a tool row that follows no assistant call", async () => {
     const work_dir = await make_temp_dir();
     const handle = await open_session(path.join(work_dir, "sessions"), "orphan");

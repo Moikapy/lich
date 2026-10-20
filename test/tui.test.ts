@@ -239,6 +239,19 @@ describe("format_message_block", () => {
     expect(block.lines).toEqual(['✓ read_file · {"output":""}']);
   });
 
+  it("does not unwrap a success flag or a non-string output as a failure preview", () => {
+    const success = JSON.stringify({ ok: true, output: "", error: "should-not-preview" });
+    const numeric = JSON.stringify({ ok: false, output: 0, error: "nope" });
+    expect(format_message_block(
+      { role: "tool", tool_call_id: "1", name: "read_file", content: success },
+      LICH_THEME,
+    ).lines).toEqual([`✓ read_file · ${success}`]);
+    expect(format_message_block(
+      { role: "tool", tool_call_id: "1", name: "read_file", content: numeric },
+      LICH_THEME,
+    ).lines).toEqual([`✓ read_file · ${numeric}`]);
+  });
+
   it("formats tool messages as ok/error result rows", () => {
     const ok = format_message_block({ role: "tool", tool_call_id: "1", name: "shell", content: "listed files" }, LICH_THEME);
     expect(ok.role).toBe("tool");
