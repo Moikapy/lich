@@ -321,6 +321,37 @@ describe("serve session rpc", () => {
     expect(sessions.get(extra.session_id)).toBeUndefined();
   });
 
+  it("holds a session until every overlapping pin is released", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-pin-refcount"), "sessions");
+    const sessions = create_serve_session_store(session_dir, 1);
+    const live = await sessions.create({ source: "live" });
+    // Two in-flight submits each take a hold. The first release must not
+    // make the bag evictable while the second submit is still queued.
+    sessions.pin(live.session_id);
+    sessions.pin(live.session_id);
+
+    const during = await sessions.create({ source: "during" });
+    sessions.unpin(live.session_id);
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(during.session_id)).toBeUndefined();
+
+    const still_held = await sessions.create({ source: "still-held" });
+    const overflow = await sessions.create({ source: "overflow" });
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(still_held.session_id)).toBeUndefined();
+    expect(sessions.get(overflow.session_id)?.source).toBe("overflow");
+
+    sessions.unpin(live.session_id);
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(overflow.session_id)).toBeUndefined();
+
+    // An extra release must not leave a hold that survives the next create.
+    sessions.unpin(live.session_id);
+    const after = await sessions.create({ source: "after" });
+    expect(sessions.get(live.session_id)).toBeUndefined();
+    expect(sessions.get(after.session_id)?.source).toBe("after");
+  });
+
   it("evicts the least recently used bag beyond the cap", async () => {
     const session_dir = path.join(await make_temp_dir("serve-lru"), "sessions");
     const context = rpc_context(session_dir, 2);

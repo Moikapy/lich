@@ -808,6 +808,81 @@ describe("serve prompt rpc", () => {
     expect(sessions.get(third.session_id)?.history).toEqual([]);
   });
 
+  it("keeps the session pinned while a second submit is still queued", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-pin-refcount");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_count = 0;
+    let release_first!: () => void;
+    const first_gate = new Promise<void>((resolve) => {
+      release_first = resolve;
+    });
+    let release_second!: () => void;
+    const second_gate = new Promise<void>((resolve) => {
+      release_second = resolve;
+    });
+    const fetch_fn: typeof fetch = async () => {
+      fetch_count += 1;
+      if (fetch_count === 1) {
+        await first_gate;
+      } else {
+        await second_gate;
+      }
+      const content = fetch_count === 1 ? "first-reply" : "second-reply";
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content }, "stop")),
+        { status: 200 },
+      );
+    };
+    const sessions = create_serve_session_store(session_dir, 1);
+    const prompts = create_serve_prompt_service(mock_agent(work_dir, fetch_fn), sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const first_submit = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "first" },
+      2,
+    );
+    const second_submit = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "second" },
+      3,
+    );
+    const during = (await rpc(context, "session.create", { source: "during" }, 4)).result as {
+      session_id: string;
+    };
+    expect(sessions.get(created.session_id)).toBeDefined();
+    expect(sessions.get(during.session_id)).toBeDefined();
+
+    release_first();
+    const first = (await first_submit).result as { reply: string };
+    expect(first.reply).toBe("first-reply");
+
+    // The first submit has released its hold. The queued submit must still
+    // pin the bag, or this create evicts it and the second turn is lost.
+    const after = (await rpc(context, "session.create", { source: "after" }, 5)).result as {
+      session_id: string;
+    };
+    expect(sessions.get(created.session_id)?.history.some(
+      (message) => message.role === "assistant" && message.content === "first-reply",
+    )).toBe(true);
+    expect(sessions.get(during.session_id)).toBeUndefined();
+    expect(sessions.get(after.session_id)?.history).toEqual([]);
+
+    release_second();
+    const second = (await second_submit).result as { reply: string; stopped_reason: string };
+    expect(second.stopped_reason).toBe("final");
+    expect(second.reply).toBe("second-reply");
+    const kept = sessions.get(created.session_id);
+    expect(kept?.history.some((message) => message.role === "user" && message.content === "second")).toBe(true);
+    expect(kept?.history.some((message) => message.role === "assistant" && message.content === "second-reply")).toBe(true);
+    expect(sessions.get(after.session_id)).toBeUndefined();
+  });
+
   it("reuses one SessionHandle transcript across multi-turn submits", async () => {
     const work_dir = await make_temp_dir("serve-prompt-multi");
     const session_dir = path.join(work_dir, "sessions");
