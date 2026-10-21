@@ -1456,6 +1456,89 @@ describe("serve prompt over websocket", () => {
     }
   });
 
+  it("waits to resume latest and a unique prefix of the transcript being written", async () => {
+    const work_dir = await make_temp_dir("serve-ws-resume-latest");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_hang!: () => void;
+    const hang = new Promise<void>((resolve) => {
+      release_hang = resolve;
+    });
+    let hang_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      hang_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: string }> };
+      if (body.messages.some((message) => message.content === "hang") === true) {
+        hang_started();
+        await hang;
+      }
+      return new Response(
+        JSON.stringify({
+          model: "mock-model",
+          choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir, agent, version: "9.9.9" });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const live = (
+        (await request_rpc(ws, { jsonrpc: "2.0", id: 1, method: "session.create", params: { source: "test" } }))
+          .result as { session_id: string }
+      ).session_id;
+      const prefix = live.slice(0, live.length - 1);
+      const slow = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id: live, text: "hang" },
+      });
+      await started;
+      let resumed_latest = false;
+      let resumed_prefix = false;
+      const resume_latest = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "session.resume",
+        params: { id: "latest" },
+      }).then((body) => {
+        resumed_latest = true;
+        return body;
+      });
+      const resume_prefix = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "session.resume",
+        params: { id: prefix },
+      }).then((body) => {
+        resumed_prefix = true;
+        return body;
+      });
+      const health = await request_rpc(ws, { jsonrpc: "2.0", id: 5, method: "health" });
+      expect(health.result).toMatchObject({ status: "ok" });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(resumed_latest).toBe(false);
+      expect(resumed_prefix).toBe(false);
+      release_hang();
+      const latest_body = await resume_latest;
+      const prefix_body = await resume_prefix;
+      expect((await slow).result).toMatchObject({ session_id: live, stopped_reason: "final" });
+      expect(latest_body.result).toMatchObject({ resumed_id: live });
+      expect(prefix_body.result).toMatchObject({ resumed_id: live });
+      expect((latest_body.result as { message_count: number }).message_count).toBeGreaterThanOrEqual(2);
+      expect((prefix_body.result as { message_count: number }).message_count).toBeGreaterThanOrEqual(2);
+    } finally {
+      release_hang();
+      ws.close();
+    }
+  });
+
   it("holds later frames on a session until its in-flight submit finishes", async () => {
     const work_dir = await make_temp_dir("serve-ws-lane-order");
     const session_dir = path.join(work_dir, "sessions");

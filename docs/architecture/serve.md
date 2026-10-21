@@ -131,9 +131,11 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
   `params.session_id` match are handled in arrival order and get in-order
   replies, while other sessions, and frames that name no session (such as
   `health`, `session.list` or `session.create`), do not wait behind them.
-  `session.resume` is queued by `params.id` instead, so resuming the transcript
-  an in-flight `prompt.submit` is still writing waits for that run. A resume
-  of a different id does not.
+  `session.resume` is queued on the transcript `params.id` resolves to (exact
+  id, unique prefix, or `latest`), so resuming the file an in-flight
+  `prompt.submit` is still writing waits for that run. The id is pinned when
+  the frame is accepted: a newer transcript created while the frame waits does
+  not retarget `latest`. A resume of a different transcript does not wait.
   Replies from different sessions can therefore interleave; match them by
   JSON-RPC `id`.
   `prompt.abort` is dispatched immediately so it can cancel an in-flight
