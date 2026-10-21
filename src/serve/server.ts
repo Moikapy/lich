@@ -11,6 +11,7 @@ import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
 import { safe_json_parse } from "../util/json.js";
+import { resolve_session_path } from "../session/resolve.js";
 import { create_serve_prompt_service, type ServePromptService } from "./prompts.js";
 import { handle_serve_rpc_message } from "./rpc.js";
 import { create_serve_session_store, type ServeSessionStore } from "./sessions.js";
@@ -164,7 +165,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
         }
         wss?.handleUpgrade(request, socket, head, (client) => {
           socket.off("error", on_socket_error);
-          attach_client(client, version, sessions, prompts, inflight);
+          attach_client(client, version, sessions, prompts, inflight, session_dir);
         });
       });
       try {
@@ -232,15 +233,20 @@ function attach_client(
   sessions: ServeSessionStore,
   prompts: ServePromptService | undefined,
   inflight: Set<Promise<void>>,
+  session_dir: string,
 ): void {
   // Serialize frames per session on this connection: frames for one session_id
   // get in-order replies, while different sessions (and session-less frames
   // such as health or session.list) no longer wait behind each other's runs.
-  // session.resume is keyed by params.id so it waits on the transcript it reads.
-  // Replies across lanes can interleave; clients match them by JSON-RPC id.
+  // session.resume waits on the transcript params.id resolves to (exact id,
+  // unique prefix, or latest), pinned at accept time. Replies across lanes
+  // can interleave; clients match them by JSON-RPC id.
   // prompt.abort is on no lane. It must run while prompt.submit is still
   // awaiting the model; waiting would deadlock a hung run with its own cancel.
   const tails = new Map<string, Promise<void>>();
+  // Lane choice for `latest` awaits a directory read. Bind serially so two
+  // frames cannot both observe an empty tail and drop one chain.
+  let bind_tail: Promise<void> = Promise.resolve();
   const track = (chain: Promise<void>): void => {
     inflight.add(chain);
     void chain.finally(() => {
@@ -256,40 +262,78 @@ function attach_client(
       track(Promise.resolve().then(() => run_frame(data)));
       return;
     }
-    // Arm the controller before this frame waits on `tail`, so prompt.abort
-    // (which skips the tail) can cancel a submit that has not started yet.
+    // Arm the controller before this frame waits on its lane, so prompt.abort
+    // (which skips the lane) can cancel a submit that has not started yet.
     const prepared = arm_queued_submit(data, prompts);
-    const lane = frame_lane(data);
-    const chain = (tails.get(lane) ?? Promise.resolve()).then(() => run_frame(data, prepared));
-    tails.set(lane, chain);
-    track(chain);
-    // Drop an idle lane so the map does not grow with every session ever used.
-    void chain.finally(() => {
-      if (tails.get(lane) === chain) {
-        tails.delete(lane);
+    const bound = bind_tail.then(async () => {
+      let next: BoundFrame = { lane: "", data };
+      try {
+        next = await bind_frame(data, session_dir);
+      } catch (error) {
+        logger.warn("serve frame lane bind failed", error);
       }
+      const chain = (tails.get(next.lane) ?? Promise.resolve()).then(() => run_frame(next.data, prepared));
+      tails.set(next.lane, chain);
+      track(chain);
+      // Drop an idle lane so the map does not grow with every session ever used.
+      void chain.finally(() => {
+        if (tails.get(next.lane) === chain) {
+          tails.delete(next.lane);
+        }
+      });
     });
+    bind_tail = bound.then(
+      () => undefined,
+      () => undefined,
+    );
   });
+}
+
+interface BoundFrame {
+  lane: string;
+  data: RawData;
 }
 
 /**
  * Lane for a frame. `prompt.submit` / `session.clear` use `params.session_id`.
- * `session.resume` uses `params.id` (the transcript being read) so a resume of
- * the file an in-flight submit is appending waits until that run finishes.
- * Other frames share "".
+ * `session.resume` uses the transcript `params.id` resolves to, so `latest`
+ * and a unique prefix wait on the same lane as the submit writing that file.
+ * The resolved id is written into the frame: a newer transcript created while
+ * this frame waits must not retarget `latest`. Other frames share "".
  */
-function frame_lane(data: RawData): string {
+async function bind_frame(data: RawData, session_dir: string): Promise<BoundFrame> {
   const body = parse_frame_object(data);
-  const params = body?.params;
+  if (body === undefined) {
+    return { lane: "", data };
+  }
+  const params = body.params;
   if (typeof params !== "object" || params === null || Array.isArray(params)) {
-    return "";
+    return { lane: "", data };
   }
   const record = params as { session_id?: unknown; id?: unknown };
-  if (body?.method === "session.resume" && typeof record.id === "string" && record.id.length > 0) {
-    return `session:${record.id}`;
+  if (body.method === "session.resume" && typeof record.id === "string" && record.id.length > 0) {
+    const canonical = await canonical_resume_id(session_dir, record.id);
+    const lane_id = canonical ?? record.id;
+    const fields = params as Record<string, unknown>;
+    const pinned =
+      canonical !== undefined && canonical !== record.id
+        ? JSON.stringify({ ...body, params: { ...fields, id: canonical } })
+        : data;
+    return { lane: `session:${lane_id}`, data: pinned as RawData };
   }
   const session_id = record.session_id;
-  return typeof session_id === "string" && session_id.length > 0 ? `session:${session_id}` : "";
+  const lane = typeof session_id === "string" && session_id.length > 0 ? `session:${session_id}` : "";
+  return { lane, data };
+}
+
+/** Transcript id for an exact id, unique prefix, or `latest`. Undefined when unresolved. */
+async function canonical_resume_id(session_dir: string, raw_id: string): Promise<string | undefined> {
+  try {
+    const transcript = await resolve_session_path(session_dir, raw_id);
+    return path.basename(transcript, ".jsonl");
+  } catch {
+    return undefined;
+  }
 }
 
 interface PreparedSubmit {
@@ -331,12 +375,12 @@ function prompt_submit_session_id(data: RawData): string | undefined {
   return session_id;
 }
 
-function parse_frame_object(data: RawData): { method?: unknown; id?: unknown; params?: unknown } | undefined {
+function parse_frame_object(data: RawData): Record<string, unknown> | undefined {
   const parsed = safe_json_parse<unknown>(raw_data_to_string(data));
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return undefined;
   }
-  return parsed as { method?: unknown; id?: unknown; params?: unknown };
+  return parsed as Record<string, unknown>;
 }
 
 /** True when this frame is prompt.abort (cancel must not wait on the run it cancels). */

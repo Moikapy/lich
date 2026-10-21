@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `lich serve`: `session.resume` with `latest` or a unique id prefix waits for
+  an in-flight `prompt.submit` that is writing that transcript, same as an
+  exact id. The transcript is the one resolved when the frame was accepted.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
