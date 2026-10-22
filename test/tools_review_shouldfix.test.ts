@@ -218,6 +218,43 @@ describe("S-9 HTTP stream clamp", () => {
     expect(() => reject_oversized_content_length(response, 1000)).toThrow(/body_too_large/);
   });
 
+  it("allows a content-length at the budget and ignores a non-numeric one", () => {
+    const at_budget = new Response("abcd", { headers: { "content-length": "4" } });
+    expect(() => reject_oversized_content_length(at_budget, 4)).not.toThrow();
+    const one_over = new Response("abcd", { headers: { "content-length": "5" } });
+    expect(() => reject_oversized_content_length(one_over, 4)).toThrow(/body_too_large/);
+    const garbage = new Response("abcd", { headers: { "content-length": "nope" } });
+    expect(() => reject_oversized_content_length(garbage, 1)).not.toThrow();
+    const blank = new Response("abcd", { headers: { "content-length": "" } });
+    expect(() => reject_oversized_content_length(blank, 1)).not.toThrow();
+    const negative = new Response("abcd", { headers: { "content-length": "-1" } });
+    expect(() => reject_oversized_content_length(negative, 1)).not.toThrow();
+    const missing = new Response("abcd");
+    expect(() => reject_oversized_content_length(missing, 1)).not.toThrow();
+  });
+
+  it("stops a multibyte chunk at the byte budget and survives a cancel failure", async () => {
+    const euro = Buffer.from("€");
+    expect(euro.byteLength).toBe(3);
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(euro);
+        if (pulls > 1) {
+          controller.close();
+        }
+      },
+      cancel() {
+        return Promise.reject(new Error("cancel failed"));
+      },
+    });
+    const clamped = await read_clamped_text(new Response(stream), 4);
+    expect(clamped.bytes_read).toBe(4);
+    expect(clamped.truncated).toBe(true);
+    expect(clamped.text.match(/€/g)?.length).toBe(1);
+  });
+
   it("streams only up to the byte budget from a ReadableStream body", async () => {
     const chunk = new Uint8Array(1000).fill(65);
     let reads = 0;
