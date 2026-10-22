@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { SERVE_ERROR_CODES } from "../src/serve/protocol.js";
+import type { ServePromptService } from "../src/serve/prompts.js";
 import { handle_serve_rpc_message, type ServeRpcContext } from "../src/serve/rpc.js";
 import type { ServeSessionStore } from "../src/serve/sessions.js";
 
@@ -90,6 +91,19 @@ describe("serve rpc framing", () => {
       rpc_error(null, SERVE_ERROR_CODES.INVALID_REQUEST, "Invalid Request"),
     );
 
+    const bool_id = await dispatch(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: true,
+        method: "prompt.submit",
+        params: { session_id: "s1", text: "hi" },
+      }),
+    );
+    expect(bool_id.calls).toEqual([]);
+    expect(bool_id.body).toEqual(
+      rpc_error(null, SERVE_ERROR_CODES.INVALID_REQUEST, "Invalid Request"),
+    );
+
     const notification = await dispatch(
       JSON.stringify({ jsonrpc: "2.0", method: "session.clear", params: { session_id: "s1" } }),
     );
@@ -116,6 +130,12 @@ describe("serve rpc framing", () => {
       { jsonrpc: "2.0", id: 5, method: "session.clear", params: { session_id: 1 } },
       { jsonrpc: "2.0", id: 6, method: "session.resume", params: { id: "abc", source: "" } },
       { jsonrpc: "2.0", id: 7, method: "session.resume", params: { id: "" } },
+      { jsonrpc: "2.0", id: 8, method: "session.resume", params: { id: "abc", source: 1 } },
+      { jsonrpc: "2.0", id: 9, method: "session.resume", params: { source: "tui" } },
+      { jsonrpc: "2.0", id: 10, method: "session.create", params: { source: 1 } },
+      { jsonrpc: "2.0", id: 11, method: "session.create", params: { source: "ok", label: 1 } },
+      { jsonrpc: "2.0", id: 12, method: "health", params: [] },
+      { jsonrpc: "2.0", id: 13, method: "session.list", params: [] },
     ];
     for (const frame of cases) {
       const result = await dispatch(JSON.stringify(frame));
@@ -123,6 +143,36 @@ describe("serve rpc framing", () => {
       expect(result.body).toEqual(
         rpc_error(frame.id, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params"),
       );
+    }
+  });
+
+  it("treats omitted, null, and empty object params as a list or health call", async () => {
+    const frames = [
+      { jsonrpc: "2.0", id: 1, method: "session.list" },
+      { jsonrpc: "2.0", id: 2, method: "session.list", params: null },
+      { jsonrpc: "2.0", id: 3, method: "session.list", params: {} },
+    ];
+    for (const frame of frames) {
+      const listed = await dispatch(JSON.stringify(frame));
+      expect(listed.calls).toEqual(["list"]);
+      expect(listed.body).toMatchObject({
+        error: { code: SERVE_ERROR_CODES.APPLICATION_ERROR },
+      });
+    }
+    const empty_health = await dispatch(
+      JSON.stringify({ jsonrpc: "2.0", id: 4, method: "health", params: {} }),
+    );
+    expect(empty_health.calls).toEqual([]);
+    expect(empty_health.body).toMatchObject({ result: { status: "ok", protocol_version: 1 } });
+
+    for (const params of ["x", 0]) {
+      for (const method of ["health", "session.list"]) {
+        const rejected = await dispatch(JSON.stringify({ jsonrpc: "2.0", id: 5, method, params }));
+        expect(rejected.calls).toEqual([]);
+        expect(rejected.body).toEqual(
+          rpc_error(5, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params"),
+        );
+      }
     }
   });
 
@@ -167,5 +217,99 @@ describe("serve rpc framing", () => {
     expect(submit.body).toEqual(
       rpc_error("submit-1", SERVE_ERROR_CODES.APPLICATION_ERROR, "agent not configured"),
     );
+  });
+
+  it("rejects malformed prompt params without calling the agent", async () => {
+    const calls: string[] = [];
+    const prompts: ServePromptService = {
+      submit: async () => {
+        calls.push("submit");
+        throw new Error("submit");
+      },
+      abort: () => {
+        calls.push("abort");
+        throw new Error("abort");
+      },
+      abort_all: () => undefined,
+    };
+    const { store } = untouched_store();
+    const frames = [
+      { id: 1, method: "prompt.submit", params: { session_id: "s" } },
+      { id: 2, method: "prompt.submit", params: { text: "hi" } },
+      { id: 3, method: "prompt.submit", params: { session_id: "", text: "hi" } },
+      { id: 4, method: "prompt.submit", params: { session_id: "s", text: 1 } },
+      { id: 5, method: "prompt.submit", params: [] },
+      { id: 6, method: "prompt.submit", params: null },
+      { id: 7, method: "prompt.abort", params: {} },
+      { id: 8, method: "prompt.abort", params: { session_id: "" } },
+      { id: 9, method: "prompt.abort", params: { session_id: 1 } },
+      { id: 10, method: "prompt.abort", params: null },
+    ];
+    for (const frame of frames) {
+      const text = await handle_serve_rpc_message(JSON.stringify({ jsonrpc: "2.0", ...frame }), {
+        version: "9.9.9",
+        sessions: store,
+        prompts,
+      });
+      expect(JSON.parse(text ?? "")).toEqual(
+        rpc_error(frame.id, SERVE_ERROR_CODES.INVALID_PARAMS, "Invalid params"),
+      );
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("claims a prepared controller only for the submit it was armed for", async () => {
+    const seen: Array<AbortController | undefined> = [];
+    let claimed = 0;
+    const controller = new AbortController();
+    const prompts: ServePromptService = {
+      submit: async (params, _notify, prepared) => {
+        seen.push(prepared);
+        return {
+          session_id: params.session_id,
+          reply: "ok",
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          session_path: undefined,
+          turns_used: 0,
+          stopped_reason: "final",
+        };
+      },
+      abort: () => {
+        throw new Error("abort");
+      },
+      abort_all: () => undefined,
+    };
+    const { store } = untouched_store();
+    const frame = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "prompt.submit",
+      params: { session_id: "live", text: "hi" },
+    };
+    const mismatched = await handle_serve_rpc_message(JSON.stringify(frame), {
+      version: "9.9.9",
+      sessions: store,
+      prompts,
+      prepared_submit: { session_id: "other", controller },
+      claim_prepared_submit: () => {
+        claimed += 1;
+      },
+    });
+    expect(claimed).toBe(0);
+    expect(seen).toEqual([undefined]);
+    expect(JSON.parse(mismatched ?? "")).toMatchObject({ result: { session_id: "live" } });
+
+    const matched = await handle_serve_rpc_message(JSON.stringify({ ...frame, id: 2 }), {
+      version: "9.9.9",
+      sessions: store,
+      prompts,
+      prepared_submit: { session_id: "live", controller },
+      claim_prepared_submit: () => {
+        claimed += 1;
+      },
+    });
+    expect(claimed).toBe(1);
+    expect(seen[1]).toBe(controller);
+    expect(JSON.parse(matched ?? "")).toMatchObject({ result: { session_id: "live" } });
   });
 });

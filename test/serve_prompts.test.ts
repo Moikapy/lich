@@ -1310,6 +1310,62 @@ describe("serve prompt over websocket", () => {
     }
   });
 
+  it("releases a controller armed for a prompt.submit whose id is not a JSON-RPC id", async () => {
+    const work_dir = await make_temp_dir("serve-ws-bad-submit-id");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async () => {
+      fetch_calls += 1;
+      return new Response(
+        JSON.stringify(completion_body({ role: "assistant", content: "ran" }, "stop")),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({
+      port: 0,
+      boot_stdout: null,
+      session_dir,
+      agent,
+      version: "9.9.9",
+    });
+    servers.push(server);
+    const boot = await server.start();
+    const ws = await open_ws(`ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`);
+    try {
+      const create_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "session.create",
+        params: { source: "test" },
+      });
+      const session_id = (create_resp.result as { session_id: string }).session_id;
+      const bad_ids = [true, { n: 1 }];
+      for (const id of bad_ids) {
+        const pending = next_frame(ws);
+        ws.send(JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "prompt.submit",
+          params: { session_id, text: "nope" },
+        }));
+        const body = await pending;
+        expect(body.id).toBeNull();
+        expect(body.error).toMatchObject({ code: -32600, message: "Invalid Request" });
+      }
+      const abort_resp = await request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.abort",
+        params: { session_id },
+      });
+      expect(abort_resp.result).toEqual({ session_id, aborted: false });
+      expect(fetch_calls).toBe(0);
+    } finally {
+      ws.close();
+    }
+  });
+
   it("runs different sessions on one connection concurrently, and session-less frames do not wait", async () => {
     const work_dir = await make_temp_dir("serve-ws-lanes");
     const session_dir = path.join(work_dir, "sessions");
@@ -1674,6 +1730,16 @@ function send_raw_rpc(
     };
     ws.on("message", on_message);
     ws.send(raw);
+  });
+}
+
+function next_frame(ws: WebSocket): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("rpc timeout")), 5000);
+    ws.once("message", (data) => {
+      clearTimeout(timer);
+      resolve(JSON.parse(String(data)) as Record<string, unknown>);
+    });
   });
 }
 
