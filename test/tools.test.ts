@@ -380,6 +380,52 @@ describe("list_dir", () => {
     expect(grepped.output).not.toContain("dist-marker");
     expect(grepped.output).not.toContain("cursor-marker");
   });
+
+  it("clamps depth into 1..4 so a deep tree stops before the fifth level", async () => {
+    await write_temp(tmp_root, "depth/l1.txt", "x");
+    await write_temp(tmp_root, "depth/d1/l2.txt", "x");
+    await write_temp(tmp_root, "depth/d1/d2/l3.txt", "x");
+    await write_temp(tmp_root, "depth/d1/d2/d3/l4.txt", "x");
+    await write_temp(tmp_root, "depth/d1/d2/d3/d4/l5.txt", "x");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const shallow = await executor.execute("list_dir", { path: "depth", depth: 0 });
+    expect(shallow.ok).toBe(true);
+    expect(shallow.output).toContain("l1.txt");
+    expect(shallow.output).toContain("d d1/");
+    expect(shallow.output).not.toContain("l2.txt");
+    const negative = await executor.execute("list_dir", { path: "depth", depth: -2 });
+    expect(negative.output).toBe(shallow.output);
+    const fractional = await executor.execute("list_dir", { path: "depth", depth: 2.9 });
+    expect(fractional.output).toContain("l2.txt");
+    expect(fractional.output).not.toContain("l3.txt");
+    const at_cap = await executor.execute("list_dir", { path: "depth", depth: 4 });
+    const over = await executor.execute("list_dir", { path: "depth", depth: 100 });
+    expect(over.output).toBe(at_cap.output);
+    expect(at_cap.output).toContain("l4.txt");
+    expect(at_cap.output).toContain("d d4/");
+    expect(at_cap.output).not.toContain("l5.txt");
+  });
+
+  it("stops at 500 entries and reports the truncation", async () => {
+    const dir = path.join(tmp_root, "list-cap");
+    await mkdir(dir, { recursive: true });
+    for (let index = 0; index <= 500; index += 1) {
+      const name = `f-${String(index).padStart(3, "0")}.txt`;
+      await writeFile(path.join(dir, name), "x");
+    }
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const result = await executor.execute("list_dir", { path: "list-cap", depth: 1 });
+    expect(result.ok).toBe(true);
+    const lines = result.output.split("\n");
+    expect(lines.at(-1)).toBe("(... truncated at 500 entries)");
+    expect(lines.filter((line) => line.startsWith("- f-"))).toHaveLength(500);
+    expect(result.output).toContain("f-000.txt");
+    expect(result.output).not.toContain("f-500.txt");
+  });
 });
 
 describe("terminal", () => {
@@ -622,5 +668,86 @@ describe("grep_files", () => {
     const bad = await executor.execute("grep_files", { pattern: "[unclosed", path: "grep2" });
     expect(bad.ok).toBe(false);
     expect(bad.error?.includes("invalid_regex")).toBe(true);
+  });
+
+  it("skips a file at the 1_000_000 byte cap and still reads one byte under it", async () => {
+    const huge = Buffer.alloc(1_000_000, 0x61);
+    Buffer.from("HUGE_MARKER\n").copy(huge);
+    const almost = Buffer.alloc(999_999, 0x61);
+    Buffer.from("ALMOST_MARKER\n").copy(almost);
+    await write_temp(tmp_root, "grep-size/huge.txt", huge);
+    await write_temp(tmp_root, "grep-size/almost.txt", almost);
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const result = await executor.execute("grep_files", {
+      pattern: "HUGE_MARKER|ALMOST_MARKER",
+      path: "grep-size",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("almost.txt");
+    expect(result.output).toContain("ALMOST_MARKER");
+    expect(result.output).not.toContain("huge.txt");
+    expect(result.output).not.toContain("HUGE_MARKER");
+  });
+
+  it("treats a NUL only inside the first 1000 bytes as binary", async () => {
+    const late = Buffer.concat([
+      Buffer.alloc(1000, 0x61),
+      Buffer.from([0]),
+      Buffer.from("LATE_NUL_MARKER\n"),
+    ]);
+    const early = Buffer.concat([Buffer.from([0]), Buffer.from("EARLY_NUL_MARKER\n")]);
+    await write_temp(tmp_root, "grep-nul/late.txt", late);
+    await write_temp(tmp_root, "grep-nul/early.dat", early);
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const result = await executor.execute("grep_files", {
+      pattern: "LATE_NUL_MARKER|EARLY_NUL_MARKER",
+      path: "grep-nul",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("late.txt");
+    expect(result.output).toContain("LATE_NUL_MARKER");
+    expect(result.output).not.toContain("early.dat");
+    expect(result.output).not.toContain("EARLY_NUL_MARKER");
+  });
+
+  it("does not follow a symlink onto another file while scanning a directory", async () => {
+    await write_temp(tmp_root, "grep-link/note.txt", "LINK_MARKER\n");
+    symlinkSync("note.txt", path.join(tmp_root, "grep-link", "alias.txt"));
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const result = await executor.execute("grep_files", { pattern: "LINK_MARKER", path: "grep-link" });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("note.txt");
+    expect(result.output).not.toContain("alias.txt");
+  });
+
+  it("matches a prefix glob and an exact filename", async () => {
+    await write_temp(tmp_root, "grep-glob/pre.txt", "GLOB_MARKER\n");
+    await write_temp(tmp_root, "grep-glob/other.txt", "GLOB_MARKER\n");
+    await write_temp(tmp_root, "grep-glob/exact.txt", "GLOB_MARKER\n");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const prefix = await executor.execute("grep_files", {
+      pattern: "GLOB_MARKER",
+      path: "grep-glob",
+      glob: "pre*",
+    });
+    expect(prefix.ok).toBe(true);
+    expect(prefix.output).toContain("pre.txt");
+    expect(prefix.output).not.toContain("other.txt");
+    expect(prefix.output).not.toContain("exact.txt");
+    const exact = await executor.execute("grep_files", {
+      pattern: "GLOB_MARKER",
+      path: "grep-glob",
+      glob: "exact.txt",
+    });
+    expect(exact.output).toContain("exact.txt");
+    expect(exact.output).not.toContain("pre.txt");
   });
 });
