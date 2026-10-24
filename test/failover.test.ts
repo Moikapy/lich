@@ -1,5 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { compute_backoff_ms, classify_error, run_with_retries } from "../src/providers/failover.js";
+
+const sleep_state = vi.hoisted(() => ({
+  calls: [] as number[],
+  abort_during_wait: false,
+  abort_now: undefined as (() => void) | undefined,
+}));
+
+vi.mock("../src/util/sleep.js", () => ({
+  sleep: (ms: number, signal?: AbortSignal): Promise<void> => {
+    sleep_state.calls.push(ms);
+    if (signal?.aborted === true) {
+      return Promise.reject(new Error("sleep_aborted"));
+    }
+    if (sleep_state.abort_during_wait === true) {
+      sleep_state.abort_now?.();
+      return Promise.reject(new Error("sleep_aborted"));
+    }
+    return Promise.resolve();
+  },
+}));
 import { chat_with_failover, ProviderRouter } from "../src/providers/router.js";
 import { ProviderError } from "../src/providers/types.js";
 import type { ChatResult, ProviderConfig } from "../src/providers/types.js";
@@ -272,5 +292,92 @@ describe("chat_with_failover", () => {
     expect(backup_calls).toBe(0);
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).name).toBe("AbortError");
+  });
+});
+
+describe("run_with_retries delay and cancel", () => {
+  afterEach(() => {
+    sleep_state.calls = [];
+    sleep_state.abort_during_wait = false;
+    sleep_state.abort_now = undefined;
+  });
+
+  async function retry_once(retry_after_ms: number): Promise<{
+    delays: number[];
+    slept: number[];
+    calls: number;
+    value?: string;
+    error?: unknown;
+  }> {
+    sleep_state.calls = [];
+    const delays: number[] = [];
+    let calls = 0;
+    const settled = await run_with_retries(
+      (attempt) => {
+        calls += 1;
+        if (attempt === 1) {
+          return Promise.reject(rate_limit_error("p", retry_after_ms));
+        }
+        return Promise.resolve("done");
+      },
+      {
+        max_attempts: 2,
+        on_retry: (_kind, _attempt, delay_ms) => {
+          delays.push(delay_ms);
+        },
+      },
+    ).then(
+      (value) => ({ value, error: undefined }),
+      (error: unknown) => ({ value: undefined, error }),
+    );
+    return { delays, slept: [...sleep_state.calls], calls, ...settled };
+  }
+
+  it("uses Retry-After only when it is above the backoff and at most 30000ms", async () => {
+    const backoff = compute_backoff_ms(1);
+    const below = await retry_once(backoff - 1);
+    expect(below.value).toBe("done");
+    expect(below.calls).toBe(2);
+    expect(below.delays).toEqual([backoff]);
+    expect(below.slept).toEqual([backoff]);
+
+    const honored = await retry_once(5000);
+    expect(honored.value).toBe("done");
+    expect(honored.delays).toEqual([5000]);
+    expect(honored.slept).toEqual([5000]);
+
+    const at_cap = await retry_once(30_000);
+    expect(at_cap.value).toBe("done");
+    expect(at_cap.delays).toEqual([30_000]);
+    expect(at_cap.slept).toEqual([30_000]);
+
+    const over_cap = await retry_once(30_001);
+    expect(over_cap.calls).toBe(1);
+    expect(over_cap.delays).toEqual([]);
+    expect(over_cap.slept).toEqual([]);
+    expect(over_cap.error).toBeInstanceOf(ProviderError);
+    expect((over_cap.error as ProviderError).kind).toBe("rate_limit");
+  });
+
+  it("does not start another attempt when the caller aborts during the wait", async () => {
+    const controller = new AbortController();
+    const cause = rate_limit_error("p", 5000);
+    sleep_state.abort_during_wait = true;
+    sleep_state.abort_now = () => {
+      controller.abort();
+    };
+    let calls = 0;
+    const failure = await run_with_retries(
+      () => {
+        calls += 1;
+        return Promise.reject(cause);
+      },
+      { max_attempts: 3, signal: controller.signal },
+    ).catch((error: unknown) => error);
+    expect(calls).toBe(1);
+    expect(sleep_state.calls).toEqual([5000]);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).name).toBe("AbortError");
+    expect((failure as Error).cause).toBe(cause);
   });
 });
