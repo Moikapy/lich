@@ -136,7 +136,11 @@ describe("guard", () => {
   it("optional args coerce or fall back", () => {
     expect(optional_number_arg({ n: 7 }, "n", 1)).toBe(7);
     expect(optional_number_arg({ n: "x" }, "n", 1)).toBe(1);
+    expect(optional_number_arg({ n: Number.NaN }, "n", 8)).toBe(8);
+    expect(optional_number_arg({ n: Number.POSITIVE_INFINITY }, "n", 8)).toBe(8);
     expect(optional_boolean_arg({ b: true }, "b", false)).toBe(true);
+    expect(optional_boolean_arg({ b: "true" }, "b", false)).toBe(false);
+    expect(optional_boolean_arg({ b: 1 }, "b", false)).toBe(false);
     expect(optional_boolean_arg({}, "b", false)).toBe(false);
   });
 

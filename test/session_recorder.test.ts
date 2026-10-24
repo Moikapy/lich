@@ -5,8 +5,8 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { AgentEventBody } from "../src/agent/events.js";
-import { create_session_recorder } from "../src/session/recorder.js";
-import { open_session, read_session_messages, type SessionRecord } from "../src/session/store.js";
+import { create_session_recorder, mark_session_seeded } from "../src/session/recorder.js";
+import { open_session, read_session_messages, type SessionHandle, type SessionRecord } from "../src/session/store.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
 
 const temp_dirs: string[] = [];
@@ -22,6 +22,14 @@ async function make_temp_dir(): Promise<string> {
   const dir = await mkdtemp(path.join(TMP_BASE, "session-recorder-"));
   temp_dirs.push(dir);
   return dir;
+}
+
+function record_line(record: SessionRecord): string {
+  if (record.message === undefined) {
+    return `meta:${String(record.meta?.event)}`;
+  }
+  const content = "content" in record.message ? record.message.content : "";
+  return `${record.message.role}:${content}`;
 }
 
 async function read_records(file_path: string): Promise<SessionRecord[]> {
@@ -211,5 +219,103 @@ describe("session recorder", () => {
       "user:b",
       "assistant:reply-b",
     ]);
+  });
+
+  it("does not prepend system_prompt when history already has a system message", async () => {
+    const dir = await make_temp_dir();
+    const handle = await open_session(dir, "has-system");
+    const recorder = create_session_recorder(handle);
+    await recorder.seed({
+      input: "now",
+      history: [
+        { role: "system", content: "from-history" },
+        { role: "user", content: "prior" },
+      ],
+      system_prompt: "fresh",
+      owned: true,
+    });
+    await recorder.flush();
+    const records = await read_records(handle.path);
+    expect(records.map(record_line)).toEqual([
+      "meta:run_start",
+      "system:from-history",
+      "user:prior",
+      "user:now",
+    ]);
+  });
+
+  it("still copies history for an owned seed after the handle is marked seeded", async () => {
+    const dir = await make_temp_dir();
+    const handle = await open_session(dir, "owned-mark");
+    mark_session_seeded(handle);
+    const owned = create_session_recorder(handle);
+    await owned.seed({
+      input: "a",
+      history: [{ role: "user", content: "prior" }],
+      system_prompt: "sys",
+      owned: true,
+    });
+    await owned.finish("final", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+
+    const shared = create_session_recorder(handle);
+    await shared.seed({
+      input: "b",
+      history: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "prior" },
+        { role: "user", content: "a" },
+      ],
+      system_prompt: "sys",
+      owned: false,
+    });
+    await shared.flush();
+
+    const records = await read_records(handle.path);
+    expect(records.map(record_line)).toEqual([
+      "meta:run_start",
+      "system:sys",
+      "user:prior",
+      "user:a",
+      "meta:run_end",
+      "meta:run_start",
+      "user:b",
+    ]);
+  });
+
+  it("keeps writing after an append fails and records a zero-length summary", async () => {
+    const records: SessionRecord[] = [];
+    let fail_remaining = 1;
+    const handle: SessionHandle = {
+      id: "fail",
+      path: "virtual.jsonl",
+      append: async (record) => {
+        if (fail_remaining > 0) {
+          fail_remaining -= 1;
+          throw new Error("disk full");
+        }
+        records.push(record);
+      },
+    };
+    const recorder = create_session_recorder(handle);
+    await recorder.seed({
+      input: "hi",
+      history: [],
+      system_prompt: "sys",
+      owned: true,
+    });
+    expect(records.map((record) => record.message?.content)).toEqual(["sys", "hi"]);
+
+    fail_remaining = 1;
+    recorder.on_event(llm_end("one"));
+    recorder.on_event(llm_end("two"));
+    recorder.on_event({ type: "compress_end", summary_chars: 0 });
+    await recorder.flush();
+    expect(records.filter((record) => record.message?.role === "assistant").map((record) => record.message?.content)).toEqual([
+      "two",
+    ]);
+    expect(records.some((record) => record.meta?.event === "compress_end" && record.meta.summary_chars === 0)).toBe(
+      true,
+    );
+    expect(JSON.stringify(records)).not.toContain("disk full");
   });
 });

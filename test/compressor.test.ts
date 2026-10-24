@@ -7,7 +7,7 @@ import {
   truncate_head_tail,
   type ChatFn,
 } from "../src/context/compressor.js";
-import { estimate_text_tokens } from "../src/context/tokens.js";
+import { estimate_message_tokens, estimate_text_tokens } from "../src/context/tokens.js";
 import type { ChatResult, Message, SystemMessage, UserMessage } from "../src/providers/types.js";
 import { ProviderError } from "../src/providers/types.js";
 
@@ -157,5 +157,97 @@ describe("compress_messages", () => {
     expect(recent[1]?.role).toBe("assistant");
     expect(recent[2]?.role).toBe("tool");
     expect(recent.slice(1).map((message) => message.role)).toEqual(["assistant", "tool", "user", "user"]);
+  });
+
+  it("caps the summarizer transcript and keeps the head and tail of a long line", () => {
+    expect(transcript_char_budget(0)).toBe(8000);
+    expect(transcript_char_budget(-50)).toBe(8000);
+    expect(transcript_char_budget(399_999)).toBe(95999);
+    expect(transcript_char_budget(400_000)).toBe(96000);
+    expect(transcript_char_budget(400_001)).toBe(96000);
+
+    expect(truncate_head_tail("abcdef", 0)).toBe("");
+    expect(truncate_head_tail("abcdef", -4)).toBe("");
+    expect(truncate_head_tail("abcdefghij", 6)).toBe("abcdef");
+
+    const head = "HEAD!!";
+    const tail = "TAIL!!";
+    const text = `${head}${"m".repeat(88)}${tail}`;
+    expect(text).toHaveLength(100);
+    expect(truncate_head_tail(text, 40)).toBe(`${head}\n[...88 chars...]\n${tail}`);
+  });
+
+  it("forwards the abort signal and keeps history when summarization throws", async () => {
+    const controller = new AbortController();
+    const input = [user_message("u0"), user_message("u1"), user_message("u2")];
+    let seen: AbortSignal | undefined;
+    const chat: ChatFn = async (_messages, _tools, options) => {
+      seen = options?.signal;
+      throw new Error("summarizer down");
+    };
+    const outcome = await compress_messages({ chat }, input, {
+      budget_tokens: 10,
+      keep_recent: 1,
+      signal: controller.signal,
+    });
+    expect(seen).toBe(controller.signal);
+    expect(outcome.messages).toEqual(input);
+    expect(outcome.summary_chars).toBe(0);
+
+    const thrown: ChatFn = async () => {
+      throw "provider down";
+    };
+    const again = await compress_messages({ chat: thrown }, input, { budget_tokens: 10, keep_recent: 1 });
+    expect(again.messages).toEqual(input);
+    expect(again.summary_chars).toBe(0);
+  });
+
+  it("summarizes every non-system turn when keep_recent is zero or negative", async () => {
+    const requests: string[] = [];
+    const chat: ChatFn = async (messages) => {
+      const request = messages[1];
+      requests.push(request?.role === "user" ? request.content : "");
+      return fixed_chat_result("ALL");
+    };
+    const system = system_message("sys");
+    const users = [user_message("u0"), user_message("u1")];
+    for (const keep_recent of [0, -3]) {
+      const outcome = await compress_messages({ chat }, [system, ...users], { budget_tokens: 10, keep_recent });
+      expect(outcome.summary_chars).toBe(3);
+      expect(outcome.messages).toHaveLength(2);
+      expect(outcome.messages[0]).toBe(system);
+      expect(outcome.messages[1]).toMatchObject({ role: "user" });
+    }
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toContain("u0");
+    expect(requests[0]).toContain("u1");
+    expect(requests[1]).toContain("u0");
+    expect(requests[1]).toContain("u1");
+  });
+});
+
+describe("estimate_message_tokens", () => {
+  it("counts assistant tool calls and a fixed tool-message overhead", () => {
+    const tool_calls = [{ id: "c1", name: "read_file", args: { path: "notes.md" } }];
+    const assistant = { role: "assistant" as const, content: "abcd", tool_calls };
+    expect(estimate_message_tokens(assistant)).toBe(
+      estimate_text_tokens("abcd") + estimate_text_tokens(JSON.stringify(tool_calls)),
+    );
+    expect(estimate_message_tokens({
+      role: "tool",
+      tool_call_id: "c1",
+      name: "read_file",
+      content: "abcd",
+    })).toBe(estimate_text_tokens("abcd") + 8);
+    expect(estimate_message_tokens(user_message("abcd"))).toBe(estimate_text_tokens("abcd"));
+  });
+
+  it("does not throw when tool call arguments are circular", () => {
+    const tool_calls: unknown[] = [];
+    const assistant = { role: "assistant" as const, content: "ab", tool_calls };
+    tool_calls.push(assistant);
+    expect(estimate_message_tokens(assistant as unknown as Message)).toBe(
+      estimate_text_tokens("ab") + estimate_text_tokens("[object Object]"),
+    );
   });
 });
