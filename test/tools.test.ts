@@ -3,8 +3,11 @@ import { symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, unlink, rmdir, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
+import { clamp_int_arg } from "../src/tools/builtin/fetch_url.js";
+import { read_file_tool } from "../src/tools/builtin/read_file.js";
 import {
   clamp_output,
+  DEFAULT_MAX_OUTPUT_CHARS,
   optional_boolean_arg,
   optional_number_arg,
   require_string_arg,
@@ -140,6 +143,17 @@ describe("guard", () => {
     expect(optional_boolean_arg({}, "b", false)).toBe(false);
   });
 
+  it("clamp_int_arg floors into 1..max and ignores non-finite values", () => {
+    expect(clamp_int_arg({}, "n", 20, 100)).toBe(20);
+    expect(clamp_int_arg({ n: 0 }, "n", 20, 100)).toBe(1);
+    expect(clamp_int_arg({ n: -4 }, "n", 20, 100)).toBe(1);
+    expect(clamp_int_arg({ n: 2.9 }, "n", 20, 100)).toBe(2);
+    expect(clamp_int_arg({ n: 100 }, "n", 20, 100)).toBe(100);
+    expect(clamp_int_arg({ n: 101 }, "n", 20, 100)).toBe(100);
+    expect(clamp_int_arg({ n: "3" }, "n", 20, 100)).toBe(20);
+    expect(clamp_int_arg({ n: Number.NaN }, "n", 0, 100)).toBe(1);
+  });
+
   it("clamp_output truncates via truncate_text", () => {
     const long = "x".repeat(25000);
     const clamped = clamp_output(long, 100);
@@ -242,6 +256,32 @@ describe("executor", () => {
     expect(ToolExecutor.format_result({ ok: true, output: "plain" })).toBe("plain");
   });
 
+  it("clamps tool output at the shared cap and keeps the error", async () => {
+    const registry = new ToolRegistry();
+    const over = "z".repeat(DEFAULT_MAX_OUTPUT_CHARS + 3);
+    registry.register(make_tool("big", async () => ({ ok: false, output: over, error: "too big" })));
+    const executor = make_executor(registry);
+    const result = await executor.execute("big", {});
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("too big");
+    expect(result.output).toBe(`${"z".repeat(DEFAULT_MAX_OUTPUT_CHARS)}\n[... truncated, 3 chars omitted ...]`);
+    registry.register(make_tool("fit", async () => ({ ok: true, output: "y".repeat(DEFAULT_MAX_OUTPUT_CHARS) })));
+    const fitted = await executor.execute("fit", {});
+    expect(fitted.output).toBe("y".repeat(DEFAULT_MAX_OUTPUT_CHARS));
+  });
+
+  it("reports cancelled when the caller aborts before a tool throw settles", async () => {
+    const controller = new AbortController();
+    const registry = new ToolRegistry();
+    registry.register(make_tool("boom", async () => {
+      controller.abort();
+      throw new Error("boom");
+    }));
+    const executor = make_executor(registry);
+    const result = await executor.execute("boom", {}, { work_dir: tmp_root, env: {}, signal: controller.signal });
+    expect(result).toEqual({ ok: false, output: "", error: "cancelled" });
+  });
+
   it("honors a tool-declared timeout_ms over the 30s default", async () => {
     const registry = new ToolRegistry();
     const hanging: Tool = {
@@ -295,6 +335,39 @@ describe("read/write/edit", () => {
     expect(offset.output).toBe("beta");
   });
 
+  it("read_file treats non-positive windows as empty or the first line", async () => {
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    await executor.execute("write_file", { path: "rw/lines.txt", content: "alpha\nbeta\ngamma\n" });
+    const from_zero = await executor.execute("read_file", { path: "rw/lines.txt", offset: 0, limit: 1 });
+    const from_negative = await executor.execute("read_file", { path: "rw/lines.txt", offset: -3, limit: 1 });
+    expect(from_zero.output).toBe("alpha");
+    expect(from_negative.output).toBe("alpha");
+    const empty_limit = await executor.execute("read_file", { path: "rw/lines.txt", offset: 2, limit: 0 });
+    const negative_limit = await executor.execute("read_file", { path: "rw/lines.txt", offset: 2, limit: -2 });
+    expect(empty_limit.output).toBe("");
+    expect(negative_limit.output).toBe("");
+    const past_end = await executor.execute("read_file", { path: "rw/lines.txt", offset: 9, limit: 2 });
+    expect(past_end.ok).toBe(true);
+    expect(past_end.output).toBe("");
+    const string_bounds = await executor.execute("read_file", { path: "rw/lines.txt", offset: "2", limit: "1" });
+    expect(string_bounds.output).toBe("alpha\nbeta\ngamma\n");
+  });
+
+  it("read_file keeps 256000 chars and truncates one past that cap", async () => {
+    const cap = 256_000;
+    const context = { work_dir: tmp_root, env: {} };
+    await write_temp(tmp_root, "rw/exact.txt", "a".repeat(cap));
+    const exact = await read_file_tool.execute({ path: "rw/exact.txt" }, context);
+    expect(exact.ok).toBe(true);
+    expect(exact.output).toBe("a".repeat(cap));
+    await write_temp(tmp_root, "rw/over.txt", "b".repeat(cap + 7));
+    const truncated = await read_file_tool.execute({ path: "rw/over.txt" }, context);
+    expect(truncated.ok).toBe(true);
+    expect(truncated.output).toBe(`${"b".repeat(cap)}\n[... truncated, 7 chars omitted ...]`);
+  });
+
   it("read_file reports not_found", async () => {
     const registry = new ToolRegistry();
     register_builtin_tools(registry);
@@ -340,6 +413,42 @@ describe("read/write/edit", () => {
     expect(result.ok).toBe(true);
     expect(result.output).toBe("edited edit/two.txt (replaced 2 occurrence(s))");
     expect(await read_temp(tmp_root, "edit/two.txt")).toBe("z-y-z");
+  });
+
+  it("edit_file rejects an empty needle and a non-boolean replace_all", async () => {
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    await executor.execute("write_file", { path: "edit/bounds.txt", content: "aaa bbb aaa" });
+    const empty_old = await executor.execute("edit_file", { path: "edit/bounds.txt", old_string: "", new_string: "z" });
+    expect(empty_old.error).toBe("missing_arg: old_string");
+    const bad_new = await executor.execute("edit_file", { path: "edit/bounds.txt", old_string: "aaa", new_string: 1 });
+    expect(bad_new.error).toBe("missing_arg: new_string");
+    const truthy = await executor.execute("edit_file", {
+      path: "edit/bounds.txt",
+      old_string: "aaa",
+      new_string: "q",
+      replace_all: "true",
+    });
+    expect(truthy.ok).toBe(false);
+    expect(truthy.error).toBe("old_string_not_unique (2 occurrences)");
+    expect(await read_temp(tmp_root, "edit/bounds.txt")).toBe("aaa bbb aaa");
+    const cleared = await executor.execute("edit_file", { path: "edit/bounds.txt", old_string: " bbb ", new_string: "" });
+    expect(cleared.ok).toBe(true);
+    expect(await read_temp(tmp_root, "edit/bounds.txt")).toBe("aaaaaa");
+  });
+
+  it("write_file allows an empty body and rejects a non-string", async () => {
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const empty = await executor.execute("write_file", { path: "rw/blank.txt", content: "" });
+    expect(empty.ok).toBe(true);
+    expect(empty.output).toBe("wrote 0 chars to rw/blank.txt");
+    expect(await read_temp(tmp_root, "rw/blank.txt")).toBe("");
+    const bad = await executor.execute("write_file", { path: "rw/blank.txt", content: 1 });
+    expect(bad.error).toBe("missing_arg: content");
+    expect(await read_temp(tmp_root, "rw/blank.txt")).toBe("");
   });
 });
 
