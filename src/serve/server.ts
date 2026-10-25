@@ -11,6 +11,7 @@ import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
 import { logger } from "../util/log.js";
 import { safe_json_parse } from "../util/json.js";
+import { create_session_manager } from "../session/manager.js";
 import { create_serve_prompt_service, type ServePromptService } from "./prompts.js";
 import { handle_serve_rpc_message } from "./rpc.js";
 import { create_serve_session_store, type ServeSessionStore } from "./sessions.js";
@@ -97,7 +98,9 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   const token = options.token ?? randomBytes(TOKEN_BYTES).toString("hex");
   const version = options.version ?? LICH_VERSION;
   const session_dir = options.session_dir ?? path.join(process.cwd(), ".lich", "sessions");
-  const sessions = create_serve_session_store(session_dir, options.max_session_bags);
+  // One queue for prompt.submit and session.resume, shared by every connection.
+  const turns = create_session_manager();
+  const sessions = create_serve_session_store(session_dir, options.max_session_bags, turns);
   assert_loopback_host(host);
 
   let http_server: Server | undefined;
@@ -128,7 +131,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       if (agent !== undefined && options.agent === undefined) {
         owned_agent = agent;
       }
-      prompts = agent === undefined ? undefined : create_serve_prompt_service(agent, sessions);
+      prompts = agent === undefined ? undefined : create_serve_prompt_service(agent, sessions, turns);
       http_server = createServer((_req, res) => {
         res.statusCode = 404;
         res.end();

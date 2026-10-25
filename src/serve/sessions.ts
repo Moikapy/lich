@@ -7,6 +7,7 @@
  */
 import path from "node:path";
 import { writeFile } from "node:fs/promises";
+import type { SessionManager } from "../session/manager.js";
 import type { Message } from "../providers/types.js";
 import { logger } from "../util/log.js";
 import { is_enoent } from "../util/fs.js";
@@ -115,6 +116,8 @@ export const DEFAULT_SERVE_SESSION_LIMIT = 32;
 export function create_serve_session_store(
   session_dir: string,
   max_bags: number = DEFAULT_SERVE_SESSION_LIMIT,
+  /** Shared with prompt.submit so a resume waits out the turn writing this transcript. */
+  turns?: SessionManager,
 ): ServeSessionStore {
   const bags = new Map<string, ServeSessionBag>();
   /** session_id → in-flight submits that must survive LRU eviction. */
@@ -165,6 +168,38 @@ export function create_serve_session_store(
     evict_overflow(id);
   }
 
+  /** Read `transcript` and fork it into a new bag. `transcript` is already resolved. */
+  async function fork_resumed_transcript(transcript: string, source: string | undefined): Promise<SessionResumeResult> {
+    let messages: Message[];
+    try {
+      messages = await read_session_messages(transcript);
+    } catch (error) {
+      // File vanished between resolve and read → same as not found.
+      if (is_enoent(error) === true) {
+        throw new ServeSessionError("not_found", CLIENT_MESSAGES.not_found);
+      }
+      logger.warn("serve session transcript unreadable", error);
+      throw new ServeSessionError("unreadable", CLIENT_MESSAGES.unreadable);
+    }
+    let handle: SessionHandle;
+    try {
+      handle = await open_session(session_dir, "resume");
+      // Write the filtered bag history (not a raw copy) so the fork matches
+      // in-memory state; mark seeded so prompt.submit's recorder.seed
+      // appends only the new turn.
+      await write_fork_transcript(handle.path, messages);
+      mark_session_seeded(handle);
+    } catch (error) {
+      throw client_error(error);
+    }
+    put(handle.id, { handle, source: source ?? "resume", history: [...messages], epoch: 0 });
+    return {
+      session_id: handle.id,
+      message_count: messages.length,
+      resumed_id: path.basename(transcript, ".jsonl"),
+    };
+  }
+
   return {
     create: async (params) => {
       let handle: SessionHandle;
@@ -208,34 +243,11 @@ export function create_serve_session_store(
       } catch (error) {
         throw client_error(error);
       }
-      let messages: Message[];
-      try {
-        messages = await read_session_messages(transcript);
-      } catch (error) {
-        // File vanished between resolve and read → same as not found.
-        if (is_enoent(error) === true) {
-          throw new ServeSessionError("not_found", CLIENT_MESSAGES.not_found);
-        }
-        logger.warn("serve session transcript unreadable", error);
-        throw new ServeSessionError("unreadable", CLIENT_MESSAGES.unreadable);
-      }
-      let handle: SessionHandle;
-      try {
-        handle = await open_session(session_dir, "resume");
-        // Write the filtered bag history (not a raw copy) so the fork matches
-        // in-memory state; mark seeded so #83 prompt.submit's recorder.seed
-        // appends only the new turn.
-        await write_fork_transcript(handle.path, messages);
-        mark_session_seeded(handle);
-      } catch (error) {
-        throw client_error(error);
-      }
-      put(handle.id, { handle, source: params.source ?? "resume", history: [...messages], epoch: 0 });
-      return {
-        session_id: handle.id,
-        message_count: messages.length,
-        resumed_id: path.basename(transcript, ".jsonl"),
-      };
+      // Keep the file resolved now (`latest` and prefixes included) and read it
+      // only after an in-flight prompt.submit on that id has finished writing.
+      const file_id = path.basename(transcript, ".jsonl");
+      const fork = (): Promise<SessionResumeResult> => fork_resumed_transcript(transcript, params.source);
+      return turns === undefined ? fork() : turns.enqueue(file_id, fork);
     },
     get: (session_id) => {
       touch(session_id);

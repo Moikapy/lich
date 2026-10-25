@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `lich serve`: `session.resume` waits for an in-flight `prompt.submit` that is
+  writing that transcript even when the resume arrives on another connection
+  (a reconnect, or a second client). `latest` and a unique prefix resolve to
+  the file before the wait, so a session created while the resume is queued
+  does not change which transcript is read.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
