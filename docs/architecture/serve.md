@@ -132,8 +132,10 @@ same WebSocket that issued `prompt.submit` while the call is still in flight.
   replies, while other sessions, and frames that name no session (such as
   `health`, `session.list` or `session.create`), do not wait behind them.
   `session.resume` is queued by `params.id` instead, so resuming the transcript
-  an in-flight `prompt.submit` is still writing waits for that run. A resume
-  of a different id does not.
+  an in-flight `prompt.submit` is still writing waits for that run. That wait
+  is on the server-wide per-session run queue, so a resume from another
+  connection waits too. `latest` and a unique prefix resolve to the transcript
+  id before the wait. A resume of a different id does not.
   Replies from different sessions can therefore interleave; match them by
   JSON-RPC `id`.
   `prompt.abort` is dispatched immediately so it can cancel an in-flight

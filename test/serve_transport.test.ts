@@ -66,8 +66,8 @@ vi.mock("../src/serve/sessions.js", async (import_original) => {
   });
   return {
     ...actual,
-    create_serve_session_store: (dir: string, max_bags?: number) =>
-      wrap_store(actual.create_serve_session_store(dir, max_bags)),
+    create_serve_session_store: (...args: Parameters<typeof actual.create_serve_session_store>) =>
+      wrap_store(actual.create_serve_session_store(...args)),
   };
 });
 

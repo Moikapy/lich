@@ -5,7 +5,7 @@
 import type { Agent, AgentRunResult } from "../agent/agent.js";
 import type { AgentEvent } from "../agent/events.js";
 import { history_after_abort, history_after_run_error, reply_after_abort } from "../agent/loop.js";
-import { create_session_manager } from "../session/manager.js";
+import { create_session_manager, type SessionManager } from "../session/manager.js";
 import type {
   PromptAbortParams,
   PromptAbortResult,
@@ -45,10 +45,11 @@ export interface ServePromptService {
 export function create_serve_prompt_service(
   agent: Agent,
   sessions: ServeSessionStore,
+  /** Shared with the session store so session.resume waits for this queue. */
+  runs: SessionManager = create_session_manager(),
 ): ServePromptService {
   /** session_id → live AbortControllers (one running + any queued). */
   const inflight = new Map<string, Set<AbortController>>();
-  const runs = create_session_manager();
 
   /** Add the controller to the session's set, creating the set on first use. */
   function register_controller(session_id: string, controller: AbortController): void {
