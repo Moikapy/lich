@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { AgentEmitter, type AgentEventBody } from "../src/agent/events.js";
 import type { ChatFn } from "../src/context/compressor.js";
 import {
+  format_tool_result_content,
   history_after_abort,
   history_after_run_error,
   partial_messages_of,
   reply_after_abort,
   run_conversation,
+  tool_message_from_result,
   type LoopDeps,
   type LoopOutcome,
   type ToolRunner,
@@ -504,6 +506,30 @@ describe("run_conversation", () => {
     expect(seen[2]?.[0]?.content).toBe("keep me");
     expect(seen[0]).toHaveLength(2);
     expect(seen[1]).toHaveLength(2);
+  });
+
+  it("stores a defined tool error as failure JSON and leaves error-less output raw", () => {
+    expect(format_tool_result_content({ ok: true, output: "plain" })).toBe("plain");
+    expect(format_tool_result_content({ ok: false, output: "raw failure" })).toBe("raw failure");
+    expect(format_tool_result_content({ ok: true, output: "kept", error: "" })).toBe(
+      JSON.stringify({ ok: false, output: "kept", error: "" }),
+    );
+    expect(tool_message_from_result(
+      { id: "t1", name: "shell", args: {} },
+      { ok: false, output: "raw failure" },
+    )).toEqual({
+      role: "tool",
+      tool_call_id: "t1",
+      name: "shell",
+      content: "raw failure",
+      is_error: true,
+    });
+    const noted = tool_message_from_result(
+      { id: "t2", name: "shell", args: {} },
+      { ok: true, output: "kept", error: "note" },
+    );
+    expect(noted.is_error).toBeUndefined();
+    expect(noted.content).toBe(JSON.stringify({ ok: false, output: "kept", error: "note" }));
   });
 
   it("wraps failing tool results in is_error tool messages", async () => {

@@ -1,9 +1,11 @@
 /**
  * Review M-2 / M-3 / M-8 / M-9 coverage for the MCP client.
  */
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { failed_child, spawn_failure, type LineChild } from "../src/mcp/mcp_child.js";
 import { create_line_queue } from "../src/mcp/mcp_lines.js";
-import type { LineChild } from "../src/mcp/mcp_child.js";
+import { node_line_child } from "../src/mcp/mcp_stdio_node.js";
 import { stdio_pipe } from "../src/mcp/mcp_pipe.js";
 import { MCP_NAME_MAX, MCP_SCHEMA_JSON_MAX, parse_tools } from "../src/mcp/mcp_result.js";
 import { content_text } from "../src/mcp/mcp_content.js";
@@ -168,5 +170,29 @@ describe("mcp metadata bounds (M-9)", () => {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message.length).toBeLessThanOrEqual(4000);
     }
+  });
+});
+
+describe("mcp spawn failures", () => {
+  it("maps ENOENT to a stable message and every other code to spawn failed", () => {
+    expect(spawn_failure("ENOENT")).toBe("mcp command not found");
+    expect(spawn_failure("EACCES")).toBe("mcp spawn failed");
+    expect(spawn_failure(undefined)).toBe("mcp spawn failed");
+  });
+
+  it("reports a missing node command without the path and does not hang the reader", async () => {
+    const missing = path.join("/tmp", "lich-mcp-missing-bin");
+    const child = node_line_child(missing, ["--stdio"]);
+    await expect(child.read_line()).resolves.toBeUndefined();
+    expect(child.failed()).toBe("mcp command not found");
+    child.stop();
+  });
+
+  it("failed_child resolves reads immediately and keeps the spawn message", async () => {
+    const child = failed_child("mcp command not found");
+    await expect(child.read_line()).resolves.toBeUndefined();
+    expect(child.failed()).toBe("mcp command not found");
+    child.write_line("{}\n");
+    child.stop();
   });
 });
