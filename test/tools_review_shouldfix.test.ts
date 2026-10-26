@@ -4,6 +4,7 @@
 import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { grep_files_tool } from "../src/tools/builtin/grep_files.js";
 import { register_builtin_tools } from "../src/tools/builtin/index.js";
 import { reset_test_command_runner, set_test_command_runner } from "../src/tools/builtin/run_tests.js";
 import type { TestCommandRunner } from "../src/tools/builtin/run_tests.js";
@@ -155,17 +156,40 @@ describe("S-8 grep_files ReDoS caps", () => {
 
   it("clamps max_results to the hard ceiling", async () => {
     const work = await make_temp_dir();
-    const lines = Array.from({ length: 50 }, (_, i) => `hit_${i}`).join("\n");
+    const lines = Array.from({ length: 2005 }, (_, index) => `hit_${index}`).join("\n");
     await writeFile(path.join(work, "many.txt"), `${lines}\n`, "utf8");
-    const executor = make_executor(work);
-    const result = await executor.execute("grep_files", {
-      pattern: "hit_",
-      path: "many.txt",
-      max_results: 999999,
-    });
+    const context = { work_dir: work, env: {} };
+    // Call the tool directly: the executor reclamps output at 20000 chars and
+    // would hide both the 2000th hit and the suppression line.
+    const result = await grep_files_tool.execute(
+      { pattern: "hit_", path: "many.txt", max_results: 999999 },
+      context,
+    );
     expect(result.ok).toBe(true);
-    const match_lines = result.output.split("\n").filter((line) => line.includes("hit_"));
-    expect(match_lines.length).toBeLessThanOrEqual(2000);
+    const rows = result.output.split("\n").filter((line) => line.startsWith("many.txt:"));
+    expect(rows).toHaveLength(2000);
+    expect(rows[1999]).toBe("many.txt:2000: hit_1999");
+    expect(result.output.endsWith("(... 1 more matches suppressed)")).toBe(true);
+    const floored = await grep_files_tool.execute(
+      { pattern: "hit_", path: "many.txt", max_results: 2.9 },
+      context,
+    );
+    expect(floored.output.split("\n").filter((line) => line.startsWith("many.txt:"))).toEqual([
+      "many.txt:1: hit_0",
+      "many.txt:2: hit_1",
+    ]);
+    const at_least_one = await grep_files_tool.execute(
+      { pattern: "hit_", path: "many.txt", max_results: 0 },
+      context,
+    );
+    expect(at_least_one.output.split("\n")[0]).toBe("many.txt:1: hit_0");
+    expect(at_least_one.output).not.toContain("many.txt:2:");
+    const negative = await grep_files_tool.execute(
+      { pattern: "hit_", path: "many.txt", max_results: -4 },
+      context,
+    );
+    expect(negative.output.split("\n")[0]).toBe("many.txt:1: hit_0");
+    expect(negative.output).not.toContain("many.txt:2:");
   });
 
   it("matches past column 22 for literal, space, and metachar patterns", async () => {

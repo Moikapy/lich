@@ -269,6 +269,23 @@ describe("openai compat provider", () => {
     expect(body["temperature"]).toBeUndefined();
   });
 
+  it("treats gpt-5 as reasoning and leaves gpt-4o on max_tokens", async () => {
+    const reasoning = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+    const reasoning_provider = new OpenAICompatProvider(openai_config({ model: "gpt-5", fetch_fn: reasoning.fetch_fn }));
+    await reasoning_provider.chat([{ role: "user", content: "hi" }], [], { max_tokens: 64, temperature: 0.4 });
+    const reasoning_body = request_json(reasoning.requests[0]!);
+    expect(reasoning_body["max_completion_tokens"]).toBe(64);
+    expect(reasoning_body["max_tokens"]).toBeUndefined();
+    expect(reasoning_body["temperature"]).toBeUndefined();
+    const classic = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+    const classic_provider = new OpenAICompatProvider(openai_config({ model: "gpt-4o", fetch_fn: classic.fetch_fn }));
+    await classic_provider.chat([{ role: "user", content: "hi" }], [], { max_tokens: 64, temperature: 0.4 });
+    const classic_body = request_json(classic.requests[0]!);
+    expect(classic_body["max_tokens"]).toBe(64);
+    expect(classic_body["max_completion_tokens"]).toBeUndefined();
+    expect(classic_body["temperature"]).toBe(0.4);
+  });
+
   it("maps 413 and tight context overflow, not bare token mentions", async () => {
     const overflow_mock = mock_fetch(() => ({
       status: 400,
@@ -564,6 +581,22 @@ describe("anthropic provider", () => {
     const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
     expect(result.message.tool_calls).toBeUndefined();
     expect(result.message.content).toContain("[unparseable tool arguments]");
+  });
+
+  it("clamps temperature to 1 when send_temperature is on", async () => {
+    const { fetch_fn, requests } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn, send_temperature: true }));
+    await provider.chat([{ role: "user", content: "hi" }], [], { temperature: 1.7, max_tokens: 32 });
+    expect(request_json(requests[0]!)["temperature"]).toBe(1);
+    await provider.chat([{ role: "user", content: "hi" }], [], { temperature: 0, max_tokens: 32 });
+    expect(request_json(requests[1]!)["temperature"]).toBe(0);
   });
 
   it("defaults max_tokens to 16384 and omits temperature unless send_temperature", async () => {

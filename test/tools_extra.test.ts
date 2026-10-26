@@ -398,6 +398,21 @@ describe("http_request", () => {
 });
 
 describe("process_list", () => {
+  it("caps the snapshot at max_results and still reports that more processes exist", async () => {
+    const capped = await executor.execute("process_list", { max_results: 1 });
+    expect(capped.ok).toBe(true);
+    const lines = capped.output.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^\d+\t/);
+    expect(lines[1]).toMatch(/^\(\.\.\. \d+ more processes suppressed\)$/);
+    const floored = await executor.execute("process_list", { max_results: 2.9 });
+    const floored_rows = floored.output.split("\n").filter((line) => /^\d+\t/.test(line));
+    expect(floored_rows).toHaveLength(2);
+    expect(floored.output).toMatch(/more processes suppressed/);
+    const at_least_one = await executor.execute("process_list", { max_results: -3 });
+    expect(at_least_one.output.split("\n").filter((line) => /^\d+\t/.test(line))).toHaveLength(1);
+  });
+
   it("lists real processes and honors the filter", async () => {
     const listing = await executor.execute("process_list", {});
     expect(listing.ok).toBe(true);
@@ -421,6 +436,22 @@ describe("process_list", () => {
 });
 
 describe("disk_usage", () => {
+  it("keeps the full total when the entry list is capped", async () => {
+    await write_temp("du-cap/a.txt", "a".repeat(10));
+    await write_temp("du-cap/b.txt", "b".repeat(100));
+    await write_temp("du-cap/c.txt", "c".repeat(1000));
+    const result = await executor.execute("disk_usage", { path: "du-cap", max_entries: 1 });
+    expect(result.ok).toBe(true);
+    const lines = result.output.split("\n");
+    expect(lines[0]).toBe("1000\tc.txt");
+    expect(result.output).toContain("(... 2 more entries suppressed)");
+    expect(result.output).not.toContain("a.txt");
+    expect(lines[lines.length - 1]).toBe("TOTAL\t1110");
+    const floored = await executor.execute("disk_usage", { path: "du-cap", max_entries: 0 });
+    expect(floored.output.split("\n")[0]).toBe("1000\tc.txt");
+    expect(floored.output).toContain("TOTAL\t1110");
+  });
+
   it("sorts du sizes descending with a total and blocks path escapes", async () => {
     await write_temp("du/small.txt", "x");
     await write_temp("du/big.txt", "y".repeat(1024));
