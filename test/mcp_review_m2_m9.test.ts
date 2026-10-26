@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { create_line_queue } from "../src/mcp/mcp_lines.js";
 import type { LineChild } from "../src/mcp/mcp_child.js";
+import { node_line_child } from "../src/mcp/mcp_stdio_node.js";
 import { stdio_pipe } from "../src/mcp/mcp_pipe.js";
 import { MCP_NAME_MAX, MCP_SCHEMA_JSON_MAX, parse_tools } from "../src/mcp/mcp_result.js";
 import { content_text } from "../src/mcp/mcp_content.js";
@@ -157,6 +158,44 @@ describe("mcp metadata bounds (M-9)", () => {
     queue.close();
     await expect(waiting).resolves.toBeUndefined();
     await expect(queue.read()).resolves.toBeUndefined();
+  });
+
+  it("keeps lines already buffered when the pipe closes", async () => {
+    const queue = create_line_queue();
+    queue.push("kept");
+    queue.push("also");
+    queue.close();
+    await expect(queue.read()).resolves.toBe("kept");
+    await expect(queue.read()).resolves.toBe("also");
+    await expect(queue.read()).resolves.toBeUndefined();
+  });
+
+  it("overlays an mcp entry env onto the child without dropping PATH", async () => {
+    const saved = process.env["LICH_MCP_ENV_PROBE"];
+    process.env["LICH_MCP_ENV_PROBE"] = "from-parent";
+    const child = node_line_child(
+      process.execPath,
+      [
+        "-e",
+        "console.log(JSON.stringify({ probe: process.env.LICH_MCP_ENV_PROBE, extra: process.env.LICH_MCP_ENV_EXTRA, path: typeof process.env.PATH === 'string' && process.env.PATH.length > 0 }))",
+      ],
+      { LICH_MCP_ENV_PROBE: "from-entry", LICH_MCP_ENV_EXTRA: "only-entry" },
+    );
+    try {
+      const line = await child.read_line();
+      expect(JSON.parse(line ?? "")).toEqual({
+        probe: "from-entry",
+        extra: "only-entry",
+        path: true,
+      });
+    } finally {
+      child.stop();
+      if (saved === undefined) {
+        delete process.env["LICH_MCP_ENV_PROBE"];
+      } else {
+        process.env["LICH_MCP_ENV_PROBE"] = saved;
+      }
+    }
   });
 
   it("clamps tool error text from content_text", () => {
