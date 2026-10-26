@@ -753,6 +753,74 @@ describe("serve prompt rpc", () => {
     expect(JSON.stringify(history_after)).not.toContain("clear-me");
   });
 
+  it("keeps the earlier turn when a second submit is queued on the same session", async () => {
+    const work_dir = await make_temp_dir("serve-prompt-queued-history");
+    const session_dir = path.join(work_dir, "sessions");
+    let fetch_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetch_started = resolve;
+    });
+    let release_first!: () => void;
+    const first_gate = new Promise<void>((resolve) => {
+      release_first = resolve;
+    });
+    const request_bodies: string[] = [];
+    const replies = ["reply-one", "reply-two"];
+    let fetch_calls = 0;
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      fetch_calls += 1;
+      request_bodies.push(String(init?.body ?? ""));
+      if (fetch_calls === 1) {
+        fetch_started();
+        await first_gate;
+      }
+      return new Response(
+        JSON.stringify(
+          completion_body({ role: "assistant", content: replies[Math.min(fetch_calls, 2) - 1] }, "stop"),
+        ),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const sessions = create_serve_session_store(session_dir);
+    const prompts = create_serve_prompt_service(agent, sessions);
+    const context: ServeRpcContext = { version: "9.9.9", sessions, prompts };
+
+    const created = (await rpc(context, "session.create", { source: "test" }, 1)).result as {
+      session_id: string;
+    };
+    const first_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "turn-one" },
+      2,
+    );
+    await started;
+    const second_promise = rpc(
+      context,
+      "prompt.submit",
+      { session_id: created.session_id, text: "turn-two" },
+      3,
+    );
+    release_first();
+    const first = (await first_promise).result as { reply: string };
+    const second = (await second_promise).result as { reply: string };
+    expect(first.reply).toBe("reply-one");
+    expect(second.reply).toBe("reply-two");
+    expect(request_bodies).toHaveLength(2);
+    expect(request_bodies[1]).toContain("turn-one");
+    expect(request_bodies[1]).toContain("reply-one");
+    expect(request_bodies[1]).toContain("turn-two");
+    const history = sessions.get(created.session_id)?.history ?? [];
+    expect(history.map((message) => message.content)).toEqual([
+      expect.any(String),
+      "turn-one",
+      "reply-one",
+      "turn-two",
+      "reply-two",
+    ]);
+  });
+
   it("keeps an in-flight session when newer creates overflow the bag cap", async () => {
     const work_dir = await make_temp_dir("serve-prompt-evict-race");
     const session_dir = path.join(work_dir, "sessions");

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `lich serve`: a second `prompt.submit` for a session that already has a turn
+  in flight waits, then continues from that turn's history. It used to snapshot
+  history when the call was queued, so the later write replaced the earlier turn.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
