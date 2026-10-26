@@ -74,14 +74,12 @@ export function create_serve_prompt_service(
 
   return {
     submit: (params, notify, prepared) => {
-      const bag_before = sessions.get(params.session_id);
-      if (bag_before === undefined) {
+      if (sessions.get(params.session_id) === undefined) {
         if (prepared !== undefined) {
           unregister_controller(params.session_id, prepared);
         }
         throw new Error(`session not found: ${params.session_id}`);
       }
-      const epoch_before = bag_before.epoch;
 
       // A frame-queue prepare already registered this controller. Otherwise
       // register before the run-queue wait so prompt.abort can cancel a queued run.
@@ -107,6 +105,16 @@ export function create_serve_prompt_service(
             stopped_reason: "aborted" as const,
           };
         }
+
+        // submit() can be called again while an earlier turn is still running
+        // (another connection). Copying history at call time then overwrites
+        // the bag with that stale copy. Read it when this run starts.
+        const bag_before = sessions.get(params.session_id);
+        if (bag_before === undefined) {
+          unregister_controller(params.session_id, controller);
+          throw new Error(`session not found: ${params.session_id}`);
+        }
+        const epoch_before = bag_before.epoch;
 
         try {
           const result = await agent.run({
