@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, rmdir, unlink, writeFile } from "node:fs/promi
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import { register_builtin_tools } from "../src/tools/builtin/index.js";
-import { docs_search_tool, reset_docs_search_cache } from "../src/tools/builtin/docs_search.js";
+import { docs_search_tool, reset_docs_search_cache, score_sections } from "../src/tools/builtin/docs_search.js";
 import { DOCS_UNAVAILABLE, docs_read_tool, reset_docs_cache, set_docs_root_resolver } from "../src/tools/builtin/docs_read.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import type { ToolContext, ToolResult } from "../src/tools/types.js";
@@ -273,5 +273,54 @@ describe("docs_search", () => {
     const result = await docs_search_tool.execute({ query: "gateway" }, context);
     expect(result.ok).toBe(false);
     expect(result.error).toBe(DOCS_UNAVAILABLE);
+  });
+
+  it("does not read .vitepress or files past walk depth 4", async () => {
+    const root = path.join(tmp_root, "walk-docs");
+    await mkdir(path.join(root, ".vitepress"), { recursive: true });
+    await mkdir(path.join(root, "deep", "a", "b", "c", "d"), { recursive: true });
+    await writeFile(path.join(root, "index.md"), "# index\n");
+    await writeFile(path.join(root, ".vitepress", "hidden.md"), "# secret zqxvite\n");
+    await writeFile(path.join(root, "deep", "a", "b", "c", "kept.md"), "# kept zqxkept\n");
+    await writeFile(path.join(root, "deep", "a", "b", "c", "d", "dropped.md"), "# dropped zqxdrop\n");
+    await writeFile(path.join(root, "notes.txt"), "not markdown zqxtxt\n");
+    const context: ToolContext = { work_dir: empty_dir, env: { LICH_DOCS_DIR: root } };
+    const kept = await docs_read_tool.execute({ path: "deep/a/b/c/kept.md" }, context);
+    expect_ok(kept, "zqxkept");
+    const dropped = await docs_read_tool.execute({ path: "deep/a/b/c/d/dropped.md" }, context);
+    expect(dropped.ok).toBe(false);
+    expect(dropped.error).toContain("not_found: deep/a/b/c/d/dropped.md");
+    expect(dropped.error).not.toContain("zqxdrop");
+    const dropped_available = dropped.error?.split("(available: ")[1] ?? "";
+    expect(dropped_available).not.toContain("dropped.md");
+    const hidden = await docs_read_tool.execute({ path: ".vitepress/hidden.md" }, context);
+    expect(hidden.ok).toBe(false);
+    expect(hidden.error).toContain("not_found: .vitepress/hidden.md");
+    expect(hidden.error).not.toContain("zqxvite");
+    const hidden_available = hidden.error?.split("(available: ")[1] ?? "";
+    expect(hidden_available).not.toContain("hidden.md");
+    const hidden_search = await docs_search_tool.execute({ query: "zqxvite" }, context);
+    expect_ok(hidden_search, "no results for: zqxvite");
+    const dropped_search = await docs_search_tool.execute({ query: "zqxdrop" }, context);
+    expect_ok(dropped_search, "no results for: zqxdrop");
+    const kept_search = await docs_search_tool.execute({ query: "zqxkept" }, context);
+    expect_ok(kept_search, "deep/a/b/c/kept.md");
+  });
+
+  it("caps each body term at 5 hits and ignores stop-word-only queries", () => {
+    const stuffed = {
+      rel_path: "notes.md",
+      heading: "# notes",
+      body: Array.from({ length: 9 }, () => "widget").join(" "),
+    };
+    const titled = { rel_path: "other.md", heading: "## widget", body: "widget" };
+    const scored = score_sections("widget", [stuffed, titled]);
+    // Nine body hits would be 19 and 14 if the per-term cap of 5 were removed (phrase bonus is 10).
+    expect(scored.map((section) => section.score)).toEqual([15, 14]);
+    expect(scored[0]?.rel_path).toBe("notes.md");
+    const stop_only = score_sections("how to", [
+      { rel_path: "guide.md", heading: "# how to", body: "how to install the library" },
+    ]);
+    expect(stop_only).toEqual([]);
   });
 });

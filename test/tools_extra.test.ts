@@ -298,8 +298,67 @@ describe("web_search", () => {
     const thrown = await executor.execute("web_search", { query: "anything" });
     expect(thrown.ok).toBe(false);
     expect(thrown.error?.startsWith("search_failed:")).toBe(true);
+    stub_fetch(vi.fn(async () => {
+      throw "boom";
+    }));
+    const bare = await executor.execute("web_search", { query: "anything" });
+    expect(bare.ok).toBe(false);
+    expect(bare.error).toBe("search_failed: boom");
+  });
+
+  it("encodes the query and clamps the result count to 1..20", async () => {
+    const html = ddg_hits(21);
+    const fetch_mock = vi.fn(async () => fake_response(html));
+    stub_fetch(fetch_mock);
+    const encoded = await executor.execute("web_search", { query: "a&b=c q", max_results: 1 });
+    expect(encoded.ok).toBe(true);
+    const called = fetch_mock.mock.calls[0] as unknown as [string] | undefined;
+    expect(called?.[0]).toBe("https://html.duckduckgo.com/html/?q=a%26b%3Dc%20q");
+    expect(encoded.output).toContain("1. Hit 00");
+    expect(encoded.output).not.toContain("2. Hit 01");
+    const two = await executor.execute("web_search", { query: "q", max_results: 2.9 });
+    expect(two.output).toContain("2. Hit 01");
+    expect(two.output).not.toContain("3. Hit 02");
+    const floor = await executor.execute("web_search", { query: "q", max_results: 0 });
+    expect(floor.output).toContain("1. Hit 00");
+    expect(floor.output).not.toContain("2. Hit 01");
+    const capped = await executor.execute("web_search", { query: "q", max_results: 100 });
+    expect(capped.output).toContain("20. Hit 19");
+    expect(capped.output).not.toContain("Hit 20");
+  });
+
+  it("unwraps both redirect shapes and keeps a broken percent escape", async () => {
+    const html = [
+      "<html><body>",
+      '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%ZZ">bad</a>',
+      '<a class="result__a" href="//duckduckgo.com/l/?rut=only">noudg</a>',
+      '<a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fa">slash</a>',
+      '<a class="result__a" href="https://example.com/x">&#39;quoted&#39; <b>Bold</b></a>',
+      "</body></html>",
+    ].join("\n");
+    stub_fetch(vi.fn(async () => fake_response(html)));
+    const result = await executor.execute("web_search", { query: "edges" });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("1. bad");
+    expect(result.output).toContain("   https%ZZ");
+    expect(result.output).toContain("2. noudg");
+    expect(result.output).toContain("   //duckduckgo.com/l/?rut=only");
+    expect(result.output).toContain("3. slash");
+    expect(result.output).toContain("   https://example.com/a");
+    expect(result.output).toContain("4. 'quoted' Bold");
+    expect(result.output).toContain("   https://example.com/x");
   });
 });
+
+function ddg_hits(count: number): string {
+  const lines = ["<html><body>"];
+  for (let index = 0; index < count; index += 1) {
+    const title = `Hit ${String(index).padStart(2, "0")}`;
+    lines.push(`<a class="result__a" href="https://example.com/${index}">${title}</a>`);
+  }
+  lines.push("</body></html>");
+  return lines.join("\n");
+}
 
 describe("http_request", () => {
   it("passes method, headers, and body through; renders status/content-type/body", async () => {
