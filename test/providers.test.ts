@@ -650,6 +650,27 @@ describe("anthropic provider", () => {
     expect(as_array(assistant_turn["content"])[0]).toEqual(thinking_block);
   });
 
+  it("replays a redacted_thinking block verbatim and does not treat it as text", async () => {
+    const redacted_block = { type: "redacted_thinking", data: "opaque-blob" };
+    const { fetch_fn, requests } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        content: [redacted_block, { type: "text", text: "done" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], []);
+    expect(result.message.content).toBe("done");
+    expect(result.message.content).not.toContain("opaque-blob");
+    expect(result.message.provider_content?.[0]).toEqual(redacted_block);
+    await provider.chat([{ role: "user", content: "go" }, result.message, { role: "user", content: "again" }], []);
+    const replay = as_array(request_json(requests[1]!)["messages"]);
+    const assistant_turn = as_record(replay[1]);
+    expect(as_array(assistant_turn["content"])[0]).toEqual(redacted_block);
+  });
+
   it("drops whitespace-only text from provider_content while keeping thinking", async () => {
     const thinking_block = {
       type: "thinking",
