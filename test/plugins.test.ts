@@ -135,6 +135,21 @@ describe("load_plugins", () => {
     await rm(no_export, { force: true });
   });
 
+  it("freezes a cloned cycle of plugin settings and leaves the caller mutable", async () => {
+    const settings: Record<string, unknown> = { ok: true };
+    settings["self"] = settings;
+    const { plugins, errors } = await load_plugins([{ path: "named.plugin.ts", settings }], FIXTURES);
+    expect(errors).toEqual([]);
+    const loaded = plugins[0]?.settings as { ok: boolean; self: { ok: boolean; self: unknown } };
+    expect(loaded.ok).toBe(true);
+    expect(loaded.self.self).toBe(loaded.self);
+    expect(Object.isFrozen(loaded)).toBe(true);
+    expect(Object.isFrozen(loaded.self)).toBe(true);
+    settings["ok"] = false;
+    expect(loaded.ok).toBe(true);
+    expect(loaded.self.ok).toBe(true);
+  });
+
   it("refuses non-module entries before import and still loads the rest", async () => {
     const { plugins, errors } = await load_plugins(
       ["notes.txt", "good.plugin.ts", "payload.json"],

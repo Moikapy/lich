@@ -289,6 +289,23 @@ describe("S-4 terminal env scrub", () => {
     expect(scrubbed.LICH_TELEGRAM_BOT_TOKEN).toBeUndefined();
     expect(scrubbed.LICH_TWITCH_OAUTH_TOKEN).toBeUndefined();
   });
+
+  it("drops pattern-matched secrets, skips unset values, and keeps an empty string", () => {
+    const scrubbed = scrub_spawn_env(
+      { PATH: "/usr/bin", OPTIONAL: undefined, EMPTY: "", Api_Key: "mixed" },
+      { GITHUB_TOKEN: "ghp-test", AWS_SECRET_ACCESS_KEY: "aws-test", VISIBLE: "kept" },
+    );
+    expect(scrubbed.PATH).toBe("/usr/bin");
+    expect(scrubbed.EMPTY).toBe("");
+    expect(scrubbed.VISIBLE).toBe("kept");
+    expect(scrubbed.OPTIONAL).toBeUndefined();
+    expect(scrubbed.Api_Key).toBeUndefined();
+    expect(scrubbed.GITHUB_TOKEN).toBeUndefined();
+    expect(scrubbed.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(Object.values(scrubbed).join(" ")).not.toContain("ghp-test");
+    expect(Object.values(scrubbed).join(" ")).not.toContain("aws-test");
+    expect(Object.values(scrubbed).join(" ")).not.toContain("mixed");
+  });
 });
 
 describe("S-5 run_tests filter gate", () => {

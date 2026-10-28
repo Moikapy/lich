@@ -200,6 +200,83 @@ describe("lich mcp", () => {
     expect(await readFile(file, "utf8")).toBe(before);
   });
 
+  it("keeps a sibling server and its secret when one entry is enabled or removed", async () => {
+    const work_dir = await temp_dir("mcp-edit-sibling");
+    const other_secret = "other-secret-token";
+    await write_config(work_dir, {
+      ...base_config(),
+      mcp_servers: {
+        lab: {
+          enabled: false,
+          command: "echo",
+          args: ["a"],
+          env: { LICH_SECRET: SECRET },
+        },
+        notes: {
+          enabled: true,
+          url: "http://127.0.0.1:9/mcp",
+          env: { OTHER_TOKEN: other_secret },
+        },
+      },
+    });
+    const file = path.join(work_dir, ".lich", "config.json");
+    const before = await readFile(file, "utf8");
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "enable", "Lab"])).rejects.toThrow(/snake_case/);
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "disable"])).rejects.toThrow(/snake_case/);
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "remove", "missing"])).rejects.toThrow(/not found/);
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "add", "extra", "--arg"])).rejects.toThrow(/--arg requires a value/);
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "add", "extra", "--command"])).rejects.toThrow(/--command requires a value/);
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "extra", "--url", "--command",
+    ])).rejects.toThrow(/--url requires a value/);
+    expect(await readFile(file, "utf8")).toBe(before);
+
+    const enabled = await capture(["--work-dir", work_dir, "mcp", "enable", "lab"]);
+    expect(enabled.out).toBe("enabled lab\n");
+    expect(enabled.out).not.toContain(SECRET);
+    expect(enabled.out).not.toContain(other_secret);
+    const saved = await read_config(work_dir);
+    const servers = saved.mcp_servers as {
+      lab: { enabled: boolean; command: string; args: string[]; env: { LICH_SECRET: string } };
+      notes: { enabled: boolean; url: string; env: { OTHER_TOKEN: string } };
+    };
+    expect(servers.lab).toEqual({
+      enabled: true,
+      command: "echo",
+      args: ["a"],
+      env: { LICH_SECRET: SECRET },
+    });
+    expect(servers.notes).toEqual({
+      enabled: true,
+      url: "http://127.0.0.1:9/mcp",
+      env: { OTHER_TOKEN: other_secret },
+    });
+    const removed = await capture(["--work-dir", work_dir, "mcp", "remove", "notes"]);
+    expect(removed.out).toBe("removed notes\n");
+    expect(removed.out).not.toContain(SECRET);
+    expect(removed.out).not.toContain(other_secret);
+    const after = await read_config(work_dir);
+    expect(after.mcp_servers).toEqual({
+      lab: {
+        enabled: true,
+        command: "echo",
+        args: ["a"],
+        env: { LICH_SECRET: SECRET },
+      },
+    });
+    expect(JSON.stringify(after)).toContain(SECRET);
+    expect(JSON.stringify(after)).not.toContain(other_secret);
+  });
+
+  it("refuses to enable a non-object mcp entry and leaves the file", async () => {
+    const work_dir = await temp_dir("mcp-edit-shape");
+    await write_config(work_dir, { ...base_config(), mcp_servers: { lab: "echo" } });
+    const file = path.join(work_dir, ".lich", "config.json");
+    const before = await readFile(file, "utf8");
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "enable", "lab"])).rejects.toThrow(/is not an object/);
+    expect(await readFile(file, "utf8")).toBe(before);
+  });
+
   it("enables, disables, and removes one entry without logging env", async () => {
     const work_dir = await temp_dir("mcp-edit");
     await write_config(work_dir, {

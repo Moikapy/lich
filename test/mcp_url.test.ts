@@ -23,4 +23,13 @@ describe("refuse_http_url", () => {
     expect(refuse_http_url("ws://127.0.0.1/mcp")).toBe("refused mcp url");
     expect(refuse_http_url("not a url")).toBe("refused mcp url");
   });
+
+  it("allows only the exact localhost and 127.0.0.1 hostnames", () => {
+    expect(refuse_http_url("http://LOCALHOST/mcp")).toBeUndefined();
+    expect(refuse_http_url("http://127.0.0.2/mcp")).toBe("refused mcp url; loopback only");
+    expect(refuse_http_url("http://foo.localhost/mcp")).toBe("refused mcp url; loopback only");
+    expect(refuse_http_url("http://localhost./mcp")).toBe("refused mcp url; loopback only");
+    expect(refuse_http_url("http://localhost%2e/mcp")).toBe("refused mcp url; loopback only");
+    expect(refuse_http_url("http://:secret@127.0.0.1/mcp")).toBe("refused mcp url credentials");
+  });
 });

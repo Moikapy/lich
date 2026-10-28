@@ -623,4 +623,23 @@ describe("grep_files", () => {
     expect(bad.ok).toBe(false);
     expect(bad.error?.includes("invalid_regex")).toBe(true);
   });
+
+  it("applies a prefix-and-suffix glob to a directory and to one file", async () => {
+    await write_temp(tmp_root, "globbed/note.md", "needle\n");
+    await write_temp(tmp_root, "globbed/notes.md", "needle\n");
+    await write_temp(tmp_root, "globbed/note.md.bak", "needle\n");
+    await write_temp(tmp_root, "globbed/other.md", "needle\n");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const matched = await executor.execute("grep_files", { pattern: "needle", path: "globbed", glob: "note*.md" });
+    expect(matched.ok).toBe(true);
+    expect(matched.output).toContain("note.md:");
+    expect(matched.output).toContain("notes.md:");
+    expect(matched.output).not.toContain("note.md.bak");
+    expect(matched.output).not.toContain("other.md");
+    const missed = await executor.execute("grep_files", { pattern: "needle", path: "globbed/other.md", glob: "note*.md" });
+    expect(missed.ok).toBe(true);
+    expect(missed.output).toBe("");
+  });
 });

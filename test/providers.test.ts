@@ -259,6 +259,56 @@ describe("openai compat provider", () => {
     expect(result.message.content).toContain("[truncated tool call omitted]");
   });
 
+  it("keeps a parsed object tool call and drops null or numeric arguments", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                { id: "bad-null", type: "function", function: { name: "list_dir", arguments: "null" } },
+                { id: "bad-num", type: "function", function: { name: "list_dir", arguments: "42" } },
+                { id: "ok", type: "function", function: { name: "list_dir", arguments: '{"path":"/ok"}' } },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+      },
+    }));
+    const provider = new OpenAICompatProvider(openai_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.tool_calls).toEqual([{ id: "ok", name: "list_dir", args: { path: "/ok" } }]);
+    expect(result.message.content).toBe("[unparseable tool arguments]\n[unparseable tool arguments]");
+  });
+
+  it("treats only anchored reasoning model names as completion-token models", async () => {
+    const cases = [
+      { model: "O1-preview", completion: true },
+      { model: "gpt-5-mini", completion: true },
+      { model: "notgpt-5", completion: false },
+      { model: "gpt-4.1", completion: false },
+    ];
+    for (const entry of cases) {
+      const { fetch_fn, requests } = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      const provider = new OpenAICompatProvider(openai_config({ model: entry.model, fetch_fn }));
+      await provider.chat([{ role: "user", content: "hi" }], [], { max_tokens: 128, temperature: 0.4 });
+      const body = request_json(requests[0]!);
+      if (entry.completion === true) {
+        expect(body["max_completion_tokens"], entry.model).toBe(128);
+        expect(body["max_tokens"], entry.model).toBeUndefined();
+        expect(body["temperature"], entry.model).toBeUndefined();
+      } else {
+        expect(body["max_tokens"], entry.model).toBe(128);
+        expect(body["temperature"], entry.model).toBe(0.4);
+        expect(body["max_completion_tokens"], entry.model).toBeUndefined();
+      }
+    }
+  });
+
   it("sends max_completion_tokens for reasoning models", async () => {
     const { fetch_fn, requests } = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
     const provider = new OpenAICompatProvider(openai_config({ model: "o3-mini", fetch_fn }));
@@ -504,6 +554,24 @@ describe("anthropic provider", () => {
       { role: "assistant", content: [{ type: "text", text: "answer" }] },
       { role: "user", content: [{ type: "text", text: "again" }] },
     ]);
+  });
+
+  it("drops a tool_use whose input is not an object and keeps a sibling call", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        content: [
+          { type: "tool_use", id: "bad-null", name: "list_dir", input: null },
+          { type: "tool_use", id: "bad-num", name: "list_dir", input: 42 },
+          { type: "tool_use", id: "ok", name: "list_dir", input: { path: "/ok" } },
+        ],
+        stop_reason: "tool_use",
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.tool_calls).toEqual([{ id: "ok", name: "list_dir", args: { path: "/ok" } }]);
+    expect(result.message.content).toBe("[unparseable tool arguments]\n[unparseable tool arguments]");
   });
 
   it("parses text plus tool_use blocks and maps usage and stop reasons", async () => {
