@@ -256,6 +256,20 @@ describe("lich init and bare lich", () => {
     expect(provider?.["base_url"]).toBe("http://gpu-box:11434");
   });
 
+  it("applies a positive --max-turns and rejects a bad value before the tui", async () => {
+    const dir = make_temp_dir("cli-max-turns");
+    write_lich_config(dir, {
+      providers: [{ kind: "ollama", name: "main", model: "llama" }],
+    });
+    tui_run.configs = [];
+    await expect(run_cli(["tui", "--work-dir", dir, "--max-turns", "0"])).rejects.toThrow(/positive integer/);
+    await expect(run_cli(["tui", "--work-dir", dir, "--max-turns", "2.5"])).rejects.toThrow(/positive integer/);
+    await expect(run_cli(["tui", "--work-dir", dir, "--max-turns", "--model"])).rejects.toThrow(/requires a value/);
+    expect(tui_run.configs).toEqual([]);
+    expect(await run_cli(["tui", "--work-dir", dir, "--max-turns", "4"])).toBe(0);
+    expect(tui_run.configs[0]?.max_turns).toBe(4);
+  });
+
   it("drops api_key_env when switching anthropic to ollama", async () => {
     const dir = make_temp_dir("init-kind-to-ollama");
     write_lich_config(dir, {

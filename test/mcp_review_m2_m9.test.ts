@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { create_line_queue } from "../src/mcp/mcp_lines.js";
 import type { LineChild } from "../src/mcp/mcp_child.js";
 import { stdio_pipe } from "../src/mcp/mcp_pipe.js";
-import { MCP_NAME_MAX, MCP_SCHEMA_JSON_MAX, parse_tools } from "../src/mcp/mcp_result.js";
+import { MCP_DESC_MAX, MCP_NAME_MAX, MCP_SCHEMA_JSON_MAX, parse_tools } from "../src/mcp/mcp_result.js";
 import { content_text } from "../src/mcp/mcp_content.js";
 
 function scripted_child(replies: Map<number, unknown>): LineChild {
@@ -136,6 +136,45 @@ describe("mcp metadata bounds (M-9)", () => {
   it("rejects a tools/list body that is not an object with a tools array", () => {
     expect(() => parse_tools(null)).toThrow(/mcp tools\/list rejected/);
     expect(() => parse_tools({ tools: {} })).toThrow(/mcp tools\/list rejected/);
+  });
+
+  it("keeps a name and description at the cap and drops a circular or array schema", () => {
+    const exact_name = "n".repeat(MCP_NAME_MAX);
+    const exact_desc = "d".repeat(MCP_DESC_MAX);
+    const over_desc = `${exact_desc}Z`;
+    const circular: Record<string, unknown> = { type: "object" };
+    circular["self"] = circular;
+    const tools = parse_tools({
+      tools: [
+        { name: exact_name, description: over_desc, inputSchema: circular },
+        { name: "listed", description: exact_desc, inputSchema: ["path"] },
+        {
+          name: "loose",
+          inputSchema: { type: "object", additionalProperties: "false", properties: null, required: "path" },
+        },
+      ],
+    });
+    expect(tools.map((tool) => tool.name)).toEqual([exact_name, "listed", "loose"]);
+    expect(tools[0]?.description).toBe(exact_desc);
+    expect(tools[0]?.description.endsWith("Z")).toBe(false);
+    expect(tools[1]?.description).toBe(exact_desc);
+    expect(tools[0]?.parameters).toEqual({ type: "object" });
+    expect(tools[1]?.parameters).toEqual({ type: "object" });
+    expect(tools[2]?.parameters).toEqual({ type: "object" });
+    expect(tools[2]?.description).toBe("loose");
+  });
+
+  it("does not treat a non-boolean isError as a tool failure", () => {
+    expect(content_text({ isError: "true", content: [{ type: "text", text: "kept" }] })).toBe("kept");
+    expect(() => content_text({ isError: true, content: [{ type: "resource" }] })).toThrow("mcp tool failed");
+    const exact = "e".repeat(4000);
+    expect(() => content_text({ isError: true, content: [{ type: "text", text: `${exact}Z` }] })).toThrow(Error);
+    try {
+      content_text({ isError: true, content: [{ type: "text", text: `${exact}Z` }] });
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(exact);
+    }
   });
 
   it("omits images and names an empty tool error", () => {

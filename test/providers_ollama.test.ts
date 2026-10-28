@@ -279,6 +279,29 @@ describe("ollama provider", () => {
     expect(result.message.content).toBe("working");
   });
 
+  it("keeps an object tool call and drops null or numeric arguments", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: ok_body({
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { function: { name: "list_dir", arguments: "null" } },
+            { function: { name: "list_dir", arguments: 42 } },
+            { function: { name: "list_dir", arguments: { path: "/ok" } } },
+          ],
+        },
+      }),
+    }));
+    const provider = new OllamaProvider(ollama_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.tool_calls).toHaveLength(1);
+    expect(result.message.tool_calls?.[0]?.name).toBe("list_dir");
+    expect(result.message.tool_calls?.[0]?.args).toEqual({ path: "/ok" });
+    expect(result.message.content).toBe("[unparseable tool arguments]\n[unparseable tool arguments]");
+  });
+
   it("omits executable tool calls on unparseable string arguments", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,
