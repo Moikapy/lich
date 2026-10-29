@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- TUI `/resume` continues on a new transcript. The launch file is already
+  seeded, so another turn on it saved only the new line and dropped the
+  history just loaded into the agent.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).

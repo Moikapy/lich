@@ -4,8 +4,9 @@
 import path from "node:path";
 import type { Message } from "../providers/types.js";
 import { resolve_session_path } from "../session/resolve.js";
-import { read_session_messages } from "../session/store.js";
+import { open_session, read_session_messages, type SessionHandle } from "../session/store.js";
 import { is_enoent } from "../util/fs.js";
+import { logger } from "../util/log.js";
 import type { ThemeSpec } from "../util/lore.js";
 import { error_notice_block, resume_session_view, type HistoryBlock } from "./state.js";
 
@@ -26,6 +27,21 @@ export async function read_transcript_or_not_found(file_path: string): Promise<M
       throw new Error("session not found (transcript deleted)");
     }
     throw error;
+  }
+}
+
+/**
+ * New transcript for turns after an in-TUI `/resume`.
+ * The launch handle is seeded on the first message, and a seeded handle's
+ * next `recorder.seed` appends only the new user line. Reusing it would
+ * leave the loaded history out of the file the next turn writes.
+ */
+export async function open_resume_continuation(session_dir: string): Promise<SessionHandle | undefined> {
+  try {
+    return await open_session(session_dir, "tui");
+  } catch (error) {
+    logger.warn("session persistence failed; continuing without transcript", error);
+    return undefined;
   }
 }
 

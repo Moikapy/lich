@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   apply_event,
@@ -30,7 +30,9 @@ import {
   type HistoryBlock,
   type UiState,
 } from "../src/tui/state.js";
-import { load_resume_view, read_transcript_or_not_found } from "../src/tui/load_resume.js";
+import { load_resume_view, open_resume_continuation, read_transcript_or_not_found } from "../src/tui/load_resume.js";
+import { create_session_recorder } from "../src/session/recorder.js";
+import { open_session } from "../src/session/store.js";
 import type { AgentRunResult } from "../src/agent/agent.js";
 import { LICH_THEME } from "../src/util/lore.js";
 import type { LoopOutcome } from "../src/agent/loop.js";
@@ -381,6 +383,39 @@ describe("load_resume_view", () => {
     );
     await writeFile(path.join(dir, `${id}.jsonl`), `${lines.join("\n")}\n`, "utf8");
   }
+
+  it("stores resumed history on a new transcript, not the seeded launch file", async () => {
+    const dir = await make_session_dir();
+    const launch = await open_session(dir, "tui");
+    const first = create_session_recorder(launch);
+    await first.seed({ input: "hello", history: [], system_prompt: "sys", owned: false });
+    await first.finish("final", { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+
+    const resumed: Message[] = [
+      { role: "user", content: "old-question" },
+      { role: "assistant", content: "old-answer" },
+    ];
+    const reused = create_session_recorder(launch);
+    await reused.seed({ input: "follow-up", history: resumed, system_prompt: "sys", owned: false });
+    await reused.finish("final", { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+    const launch_raw = await readFile(launch.path, "utf8");
+    expect(launch_raw).not.toContain("old-question");
+    expect(launch_raw).toContain("follow-up");
+
+    const continuation = await open_resume_continuation(dir);
+    expect(continuation).toBeDefined();
+    if (continuation === undefined) {
+      return;
+    }
+    expect(continuation.id).not.toBe(launch.id);
+    const next = create_session_recorder(continuation);
+    await next.seed({ input: "follow-up", history: resumed, system_prompt: "sys", owned: false });
+    await next.finish("final", { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+    const continued = await readFile(continuation.path, "utf8");
+    expect(continued).toContain("old-question");
+    expect(continued).toContain("old-answer");
+    expect(continued).toContain("follow-up");
+  });
 
   it("loads latest into blocks and a banner line with the file id", async () => {
     const dir = await make_session_dir();

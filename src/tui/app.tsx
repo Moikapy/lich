@@ -14,7 +14,7 @@ import type { SessionHandle } from "../session/store.js";
 import { LICH_VERSION } from "../index.js";
 import type { ThemeSpec } from "../util/lore.js";
 import { readdir, stat } from "node:fs/promises";
-import { load_resume_view } from "./load_resume.js";
+import { load_resume_view, open_resume_continuation } from "./load_resume.js";
 import {
   apply_event,
   apply_run_result,
@@ -201,6 +201,7 @@ function use_slash_commands(
   set_blocks: SetBlocks,
   set_history: SetHistory,
   set_resume_line: Dispatch<SetStateAction<string | undefined>>,
+  set_session: (handle: SessionHandle) => void,
   begin_resume_load: () => void,
   end_resume_load: () => void,
   total_tokens: number,
@@ -228,10 +229,14 @@ function use_slash_commands(
         }
         begin_resume_load();
         void load_resume_view(agent.config.session_dir, parsed.args, theme)
-          .then((result) => {
+          .then(async (result) => {
             if (result.ok === false) {
               add_blocks([result.block]);
               return;
+            }
+            const continuation = await open_resume_continuation(agent.config.session_dir);
+            if (continuation !== undefined) {
+              set_session(continuation);
             }
             set_history(result.messages);
             set_blocks(result.blocks);
@@ -252,6 +257,7 @@ function use_slash_commands(
       set_blocks,
       set_history,
       set_resume_line,
+      set_session,
       theme,
       total_tokens,
     ],
@@ -287,6 +293,7 @@ function initial_resume_line(
 export function TuiApp({ agent, theme, session, initial_history, resumed_id }: TuiAppProps): React.JSX.Element {
   const [blocks, set_blocks] = useState<readonly HistoryBlock[]>(() => initial_blocks(initial_history, theme));
   const [state, set_state] = useState(INITIAL_UI_STATE);
+  const [active_session, set_active_session] = useState(session);
   const [resume_line, set_resume_line] = useState<string | undefined>(() =>
     initial_resume_line(resumed_id, initial_history),
   );
@@ -317,7 +324,7 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
     set_state,
     set_blocks,
     initial_history,
-    session,
+    active_session,
   );
   const handle_slash = use_slash_commands(
     agent,
@@ -326,6 +333,7 @@ export function TuiApp({ agent, theme, session, initial_history, resumed_id }: T
     set_blocks,
     set_history,
     set_resume_line,
+    set_active_session,
     begin_resume_load,
     end_resume_load,
     state.usage.total_tokens,
