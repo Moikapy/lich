@@ -11,7 +11,7 @@ import { create_discord_adapter } from "./discord.js";
 import { create_telegram_adapter } from "./telegram.js";
 import { create_twitch_adapter } from "./twitch.js";
 import type { AdapterParams, PlatformAdapter } from "./types.js";
-import { create_webhook_adapter } from "./webhook.js";
+import { create_webhook_adapter, gateway_host_from_env, gateway_port_from_env } from "./webhook.js";
 
 /** Preload plugins, then hand that same agent to the bus factory. */
 export async function create_gateway_bus(config: AgentConfig): Promise<{ agent: Agent; bus: GatewayBus }> {
@@ -69,7 +69,7 @@ function build_adapters(config: AgentConfig, bus: GatewayBus, platforms: readonl
 function create_platform_adapter(params: AdapterParams, platform: string): PlatformAdapter | undefined {
   switch (platform) {
     case "webhook":
-      return create_webhook_adapter({ ...params, port: read_webhook_port(), host: read_webhook_host() });
+      return create_webhook_adapter({ ...params, port: gateway_port_from_env(), host: gateway_host_from_env() });
     case "telegram":
       return create_telegram_adapter(params);
     case "discord":
@@ -79,23 +79,6 @@ function create_platform_adapter(params: AdapterParams, platform: string): Platf
     default:
       return undefined;
   }
-}
-
-function read_webhook_port(): number | undefined {
-  const raw = process.env.LICH_GATEWAY_PORT;
-  if (raw === undefined || raw.length === 0) {
-    return undefined;
-  }
-  const port = Number(raw);
-  return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
-}
-
-function read_webhook_host(): string | undefined {
-  const raw = process.env.LICH_GATEWAY_HOST;
-  if (raw === undefined || raw.trim().length === 0) {
-    return undefined;
-  }
-  return raw.trim();
 }
 
 /** Adapter start failures log and are skipped; the rest keep running. */

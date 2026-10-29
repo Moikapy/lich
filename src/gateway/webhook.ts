@@ -28,8 +28,8 @@ interface IncomingPayload {
 }
 
 export function create_webhook_adapter(params: WebhookAdapterParams): PlatformAdapter {
-  const port = params.port ?? read_port_env() ?? DEFAULT_GATEWAY_PORT;
-  const host = params.host ?? read_host_env() ?? DEFAULT_GATEWAY_HOST;
+  const port = params.port ?? gateway_port_from_env() ?? DEFAULT_GATEWAY_PORT;
+  const host = params.host ?? gateway_host_from_env() ?? DEFAULT_GATEWAY_HOST;
   const token = read_platform_token(params.config, "webhook");
   let server: Server | undefined;
 
@@ -199,6 +199,29 @@ async function close_server(server: Server | undefined): Promise<void> {
   });
 }
 
+/**
+ * Port from `LICH_GATEWAY_PORT`. `0`, blank, and out-of-range values are
+ * unusable (port 0 would bind a random port) and return undefined.
+ */
+export function gateway_port_from_env(raw: string | undefined = process.env.LICH_GATEWAY_PORT): number | undefined {
+  if (raw === undefined || raw.length === 0) {
+    return undefined;
+  }
+  const port = Number(raw);
+  if (Number.isInteger(port) === false || port <= 0 || port >= 65536) {
+    return undefined;
+  }
+  return port;
+}
+
+/** Host from `LICH_GATEWAY_HOST`, trimmed. Blank or whitespace-only is unset. */
+export function gateway_host_from_env(raw: string | undefined = process.env.LICH_GATEWAY_HOST): string | undefined {
+  if (raw === undefined || raw.trim().length === 0) {
+    return undefined;
+  }
+  return raw.trim();
+}
+
 /** Loopback binds are always fine; non-loopback requires an auth token. */
 export function assert_bind_allowed(host: string, token: string | undefined): void {
   if (is_loopback_host(host) === true) {
@@ -219,19 +242,3 @@ export function is_loopback_host(host: string): boolean {
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
 }
 
-function read_port_env(): number | undefined {
-  const raw = process.env.LICH_GATEWAY_PORT;
-  if (raw === undefined || raw.length === 0) {
-    return undefined;
-  }
-  const port = Number(raw);
-  return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
-}
-
-function read_host_env(): string | undefined {
-  const raw = process.env.LICH_GATEWAY_HOST;
-  if (raw === undefined || raw.trim().length === 0) {
-    return undefined;
-  }
-  return raw.trim();
-}

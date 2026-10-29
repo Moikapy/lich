@@ -6,6 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { parse_agent_config } from "../src/agent/config.js";
 import {
@@ -18,7 +19,14 @@ import {
 import { create_discord_adapter } from "../src/gateway/discord.js";
 import { create_twitch_adapter } from "../src/gateway/twitch.js";
 import { logger } from "../src/util/log.js";
-import { assert_bind_allowed, create_webhook_adapter, MAX_WEBHOOK_BODY_BYTES } from "../src/gateway/webhook.js";
+import {
+  assert_bind_allowed,
+  create_webhook_adapter,
+  DEFAULT_GATEWAY_PORT,
+  gateway_host_from_env,
+  gateway_port_from_env,
+  MAX_WEBHOOK_BODY_BYTES,
+} from "../src/gateway/webhook.js";
 import { format_agent_reply } from "../src/gateway/format.js";
 import { create_gateway_bus } from "../src/gateway/runner.js";
 import { create_telegram_adapter, split_text, TELEGRAM_CAPABILITIES, TELEGRAM_MAX_MESSAGE_CHARS } from "../src/gateway/telegram.js";
@@ -813,6 +821,152 @@ describe("adapter capabilities", () => {
     }
   });
 });
+
+describe("gateway bind env", () => {
+  const saved_port = process.env.LICH_GATEWAY_PORT;
+  const saved_host = process.env.LICH_GATEWAY_HOST;
+  const saved_token = process.env.LICH_GATEWAY_TOKEN;
+
+  afterEach(() => {
+    restore_env("LICH_GATEWAY_PORT", saved_port);
+    restore_env("LICH_GATEWAY_HOST", saved_host);
+    restore_env("LICH_GATEWAY_TOKEN", saved_token);
+  });
+
+  function restore_env(key: string, value: string | undefined): void {
+    if (value === undefined) {
+      delete process.env[key];
+      return;
+    }
+    process.env[key] = value;
+  }
+
+  function webhook_for(work_dir: string, on_listening?: (port: number) => void) {
+    return create_webhook_adapter({
+      config: config_for(work_dir),
+      handle_message: async () => "ok",
+      get_agent: () => {
+        throw new Error("not used");
+      },
+      reply_router: () => undefined,
+      on_listening,
+    });
+  }
+
+  it("rejects port 0 and other unusable LICH_GATEWAY_PORT values", () => {
+    expect(gateway_port_from_env(undefined)).toBeUndefined();
+    for (const raw of ["", "0", "-1", "80.5", "65536", "nope"]) {
+      expect(gateway_port_from_env(raw), raw).toBeUndefined();
+    }
+    expect(gateway_port_from_env("1")).toBe(1);
+    expect(gateway_port_from_env("65535")).toBe(65535);
+    expect(gateway_port_from_env("080")).toBe(80);
+    expect(gateway_port_from_env(" 80")).toBe(80);
+  });
+
+  it("trims LICH_GATEWAY_HOST and treats whitespace as unset", () => {
+    expect(gateway_host_from_env(undefined)).toBeUndefined();
+    expect(gateway_host_from_env("")).toBeUndefined();
+    expect(gateway_host_from_env("   ")).toBeUndefined();
+    expect(gateway_host_from_env(" localhost ")).toBe("localhost");
+    expect(gateway_host_from_env(" 0.0.0.0 ")).toBe("0.0.0.0");
+  });
+
+  it("binds the default port when LICH_GATEWAY_PORT is 0", async () => {
+    process.env.LICH_GATEWAY_PORT = "0";
+    delete process.env.LICH_GATEWAY_HOST;
+    const work_dir = temp_work_dir();
+    let seen: number | undefined;
+    const adapter = webhook_for(work_dir, (port) => {
+      seen = port;
+    });
+    try {
+      await adapter.start();
+      expect(seen).toBe(DEFAULT_GATEWAY_PORT);
+      const health = await fetch(`http://127.0.0.1:${DEFAULT_GATEWAY_PORT}/health`);
+      expect(health.status).toBe(200);
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("binds the port named by LICH_GATEWAY_PORT", async () => {
+    delete process.env.LICH_GATEWAY_HOST;
+    const free = await listen_port();
+    process.env.LICH_GATEWAY_PORT = String(free);
+    const work_dir = temp_work_dir();
+    let seen: number | undefined;
+    const adapter = webhook_for(work_dir, (port) => {
+      seen = port;
+    });
+    try {
+      await adapter.start();
+      expect(seen).toBe(free);
+      const health = await fetch(`http://127.0.0.1:${free}/health`);
+      expect(health.status).toBe(200);
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to loopback when LICH_GATEWAY_HOST is blank, and refuses a trimmed public host", async () => {
+    delete process.env.LICH_GATEWAY_TOKEN;
+    process.env.LICH_GATEWAY_HOST = "   ";
+    const work_dir = temp_work_dir();
+    let seen: number | undefined;
+    const adapter = create_webhook_adapter({
+      config: config_for(work_dir),
+      handle_message: async () => "ok",
+      get_agent: () => {
+        throw new Error("not used");
+      },
+      reply_router: () => undefined,
+      port: 0,
+      on_listening: (port) => {
+        seen = port;
+      },
+    });
+    try {
+      await adapter.start();
+      const health = await fetch(`http://127.0.0.1:${String(seen)}/health`);
+      expect(health.status).toBe(200);
+    } finally {
+      await adapter.stop();
+    }
+
+    process.env.LICH_GATEWAY_HOST = " 0.0.0.0 ";
+    const refused = create_webhook_adapter({
+      config: config_for(work_dir),
+      handle_message: async () => "ok",
+      get_agent: () => {
+        throw new Error("not used");
+      },
+      reply_router: () => undefined,
+      port: 0,
+    });
+    try {
+      await expect(refused.start()).rejects.toThrow(/non-loopback bind \(0\.0\.0\.0\)/);
+    } finally {
+      await refused.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+});
+
+async function listen_port(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  await new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
+  return port;
+}
 
 describe("webhook adapter", () => {
   const env_token = process.env.LICH_GATEWAY_TOKEN;

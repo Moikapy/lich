@@ -102,6 +102,7 @@ describe("S-2 SSRF helpers", () => {
       "::ffff:10.1.2.3",
       "::ffff:169.254.169.254",
       "fe80::1",
+      "febf::1",
       "fc00::1",
       "fd12:3456::1",
       "not-an-ip",
@@ -109,7 +110,7 @@ describe("S-2 SSRF helpers", () => {
     for (const address of blocked) {
       expect(is_blocked_ip(address), address).toBe(true);
     }
-    const public_addrs = ["172.15.255.255", "172.32.0.1", "100.63.0.1", "100.128.0.1", "223.0.0.1", "::ffff:8.8.8.8", "2001:4860:4860::8888"];
+    const public_addrs = ["172.15.255.255", "172.32.0.1", "100.63.0.1", "100.128.0.1", "223.0.0.1", "::ffff:8.8.8.8", "2001:4860:4860::8888", "fe7f::1"];
     for (const address of public_addrs) {
       expect(is_blocked_ip(address), address).toBe(false);
     }
