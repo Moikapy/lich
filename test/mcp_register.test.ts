@@ -35,4 +35,26 @@ describe("register_listed", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain("editor/open_file");
   });
+
+  it("registers only the allowlisted mcp name and does not call an aborted tool", async () => {
+    const call_tool = vi.fn(async () => "called");
+    const session = { call_tool } as unknown as McpSession;
+    const registry = new ToolRegistry();
+    register_listed(
+      registry,
+      "lab",
+      [
+        { name: "ping", description: "ping", parameters },
+        { name: "exec", description: "exec", parameters },
+      ],
+      ["mcp_lab_ping"],
+      session,
+    );
+    expect(registry.list().map((tool) => tool.name)).toEqual(["mcp_lab_ping"]);
+    const controller = new AbortController();
+    controller.abort();
+    const result = await registry.get("mcp_lab_ping")?.execute({}, { work_dir: "/tmp", env: {}, signal: controller.signal });
+    expect(result).toEqual({ ok: false, output: "", error: "cancelled" });
+    expect(call_tool).not.toHaveBeenCalled();
+  });
 });

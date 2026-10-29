@@ -129,6 +129,28 @@ describe("gatekeeper plugin", () => {
     expect(innocent?.block).toBeUndefined();
   });
 
+  it("blocks dashed commit and push words and leaves nearby words alone", async () => {
+    const plugin = gatekeeper_plugin(true);
+    const state = new Map<string, unknown>();
+    const blocked: Array<[string, string]> = [
+      ["--commit", "--commit"],
+      ["-push", "-push"],
+      ["git push", "push"],
+      ["commit", "commit"],
+      ["git --commit -m x", "--commit"],
+    ];
+    for (const [command, token] of blocked) {
+      const verdict = await plugin.hooks?.before_tool_call?.(before_info("terminal", { command }), ctx_for(state));
+      expect(verdict, command).toEqual({ block: true, reason: `git_denylist: ${token}` });
+    }
+    for (const command of ["git status", "echo commitment", "git log --oneline", "pushing files", "git committer"]) {
+      const verdict = await plugin.hooks?.before_tool_call?.(before_info("terminal", { command }), ctx_for(state));
+      expect(verdict, command).toEqual({});
+    }
+    const numeric = await plugin.hooks?.before_tool_call?.(before_info("terminal", { command: 1 }), ctx_for(state));
+    expect(numeric).toEqual({});
+  });
+
   it("vetoes commit-tree hidden in a git alias and allows an innocent ls", async () => {
     const plugin = gatekeeper_plugin(true);
     const state = new Map<string, unknown>();

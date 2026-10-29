@@ -83,6 +83,23 @@ describe("parse_args serve flags", () => {
     );
   });
 
+  it("rejects an out-of-range or fractional port and a missing host or port value", () => {
+    expect(() => parse_args(["serve", "--port", "65536"])).toThrow(
+      "--port must be an integer between 0 and 65535",
+    );
+    expect(() => parse_args(["serve", "--port", "-1"])).toThrow(
+      "--port must be an integer between 0 and 65535",
+    );
+    expect(() => parse_args(["serve", "--port", "1.5"])).toThrow(
+      "--port must be an integer between 0 and 65535",
+    );
+    expect(() => parse_args(["serve", "--port"])).toThrow("--port requires a value");
+    expect(() => parse_args(["serve", "--host"])).toThrow("--host requires a value");
+    expect(() => parse_args(["serve", "--host", "--port"])).toThrow("--host requires a value");
+    expect(parse_args(["serve", "--port", "65535"]).serve_flags.port).toBe(65535);
+    expect(parse_args(["serve", "--port", "00080"]).serve_flags.port).toBe(80);
+  });
+
   it("treats serve as a flag value, not the subcommand", () => {
     expect(() => parse_args(["--resume", "serve", "--host", "127.0.0.1"])).toThrow(
       "unknown flag: --host",
