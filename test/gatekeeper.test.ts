@@ -117,6 +117,16 @@ describe("gatekeeper plugin", () => {
     expect(verdict).toEqual({});
   });
 
+  it("treats non-boolean tests_ok and dirty flags as the fail-closed defaults", async () => {
+    const plugin = gatekeeper_plugin(true);
+    const string_tests = new Map<string, unknown>([["tests_ok", "true"], ["dirty", false], ["commits", 0]]);
+    const tests = await plugin.hooks?.before_tool_call?.(before_info("git_commit", {}), ctx_for(string_tests));
+    expect(tests).toEqual({ block: true, reason: "tests_not_ok" });
+    const string_dirty = new Map<string, unknown>([["tests_ok", true], ["dirty", "false"], ["commits", 0]]);
+    const dirty = await plugin.hooks?.before_tool_call?.(before_info("git_commit", {}), ctx_for(string_dirty));
+    expect(dirty).toEqual({ block: true, reason: "worktree_dirty" });
+  });
+
   it("blocks terminal git commit/push and plumbing, but not innocent commands", async () => {
     const plugin = gatekeeper_plugin(true);
     const state = new Map<string, unknown>();
@@ -334,6 +344,8 @@ describe("gatekeeper plugin", () => {
     const cases: Array<{ paths: string[]; error: string }> = [
       { paths: [":(glob)*"], error: "invalid_path" },
       { paths: ["*"], error: "invalid_path" },
+      { paths: ["notes?.txt"], error: "invalid_path" },
+      { paths: ["notes[0].txt"], error: "invalid_path" },
       { paths: ["sub/"], error: "invalid_path" },
       { paths: ["sub"], error: "invalid_path" },
       { paths: ["nested/.env"], error: "secret_path" },

@@ -1116,6 +1116,78 @@ describe("webhook adapter", () => {
     }
   });
 
+  it("keeps health open without a token and ignores lookalike message routes", async () => {
+    const work_dir = temp_work_dir();
+    process.env.LICH_GATEWAY_TOKEN = "sekrit";
+    let port: number | undefined;
+    const seen: string[] = [];
+    const adapter = make_adapter(work_dir, "echo", (bound) => {
+      port = bound;
+    }, async (_platform, _chat, _user, text) => {
+      seen.push(text);
+      return "ok";
+    });
+    try {
+      await adapter.start();
+      if (port === undefined) {
+        throw new Error("webhook did not report a listening port");
+      }
+      const base = `http://127.0.0.1:${port}`;
+      const health = await fetch(`${base}/health`);
+      expect(health.status).toBe(200);
+      expect(await health.json()).toEqual({ status: "ok" });
+      for (const target of [
+        { method: "GET", path: "/message" },
+        { method: "POST", path: "/health" },
+        { method: "POST", path: "/message?x=1" },
+        { method: "POST", path: "/message/" },
+        { method: "GET", path: "/health/" },
+      ]) {
+        const response = await fetch(`${base}${target.path}`, {
+          method: target.method,
+          headers: { "x-lich-token": "sekrit" },
+          body: target.method === "POST" ? JSON.stringify({ text: "leak" }) : undefined,
+        });
+        expect(response.status, `${target.method} ${target.path}`).toBe(404);
+      }
+      expect(seen).toEqual([]);
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a body at the exact byte cap", async () => {
+    const work_dir = temp_work_dir();
+    let port: number | undefined;
+    const seen: string[] = [];
+    const adapter = make_adapter(work_dir, "echo", (bound) => {
+      port = bound;
+    }, async (_platform, _chat, _user, text) => {
+      seen.push(`${text.slice(0, 4)}:${text.length}`);
+      return "ok";
+    });
+    try {
+      await adapter.start();
+      if (port === undefined) {
+        throw new Error("webhook did not report a listening port");
+      }
+      const text = "a".repeat(MAX_WEBHOOK_BODY_BYTES - 11);
+      const body = `{"text":"${text}"}`;
+      expect(Buffer.byteLength(body)).toBe(MAX_WEBHOOK_BODY_BYTES);
+      const accepted = await fetch(`http://127.0.0.1:${port}/message`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      expect(accepted.status).toBe(200);
+      expect(seen).toEqual([`aaaa:${text.length}`]);
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a chunked body over the cap when content-length is absent", async () => {
     const work_dir = temp_work_dir();
     let port: number | undefined;
