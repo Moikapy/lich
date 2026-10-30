@@ -87,6 +87,69 @@ describe("run_tests", () => {
     expect(calls[0]?.command).toContain("node_modules/vitest/vitest.mjs run");
   });
 
+  it("ignores a non-string filter and a blank LICH_TEST_COMMAND", async () => {
+    const { calls, runner } = recording_runner({ exit_code: 0 });
+    set_test_command_runner(runner);
+    const numeric = await executor.execute(
+      "run_tests",
+      { filter: 1 },
+      { work_dir: tmp_root, env: { LICH_TEST_COMMAND: "" } },
+    );
+    expect(numeric.ok).toBe(true);
+    expect(calls[0]?.command).toContain("node_modules/vitest/vitest.mjs run");
+    expect(calls[0]?.command).not.toContain(" 1");
+    const flagged = await executor.execute(
+      "run_tests",
+      { filter: true },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(flagged.ok).toBe(true);
+    expect(calls[1]?.command).toBe(calls[0]?.command);
+  });
+
+  it("reports cancelled when the caller aborts during the run, even if the suite exits 0", async () => {
+    const controller = new AbortController();
+    const runner: TestCommandRunner = async (_command, _cwd, _on_chunk, signal) => {
+      controller.abort();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted === true) {
+          resolve();
+          return;
+        }
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { exit_code: 0 };
+    };
+    set_test_command_runner(runner);
+    const result = await executor.execute("run_tests", {}, {
+      work_dir: tmp_root,
+      env: {},
+      signal: controller.signal,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("cancelled");
+  });
+
+  it("treats timeout_ms 0 as a 1ms cap, not an unbounded wait", async () => {
+    const runner: TestCommandRunner = async (_command, _cwd, _on_chunk, signal) => {
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted === true) {
+          resolve();
+          return;
+        }
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { exit_code: 0 };
+    };
+    set_test_command_runner(runner);
+    const started = Date.now();
+    const result = await executor.execute("run_tests", { timeout_ms: 0 }, { work_dir: tmp_root, env: {} });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("timeout");
+    expect(result.output).toContain("[exit -1]");
+  });
+
   it("rejects filters that start with a dash", async () => {
     const { calls, runner } = recording_runner({ exit_code: 0 });
     set_test_command_runner(runner);
