@@ -151,6 +151,12 @@ export async function compress_messages(
       { signal: params.signal },
     );
     const summary = result.message.content;
+    // A blank completion is not a summary. Replacing older turns with it
+    // drops the history the next turn needs; treat it like a failed compress.
+    if (summary.trim().length === 0) {
+      logger.warn("context compression returned an empty summary; keeping history");
+      return { messages: [...messages], summary_chars: 0 };
+    }
     const summary_message: UserMessage = {
       role: "user",
       content: `[context summary of earlier turns]\n${summary}\n[end summary]`,

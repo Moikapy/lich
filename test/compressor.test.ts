@@ -112,6 +112,16 @@ describe("compress_messages", () => {
     }
   });
 
+  it("keeps history when the summarizer returns a blank summary", async () => {
+    for (const blank of ["", " \n\t "]) {
+      const chat: ChatFn = async () => fixed_chat_result(blank);
+      const input = [system_message("sys"), user_message("goal: keep this"), user_message("u1"), user_message("u2")];
+      const outcome = await compress_messages({ chat }, input, { budget_tokens: 10, keep_recent: 1 });
+      expect(outcome.messages).toEqual(input);
+      expect(outcome.summary_chars).toBe(0);
+    }
+  });
+
   it("returns messages unchanged when the chat call fails (best-effort)", async () => {
     const chat: ChatFn = async () => {
       throw new ProviderError({ kind: "network", provider_name: "mock", message: "provider down" });
