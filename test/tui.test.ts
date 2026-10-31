@@ -491,6 +491,19 @@ describe("notice blocks", () => {
     expect(model_label_block(config).lines[0]).toContain("model: chosen");
   });
 
+  it("does not fall back to providers[0] when models.chat names a missing provider", () => {
+    const config = {
+      providers: [{ name: "a", model: "first", kind: "openai_compat" }],
+      models: { chat: ["missing"] },
+    };
+    const missing = model_label_block(config).lines[0] ?? "";
+    expect(missing).toContain("model: unknown");
+    expect(missing).toContain("provider: unknown");
+    expect(missing).not.toContain("first");
+    const empty_chat = model_label_block({ ...config, models: { chat: [] } }).lines[0] ?? "";
+    expect(empty_chat).toContain("model: first");
+  });
+
   it("formats a live tool call as one row with its main arg, duration and first output line", () => {
     const ok = tool_result_block({ id: "1", name: "shell", args: { cmd: "ls" } }, true, "\nfile.txt\nother.txt", 240);
     expect(ok).toEqual({ role: "tool", lines: ["✓ shell  ls  0.2s · file.txt"] });
