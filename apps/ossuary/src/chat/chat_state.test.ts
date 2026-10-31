@@ -421,6 +421,61 @@ describe("parse_wire_event", () => {
       call: { id: "1", name: "shell", args: {} },
     });
   });
+
+  it("drops stringly typed counts and does not treat a string cancel flag as cancelled", () => {
+    expect(
+      parse_wire_event({
+        type: "llm_end",
+        turn: 1,
+        result: { usage: { prompt_tokens: "1", completion_tokens: 2, total_tokens: 3 } },
+      }),
+    ).toBeUndefined();
+    expect(parse_wire_event({ type: "compress_start", estimated_tokens: "10" })).toBeUndefined();
+    expect(
+      parse_wire_event({
+        type: "final",
+        message: { content: "done" },
+        result: { usage: { prompt_tokens: 1, completion_tokens: 1 } },
+      }),
+    ).toBeUndefined();
+    expect(
+      parse_wire_event({
+        type: "tool_call_start",
+        turn: 1,
+        call: { id: 1, name: "shell", args: {} },
+      }),
+    ).toBeUndefined();
+    const ended = parse_wire_event({
+      type: "tool_call_end",
+      turn: 1,
+      call: { id: "1", name: "shell", args: null },
+      result: { ok: false, output: "nope", error: 4 },
+      cancelled: "true",
+      seq: "9",
+      session_id: "sess",
+    });
+    expect(ended?.type).toBe("tool_call_end");
+    if (ended?.type !== "tool_call_end") {
+      return;
+    }
+    expect(ended.cancelled).toBeUndefined();
+    expect(ended.result.error).toBeUndefined();
+    expect(ended.result.ok).toBe(false);
+    expect(ended.call.args).toEqual({});
+    expect(ended.session_id).toBe("sess");
+    expect(ended.seq).toBeUndefined();
+    const compressed = parse_wire_event({
+      type: "compress_end",
+      summary_chars: 4,
+      usage: { prompt_tokens: 1 },
+    });
+    expect(compressed).toEqual({ type: "compress_end", summary_chars: 4, usage: undefined });
+    const numeric_error = parse_wire_event({ type: "error", error: 0 });
+    expect(numeric_error?.type).toBe("error");
+    if (numeric_error?.type === "error") {
+      expect(error_text(numeric_error.error)).toBe("0");
+    }
+  });
 });
 
 describe("parse_submit_result", () => {

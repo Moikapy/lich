@@ -138,6 +138,31 @@ describe("fetch_url", () => {
     expect(result.output.includes("hello world")).toBe(true);
   });
 
+  it("reports measured utf8 bytes unless content-length is a finite number", async () => {
+    const body = "caf\u00e9";
+    stub_fetch(vi.fn(async () => fake_response(body, { headers: { "content-type": "text/plain" } })));
+    const missing = await executor.execute("fetch_url", { url: "https://example.com/a" });
+    expect(missing.ok).toBe(true);
+    expect(missing.output.startsWith("# 200 text/plain (5 bytes)")).toBe(true);
+
+    stub_fetch(
+      vi.fn(async () => fake_response(body, { headers: { "content-type": "text/plain", "content-length": "nope" } })),
+    );
+    const non_numeric = await executor.execute("fetch_url", { url: "https://example.com/a" });
+    expect(non_numeric.output.startsWith("# 200 text/plain (5 bytes)")).toBe(true);
+
+    stub_fetch(
+      vi.fn(async () => fake_response("hi", { headers: { "content-type": "text/plain", "content-length": "0" } })),
+    );
+    const declared = await executor.execute("fetch_url", { url: "https://example.com/a" });
+    expect(declared.output.startsWith("# 200 text/plain (0 bytes)")).toBe(true);
+    expect(declared.output).toContain("hi");
+
+    stub_fetch(vi.fn(async () => fake_response("<p>x</p>", { headers: { "content-type": "Text/HTML; charset=utf-8" } })));
+    const html = await executor.execute("fetch_url", { url: "https://example.com/a" });
+    expect(html.output).toContain("[html content]");
+  });
+
   it("maps non-2xx to http_<status> error", async () => {
     stub_fetch(vi.fn(async () => fake_response("nope", { status: 404, headers: { "content-type": "text/plain" } })));
     const result = await executor.execute("fetch_url", { url: "https://example.com/missing" });
@@ -394,6 +419,37 @@ describe("http_request", () => {
     const bad = await executor.execute("http_request", { url: "https://api.example.com/ping", method: "TRACE" });
     expect(bad.ok).toBe(false);
     expect(bad.error?.startsWith("invalid_method")).toBe(true);
+  });
+
+  it("stringifies header values, omits an empty body, and reports the declared rate-limit headers", async () => {
+    const fetch_mock = vi.fn(async () =>
+      fake_response("hi", {
+        headers: {
+          "content-type": "text/plain",
+          "content-length": "99",
+          "retry-after": "3",
+        },
+      }),
+    );
+    stub_fetch(fetch_mock);
+    const result = await executor.execute("http_request", {
+      url: "https://api.example.com/v1",
+      method: "patch",
+      headers: { "x-count": 2, "x-skip": undefined, "x-empty": "" },
+      body: "",
+    });
+    expect(result.ok).toBe(true);
+    const call = fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined;
+    const init = call?.[1];
+    expect(init?.method).toBe("PATCH");
+    expect(init?.body).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get("x-count")).toBe("2");
+    expect(headers.get("x-empty")).toBe("");
+    expect(headers.has("x-skip")).toBe(false);
+    expect(result.output).toContain("# header content-length: 99");
+    expect(result.output).toContain("# header retry-after: 3");
+    expect(result.output).toContain("hi");
   });
 });
 
