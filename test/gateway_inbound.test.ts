@@ -5,9 +5,9 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse_agent_config } from "../src/agent/config.js";
-import { create_discord_adapter } from "../src/gateway/discord.js";
+import { create_discord_adapter, DISCORD_MAX_MESSAGE_CHARS } from "../src/gateway/discord.js";
 import { create_telegram_adapter, TELEGRAM_BACKOFF_MS } from "../src/gateway/telegram.js";
-import { create_twitch_adapter } from "../src/gateway/twitch.js";
+import { create_twitch_adapter, TWITCH_MESSAGE_CAP } from "../src/gateway/twitch.js";
 import type { AdapterParams } from "../src/gateway/types.js";
 
 const sleep_state = vi.hoisted(() => ({
@@ -259,6 +259,56 @@ describe("discord inbound", () => {
     expect(socket.close_count).toBe(0);
     await adapter.stop();
   });
+
+  it("hard-cuts replies at 2000 characters and does not post without a channel", async () => {
+    remember_env();
+    process.env.LICH_DISCORD_BOT_TOKEN = "fixture-discord-token";
+    expect(DISCORD_MAX_MESSAGE_CHARS).toBe(2000);
+    const posts: Array<{ content?: string; allowed_mentions?: unknown; url?: string }> = [];
+    const seen: string[] = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("fetch", async (url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+        content?: string;
+        allowed_mentions?: unknown;
+      };
+      posts.push({ ...body, url: String(url) });
+      return new Response("{}", { status: 200 });
+    });
+    const over = `${"a".repeat(DISCORD_MAX_MESSAGE_CHARS - 1)} ${"b".repeat(10)}`;
+    const exact = "c".repeat(DISCORD_MAX_MESSAGE_CHARS);
+    const adapter = create_discord_adapter(adapter_params(async (_platform, _chat, _user, text) => {
+      seen.push(text);
+      if (text === "over") {
+        return over;
+      }
+      if (text === "exact") {
+        return exact;
+      }
+      return text;
+    }));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    const emit = (data: Record<string, unknown>): void => {
+      socket.emit(JSON.stringify({ t: "MESSAGE_CREATE", d: data }));
+    };
+    emit({ channel_id: "c1", content: "over", author: { id: "u1", bot: false } });
+    emit({ channel_id: "c1", content: "exact", author: { id: "u1", bot: false } });
+    emit({ content: "nowhere", author: { id: "u1", bot: false } });
+    await wait_for(() => posts.length === 3 && seen.includes("nowhere"));
+    await settle();
+    const kept_space = `${"a".repeat(DISCORD_MAX_MESSAGE_CHARS - 1)} `;
+    expect(posts.map((post) => post.content).sort()).toEqual([kept_space, "b".repeat(10), exact].sort());
+    expect(posts).toHaveLength(3);
+    for (const post of posts) {
+      expect(post.content?.length ?? 0).toBeLessThanOrEqual(DISCORD_MAX_MESSAGE_CHARS);
+      expect(post.allowed_mentions).toEqual({ parse: [] });
+      expect(post.url).toBe("https://discord.com/api/v10/channels/c1/messages");
+    }
+    expect(posts.some((post) => post.url?.includes("/channels//"))).toBe(false);
+    expect(posts.some((post) => post.content === "nowhere")).toBe(false);
+    await adapter.stop();
+  });
 });
 
 describe("twitch inbound", () => {
@@ -301,6 +351,54 @@ describe("twitch inbound", () => {
     const socket = await wait_for_socket(0);
     expect(socket.sent).toContain("PASS oauth:already");
     expect(socket.sent.some((line) => line.includes("oauth:oauth:"))).toBe(false);
+    await adapter.stop();
+  });
+
+  it("splits a long reply at 450 and strips a command marker the cut creates", async () => {
+    remember_env();
+    process.env.LICH_TWITCH_OAUTH_TOKEN = "fixture-twitch-token";
+    process.env.LICH_TWITCH_NICK = "lichbot";
+    process.env.LICH_TWITCH_CHANNELS = "lobby";
+    expect(TWITCH_MESSAGE_CAP).toBe(450);
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const head = "a".repeat(TWITCH_MESSAGE_CAP);
+    const adapter = create_twitch_adapter(adapter_params(async () => `${head}/ban everyone`));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    socket.emit(":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #lobby :long\r\n");
+    const bodies = (): string[] =>
+      socket.sent.filter((line) => line.startsWith("PRIVMSG #")).map((line) => line.slice(line.indexOf(" :") + 2));
+    await wait_for(() => bodies().length === 1 && sleep_state.delays.includes(1600));
+    expect(bodies()).toEqual([head]);
+    release_sleep();
+    await wait_for(() => bodies().length === 2);
+    expect(bodies()).toEqual([head, "ban everyone"]);
+    for (const body of bodies()) {
+      expect(body.length).toBeLessThanOrEqual(TWITCH_MESSAGE_CAP);
+      expect(body.startsWith("/")).toBe(false);
+      expect(body.startsWith(".")).toBe(false);
+    }
+    await adapter.stop();
+  });
+
+  it("does not send a twitch chunk that sanitizes to empty", async () => {
+    remember_env();
+    process.env.LICH_TWITCH_OAUTH_TOKEN = "fixture-twitch-token";
+    process.env.LICH_TWITCH_NICK = "lichbot";
+    process.env.LICH_TWITCH_CHANNELS = "lobby";
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const head = "a".repeat(TWITCH_MESSAGE_CAP);
+    const adapter = create_twitch_adapter(adapter_params(async () => `${head}///`));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    socket.emit(":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #lobby :slashes\r\n");
+    const bodies = (): string[] =>
+      socket.sent.filter((line) => line.startsWith("PRIVMSG #")).map((line) => line.slice(line.indexOf(" :") + 2));
+    await wait_for(() => bodies().length === 1 && sleep_state.delays.includes(1600));
+    release_sleep();
+    await wait_for(() => sleep_state.pending.length === 0);
+    await settle();
+    expect(bodies()).toEqual([head]);
     await adapter.stop();
   });
 });
