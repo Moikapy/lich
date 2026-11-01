@@ -152,6 +152,23 @@ async function handle_irc_line(
   line: string,
   on_welcome: (ok: boolean) => void,
 ): Promise<void> {
+  try {
+    await dispatch_irc_line(params, twitch, socket, line, on_welcome);
+  } catch (error) {
+    // The caller drops this promise. A closed socket's send() throws, and an
+    // unhandled rejection exits the process (Node's default), taking every
+    // gateway adapter with it.
+    logger.warn("gateway twitch deliver failed", error);
+  }
+}
+
+async function dispatch_irc_line(
+  params: AdapterParams,
+  twitch: TwitchConfig,
+  socket: RawSocket,
+  line: string,
+  on_welcome: (ok: boolean) => void,
+): Promise<void> {
   if (line.length === 0) {
     return;
   }
