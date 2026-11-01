@@ -41,6 +41,8 @@ class FakeSocket {
   static sockets: FakeSocket[] = [];
   sent: string[] = [];
   close_count = 0;
+  /** When set, PRIVMSG sends throw, as a WebSocket does after close. */
+  fail_privmsg = false;
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onclose: ((event?: { code?: number }) => void) | null = null;
@@ -54,6 +56,9 @@ class FakeSocket {
   }
 
   send(data: string): void {
+    if (this.fail_privmsg === true && data.startsWith("PRIVMSG ") === true) {
+      throw new Error("socket closed");
+    }
     this.sent.push(data);
   }
 
@@ -288,6 +293,40 @@ describe("twitch inbound", () => {
     expect(seen).toEqual(["lobby:viewer:hello", "lobby:viewer:dot"]);
     expect(bodies()).toEqual(["ban everyone"]);
     await adapter.stop();
+  });
+
+  it("stays up when a reply send throws on a closed socket", async () => {
+    remember_env();
+    process.env.LICH_TWITCH_OAUTH_TOKEN = "fixture-twitch-token";
+    process.env.LICH_TWITCH_NICK = "lichbot";
+    process.env.LICH_TWITCH_CHANNELS = "lobby";
+    let handled = false;
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const adapter = create_twitch_adapter(adapter_params(async () => {
+      handled = true;
+      return "hello back";
+    }));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    socket.fail_privmsg = true;
+    const rejections: unknown[] = [];
+    const on_rejection = (error: unknown): void => {
+      rejections.push(error);
+    };
+    process.on("unhandledRejection", on_rejection);
+    try {
+      socket.emit(":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #lobby :hello\r\n");
+      await wait_for(() => handled === true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(rejections).toEqual([]);
+      socket.emit("PING :tmi.twitch.tv\r\n");
+      await settle();
+      expect(socket.sent).toContain("PONG :tmi.twitch.tv");
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", on_rejection);
+      await adapter.stop();
+    }
   });
 
   it("does not double the oauth prefix when the token already has one", async () => {

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Gateway Twitch: a reply send on a closed socket is logged and the process
+  stays up. The line handler's promise is otherwise unhandled, and Node exits
+  on that rejection.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
