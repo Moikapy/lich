@@ -23,6 +23,29 @@ describe("layout_component_ids", () => {
     expect(layout_component_ids({ panels: {} })).toBeNull();
     expect(layout_component_ids({ grid: {}, panels: { a: "bad" } })).toBeNull();
   });
+
+  it("rejects an empty component and uses the panel key when the component is omitted", () => {
+    expect(layout_component_ids({
+      grid: {},
+      panels: { "lich.chat": { contentComponent: "" } },
+    })).toBeNull();
+    expect(layout_component_ids({
+      grid: [],
+      panels: { "lich.chat": { contentComponent: "lich.chat" } },
+    })).toBeNull();
+    expect(layout_component_ids({
+      grid: {},
+      panels: { "lich.chat": { id: "lich.chat" } },
+    })).toEqual(["lich.chat"]);
+    expect(missing_registered_ids(
+      { grid: {}, panels: { "lich.chat": { contentComponent: "" } } },
+      new Set(["lich.chat"]),
+    )).toBeNull();
+    expect(can_restore_layout(
+      { grid: {}, panels: { "lich.chat": { id: "lich.chat" } } },
+      new Set(["lich.chat"]),
+    )).toBe(true);
+  });
 });
 
 describe("can_restore_layout", () => {

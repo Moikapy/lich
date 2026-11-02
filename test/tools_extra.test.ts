@@ -395,6 +395,67 @@ describe("http_request", () => {
     expect(bad.ok).toBe(false);
     expect(bad.error?.startsWith("invalid_method")).toBe(true);
   });
+
+  it("treats a blank or non-string method as GET and sends DELETE and OPTIONS bodies", async () => {
+    const fetch_mock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => fake_response("abcdef"));
+    stub_fetch(fetch_mock);
+    const blank = await executor.execute("http_request", {
+      url: "https://api.example.com/ping",
+      method: "",
+      body: "should-not-send",
+    });
+    expect(blank.ok).toBe(true);
+    const blank_init = (fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined)?.[1];
+    expect(blank_init?.method).toBe("GET");
+    expect(blank_init?.body).toBeUndefined();
+
+    fetch_mock.mockClear();
+    await executor.execute("http_request", {
+      url: "https://api.example.com/ping",
+      method: 1,
+      body: "should-not-send",
+    });
+    const numeric_init = (fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined)?.[1];
+    expect(numeric_init?.method).toBe("GET");
+    expect(numeric_init?.body).toBeUndefined();
+
+    const padded = await executor.execute("http_request", {
+      url: "https://api.example.com/ping",
+      method: "GET ",
+    });
+    expect(padded.ok).toBe(false);
+    expect(padded.error).toBe("invalid_method: GET ");
+
+    fetch_mock.mockClear();
+    await executor.execute("http_request", {
+      url: "https://api.example.com/ping",
+      method: "delete",
+      headers: { "x-zero": 0, "x-flag": false, "x-skip": undefined },
+      body: "payload",
+    });
+    const delete_init = (fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined)?.[1];
+    expect(delete_init?.method).toBe("DELETE");
+    expect(delete_init?.body).toBe("payload");
+    const headers = new Headers(delete_init?.headers);
+    expect(headers.get("x-zero")).toBe("0");
+    expect(headers.get("x-flag")).toBe("false");
+    expect(headers.has("x-skip")).toBe(false);
+
+    fetch_mock.mockClear();
+    const tiny = await executor.execute("http_request", {
+      url: "https://api.example.com/ping",
+      method: "options",
+      body: "ask",
+      max_chars: 0,
+    });
+    const options_init = (fetch_mock.mock.calls[0] as unknown as [string, RequestInit] | undefined)?.[1];
+    expect(options_init?.method).toBe("OPTIONS");
+    expect(options_init?.body).toBe("ask");
+    expect(tiny.ok).toBe(true);
+    // max_chars 0 floors to 1, so the reader keeps 4 bytes and the char clamp drops 3.
+    expect(tiny.output).toContain("a\n[... truncated, 3 chars omitted ...]");
+    expect(tiny.output.includes("bcdef")).toBe(false);
+  });
 });
 
 describe("process_list", () => {

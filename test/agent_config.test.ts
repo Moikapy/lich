@@ -105,4 +105,136 @@ describe("parse_agent_config", () => {
       }),
     ).toThrow(/duplicate provider name/);
   });
+
+  it("rejects toolset, platform, allowlist, and plugin-role typos", () => {
+    const open = parse_agent_config({
+      providers: minimal_providers,
+      tools_enabled: "all",
+      gateway: { tools_enabled: "all", platforms: ["webhook", "discord"] },
+    });
+    expect(open.tools_enabled).toBe("all");
+    expect(open.gateway?.tools_enabled).toBe("all");
+    expect(open.gateway?.platforms).toEqual(["webhook", "discord"]);
+
+    const rejected = [
+      { providers: minimal_providers, tools_enabled: "ALL" },
+      { providers: minimal_providers, tools_enabled: "all " },
+      { providers: minimal_providers, tools_enabled: "none" },
+      { providers: minimal_providers, gateway: { tools_enabled: "ALL" } },
+      { providers: minimal_providers, gateway: { platforms: ["Discord"] } },
+      { providers: minimal_providers, gateway: { allowed_users: { discord: [1] } } },
+      { providers: minimal_providers, gateway: { allowed_chats: { twitch: ["ok", false] } } },
+      { providers: minimal_providers, gateway: { token_envs: { discord: "1TOKEN" } } },
+      { providers: minimal_providers, gateway: { token_envs: { discord: "" } } },
+      { providers: minimal_providers, gateway: { token_envs: { discord: "HAS-DASH" } } },
+      { providers: minimal_providers, plugins: [{ path: "p.js", model: ["chat"] }] },
+      { providers: minimal_providers, plugins: [{ path: "p.js", models: ["Chat"] }] },
+      { providers: minimal_providers, log_level: "INFO" },
+    ];
+    for (const raw of rejected) {
+      expect(() => parse_agent_config(raw)).toThrow();
+    }
+    let token_error = "";
+    try {
+      parse_agent_config({
+        providers: minimal_providers,
+        gateway: { token_envs: { discord: "1TOKEN" } },
+      });
+    } catch (error) {
+      token_error = error instanceof Error ? error.message : String(error);
+    }
+    expect(token_error).toMatch(/invalid env var name/);
+    expect(token_error).not.toContain("1TOKEN");
+  });
+
+  it("keeps inclusive numeric bounds and an explicit session_dir", () => {
+    const config = parse_agent_config({
+      providers: [{ ...minimal_providers[0], timeout_ms: 1 }],
+      temperature: 0,
+      compress_threshold: 0.1,
+      context_budget_tokens: 1,
+      max_tokens: 1,
+      max_turns: 1,
+      terminal_timeout_ms: 1,
+      work_dir: "/tmp/project",
+      session_dir: "/var/lich/sessions",
+    });
+    expect(config.temperature).toBe(0);
+    expect(config.compress_threshold).toBe(0.1);
+    expect(config.context_budget_tokens).toBe(1);
+    expect(config.max_tokens).toBe(1);
+    expect(config.max_turns).toBe(1);
+    expect(config.terminal_timeout_ms).toBe(1);
+    expect(config.providers[0]?.timeout_ms).toBe(1);
+    expect(config.work_dir).toBe("/tmp/project");
+    expect(config.session_dir).toBe("/var/lich/sessions");
+
+    const upper = parse_agent_config({
+      providers: minimal_providers,
+      temperature: 2,
+      compress_threshold: 0.95,
+    });
+    expect(upper.temperature).toBe(2);
+    expect(upper.compress_threshold).toBe(0.95);
+
+    const rejected = [
+      { temperature: -0.1 },
+      { temperature: 2.0001 },
+      { compress_threshold: 0.96 },
+      { compress_threshold: 0 },
+      { context_budget_tokens: 0 },
+      { context_budget_tokens: 1.2 },
+      { max_tokens: 0 },
+      { max_turns: 1.5 },
+      { terminal_timeout_ms: 0 },
+      { providers: [{ ...minimal_providers[0], timeout_ms: 0 }] },
+      { providers: [{ ...minimal_providers[0], timeout_ms: 1.5 }] },
+    ];
+    for (const extra of rejected) {
+      expect(() => parse_agent_config({ providers: minimal_providers, ...extra })).toThrow();
+    }
+  });
+
+  it("freezes gateway tool lists and plugin role grants", () => {
+    const config = parse_agent_config({
+      providers: minimal_providers,
+      gateway: {
+        platforms: ["webhook"],
+        tools_enabled: ["read_file"],
+        token_envs: { webhook: "LICH_GATEWAY_TOKEN" },
+      },
+      plugins: [{ path: "p.js", settings: { mode: "safe" }, models: ["chat"] }],
+    });
+    expect(Object.isFrozen(config.gateway?.platforms)).toBe(true);
+    expect(Object.isFrozen(config.gateway?.tools_enabled)).toBe(true);
+    expect(Object.isFrozen(config.gateway?.token_envs)).toBe(true);
+    const plugin = config.plugins[0];
+    expect(typeof plugin).toBe("object");
+    if (typeof plugin === "string" || plugin === undefined) {
+      return;
+    }
+    const models = plugin.models;
+    const settings = plugin.settings;
+    expect(models).toEqual(["chat"]);
+    expect(settings).toEqual({ mode: "safe" });
+    expect(Object.isFrozen(models)).toBe(true);
+    expect(Object.isFrozen(settings)).toBe(true);
+    if (models === undefined || settings === undefined) {
+      return;
+    }
+    expect(() => {
+      (models as string[]).push("compress");
+    }).toThrow(TypeError);
+    expect(() => {
+      settings.mode = "open";
+    }).toThrow(TypeError);
+    expect(() => {
+      (config.gateway?.tools_enabled as string[]).push("terminal");
+    }).toThrow(TypeError);
+    expect(() => {
+      (config.gateway?.token_envs as Record<string, string>).discord = "DISCORD_BOT_TOKEN";
+    }).toThrow(TypeError);
+    expect(models).toEqual(["chat"]);
+    expect(config.gateway?.tools_enabled).toEqual(["read_file"]);
+  });
 });
