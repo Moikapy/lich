@@ -9,7 +9,7 @@ import { create_prompt_submit_settle } from "./prompt_submit_settle";
 import { submit_notice_blocks } from "./submit_notices";
 import { event_blocks } from "./event_blocks";
 import { cleared_chat_local_state } from "./chat_local_state";
-import { user_block } from "./transcript";
+import { error_notice_block, tool_result_block, user_block } from "./transcript";
 import { INITIAL_UI_STATE, type HistoryBlock, type UiState } from "./types";
 
 const usage = (total_tokens: number) => ({
@@ -267,6 +267,39 @@ describe("error_text", () => {
     expect(error_text({ message: 12 })).toBe("unknown error");
     expect(error_text(new Error("live"))).toBe("live");
     expect(error_text("plain")).toBe("plain");
+  });
+
+  it("drops an empty message and does not stringify arrays", () => {
+    expect(error_text({ message: "" })).toBe("unknown error");
+    expect(error_text([])).toBe("unknown error");
+    expect(error_text([1, 2])).not.toContain("[object Object]");
+    expect(error_text(null)).toBe("null");
+    expect(error_text(0)).toBe("0");
+    expect(error_text(false)).toBe("false");
+  });
+});
+
+describe("transcript caps", () => {
+  it("keeps a 300-char error and ellipsizes the next character", () => {
+    const exact = "e".repeat(300);
+    expect(error_notice_block(exact).lines[0]).toBe(`· error: ${exact}`);
+    const line = error_notice_block(`${exact}x`).lines[0] ?? "";
+    expect(line).toBe(`· error: ${"e".repeat(299)}…`);
+    expect(line.includes(`${exact}x`)).toBe(false);
+  });
+
+  it("ellipsizes long tool args and output", () => {
+    const block = tool_result_block(
+      { id: "1", name: "shell", args: { cmd: "x".repeat(100) } },
+      false,
+      "y".repeat(130),
+    );
+    expect(block.role).toBe("error");
+    expect(block.lines[0]).toContain("…");
+    expect(block.lines[0]?.includes("x".repeat(100))).toBe(false);
+    expect(block.lines[1]).toContain("error");
+    expect(block.lines[1]).toContain("…");
+    expect(block.lines[1]?.includes("y".repeat(130))).toBe(false);
   });
 });
 
