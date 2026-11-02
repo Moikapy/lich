@@ -164,7 +164,12 @@ async function handle_irc_line(
     socket.send("PONG :tmi.twitch.tv");
     return;
   }
-  if (parsed.kind !== "privmsg" || parsed.user === twitch.nick) {
+  // Twitch logins are case-insensitive; the PRIVMSG prefix is the lowercase
+  // login, while LICH_TWITCH_NICK is often the display-name casing. A
+  // case-sensitive compare treats the bot's own echo as a viewer. With only
+  // an allowed_chats list, that echo starts another turn, whose reply echoes
+  // again, and the bot talks to itself until the process stops.
+  if (parsed.kind !== "privmsg" || same_twitch_nick(parsed.user, twitch.nick)) {
     return;
   }
   const reply = await run_inbound_message(
@@ -227,6 +232,10 @@ export function parse_irc_line(line: string): ParsedLine {
     return { kind: "other", channel: "", user: "", text: "" };
   }
   return privmsg;
+}
+
+function same_twitch_nick(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 function match_privmsg(line: string): ParsedLine | undefined {

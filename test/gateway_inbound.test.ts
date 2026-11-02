@@ -290,6 +290,35 @@ describe("twitch inbound", () => {
     await adapter.stop();
   });
 
+  it("ignores its own echo when the configured nick differs only by case", async () => {
+    remember_env();
+    process.env.LICH_TWITCH_OAUTH_TOKEN = "fixture-twitch-token";
+    process.env.LICH_TWITCH_NICK = "LichBot";
+    process.env.LICH_TWITCH_CHANNELS = "lobby";
+    const seen: string[] = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const adapter = create_twitch_adapter(adapter_params(async (_platform, channel, user, text) => {
+      seen.push(`${channel}:${user}:${text}`);
+      return `reply ${text}`;
+    }));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    socket.emit(
+      ":lichbot!lichbot@lichbot.tmi.twitch.tv PRIVMSG #lobby :echo of the bot\r\n" +
+        ":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #lobby :hello\r\n",
+    );
+    const bodies = (): string[] =>
+      socket.sent.filter((line) => line.startsWith("PRIVMSG #")).map((line) => line.slice(line.indexOf(" :") + 2));
+    await wait_for(() => bodies().length === 1 && seen.length === 1);
+    expect(seen).toEqual(["lobby:viewer:hello"]);
+    expect(bodies()).toEqual(["reply hello"]);
+    socket.emit(":lichbot!lichbot@lichbot.tmi.twitch.tv PRIVMSG #lobby :reply hello\r\n");
+    await settle();
+    expect(seen).toEqual(["lobby:viewer:hello"]);
+    expect(bodies()).toEqual(["reply hello"]);
+    await adapter.stop();
+  });
+
   it("does not double the oauth prefix when the token already has one", async () => {
     remember_env();
     process.env.LICH_TWITCH_OAUTH_TOKEN = "oauth:already";

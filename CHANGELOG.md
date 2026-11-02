@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Twitch: the bot ignores its own chat echo when `LICH_TWITCH_NICK` differs
+  only by case from the login Twitch puts on the PRIVMSG. A case-sensitive
+  compare treated that echo as a viewer, so a channel allowlist answered it
+  again and the bot replied to itself without stopping.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
