@@ -200,6 +200,44 @@ describe("docs_read", () => {
     expect(beyond.output).toBe("# lich doc: guide/gateway.md\n");
   });
 
+  it("floors offset and limit into the file and ignores non-numeric windows", async () => {
+    const first_line = "# lich doc: guide/gateway.md\n# Gateway guide";
+    const adapter_line = "The webhook adapter forwards platform events to the agent.";
+    for (const offset of [0, -4]) {
+      const from_start = await docs_read_tool.execute(
+        { path: "guide/gateway.md", offset, limit: 1 },
+        fixture_context(),
+      );
+      expect(from_start.ok).toBe(true);
+      expect(from_start.output).toBe(first_line);
+    }
+    const floored = await docs_read_tool.execute(
+      { path: "guide/gateway.md", offset: 2.9, limit: 1 },
+      fixture_context(),
+    );
+    expect(floored.output).toBe("# lich doc: guide/gateway.md\n");
+    for (const limit of [0, -2]) {
+      const one_line = await docs_read_tool.execute(
+        { path: "guide/gateway.md", offset: 3, limit },
+        fixture_context(),
+      );
+      expect(one_line.ok).toBe(true);
+      expect(one_line.output).toBe(`# lich doc: guide/gateway.md\n${adapter_line}`);
+    }
+    const string_offset = await docs_read_tool.execute(
+      { path: "guide/gateway.md", offset: "3", limit: 1 },
+      fixture_context(),
+    );
+    expect(string_offset.output).toBe(first_line);
+    expect(string_offset.output).not.toContain(adapter_line);
+    const string_limit = await docs_read_tool.execute(
+      { path: "guide/gateway.md", offset: 3, limit: "1" },
+      fixture_context(),
+    );
+    expect(string_limit.output).toContain(adapter_line);
+    expect(string_limit.output).toContain("## Webhook events");
+  });
+
   it("reports not_found with available paths listed", async () => {
     const missing = await docs_read_tool.execute({ path: "guide/absent.md" }, fixture_context());
     expect(missing.ok).toBe(false);

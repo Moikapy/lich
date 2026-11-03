@@ -133,4 +133,49 @@ describe("session_actions", () => {
     expect(abort_rpc).not.toHaveBeenCalled();
     expect(clear_rpc).not.toHaveBeenCalled();
   });
+
+  it("start_fresh only creates when nothing is active", async () => {
+    create_rpc.mockResolvedValueOnce("fresh-0");
+    await start_fresh_session();
+    expect(create_rpc).toHaveBeenCalledWith("ossuary", "fresh");
+    expect(abort_rpc).not.toHaveBeenCalled();
+    expect(clear_rpc).not.toHaveBeenCalled();
+    expect(get_active_session()).toMatchObject({ session_id: "fresh-0", source: "create" });
+  });
+
+  it("start_fresh does not abort the bag it just created when the id is unchanged", async () => {
+    bind_active_session({ session_id: "same", source: "auto_create" });
+    create_rpc.mockResolvedValueOnce("same");
+    await start_fresh_session();
+    expect(abort_rpc).not.toHaveBeenCalled();
+    expect(clear_rpc).not.toHaveBeenCalled();
+    expect(get_active_session()).toMatchObject({ session_id: "same", source: "create" });
+  });
+
+  it("start_fresh leaves the previous bag when create fails", async () => {
+    bind_active_session({ session_id: "old", source: "resume", resume_id: "alpha" });
+    const before = get_active_session();
+    create_rpc.mockRejectedValueOnce(new Error("create failed"));
+    await expect(start_fresh_session()).rejects.toThrow("create failed");
+    expect(abort_rpc).not.toHaveBeenCalled();
+    expect(clear_rpc).not.toHaveBeenCalled();
+    expect(get_active_session()).toBe(before);
+  });
+
+  it("resume leaves the current bag when the transcript lookup fails", async () => {
+    bind_active_session({ session_id: "live", source: "create" });
+    const before = get_active_session();
+    resume_rpc.mockRejectedValueOnce(new Error("session not found"));
+    await expect(resume_listed_session("missing")).rejects.toThrow("session not found");
+    expect(get_active_session()).toBe(before);
+  });
+
+  it("clear_active leaves the binding when clear fails", async () => {
+    bind_active_session({ session_id: "s4", source: "create" });
+    const before = get_active_session();
+    clear_rpc.mockRejectedValueOnce(new Error("clear failed"));
+    await expect(clear_active_session()).rejects.toThrow("clear failed");
+    expect(abort_rpc).toHaveBeenCalledWith("s4");
+    expect(get_active_session()).toBe(before);
+  });
 });

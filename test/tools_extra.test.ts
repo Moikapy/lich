@@ -418,6 +418,14 @@ describe("process_list", () => {
     expect(filtered.ok).toBe(true);
     expect(filtered.output).toBe("no matching processes");
   });
+
+  it("matches a filter case-insensitively against this process", async () => {
+    const runner = path.basename(process.execPath).toUpperCase();
+    const listing = await executor.execute("process_list", { filter: runner, max_results: 500 });
+    expect(listing.ok).toBe(true);
+    expect(listing.output.split("\n").some((line) => line.startsWith(`${process.pid}\t`))).toBe(true);
+    expect(listing.output).not.toBe("no matching processes");
+  });
 });
 
 describe("disk_usage", () => {

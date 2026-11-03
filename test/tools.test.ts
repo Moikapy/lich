@@ -359,6 +359,22 @@ describe("list_dir", () => {
     expect(result.output.includes("node_modules")).toBe(false);
   });
 
+  it("lists directories before files and stops at depth 1", async () => {
+    await write_temp(tmp_root, "order/aaa.txt", "local\n");
+    await write_temp(tmp_root, "order/m-dir/note.txt", "nested\n");
+    await write_temp(tmp_root, "order/z-dir/note.txt", "nested\n");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const shallow = await executor.execute("list_dir", { path: "order", depth: 1 });
+    expect(shallow.ok).toBe(true);
+    expect(shallow.output.split("\n")).toEqual([
+      "d m-dir/",
+      "d z-dir/",
+      "- aaa.txt (6 bytes)",
+    ]);
+  });
+
   it("skips .git, dist, and .cursor so their contents stay out of the listing and grep", async () => {
     await write_temp(tmp_root, "skip/keep.txt", "keep-marker\n");
     await write_temp(tmp_root, "skip/.git/config", "git-token-marker\n");
@@ -454,6 +470,24 @@ describe("symlink confinement", () => {
     const listed = await executor.execute("list_dir", { path: "escape_link" });
     expect(listed.ok).toBe(false);
     expect(listed.error?.startsWith("path_escape")).toBe(true);
+  });
+
+  it("does not walk a directory symlink that points outside the ward", async () => {
+    const outside = await mkdtemp(path.join(TMP_BASE, "outside-alias-"));
+    outside_dirs.push(outside);
+    await writeFile(path.join(outside, "outside-secret.txt"), "leak\n", "utf8");
+    await mkdir(path.join(tmp_root, "ward"), { recursive: true });
+    symlinkSync(outside, path.join(tmp_root, "ward", "alias"));
+    await writeFile(path.join(tmp_root, "ward", "local.txt"), "inside\n", "utf8");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const listed = await executor.execute("list_dir", { path: "ward", depth: 4 });
+    expect(listed.ok).toBe(true);
+    expect(listed.output).toContain("- local.txt (");
+    expect(listed.output).toContain("- alias (");
+    expect(listed.output).not.toContain("d alias/");
+    expect(listed.output).not.toContain("outside-secret.txt");
   });
 
   it("rejects writing through a symlink leaf that points outside", async () => {
