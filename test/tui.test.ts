@@ -511,6 +511,9 @@ describe("notice blocks", () => {
     expect(tool_args_summary({ path: "src/a.ts", content: "..." })).toBe("src/a.ts");
     expect(tool_args_summary({ url: "https://x.test", method: "GET" })).toBe("https://x.test");
     expect(tool_args_summary({})).toBe("");
+    expect(tool_args_summary({ path: "src/a.ts\n--config", command: "ignored" })).toBe("src/a.ts --config");
+    expect(tool_args_summary({ path: "", command: "npm test" })).toBe("npm test");
+    expect(tool_args_summary({ path: 3, url: "https://x.test" })).toBe("https://x.test");
   });
 
   it("parses tool message content back into ok/output", () => {
