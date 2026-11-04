@@ -30,6 +30,17 @@ describe("format_status_pane_fields", () => {
     expect(fields.session_path).toBe("—");
     expect(fields.connection).toBe("connecting");
   });
+
+  it("labels a connection error and falls back when the message is missing", () => {
+    const refused = format_status_pane_fields(
+      { status: "error", error: "refused" },
+      INITIAL_UI_STATE,
+      "local-model",
+    );
+    expect(refused.connection).toBe("error: refused");
+    const missing = format_status_pane_fields({ status: "error" }, INITIAL_UI_STATE, "local-model");
+    expect(missing.connection).toBe("error: gateway");
+  });
 });
 
 describe("format_token_count", () => {
