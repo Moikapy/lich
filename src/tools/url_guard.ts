@@ -7,6 +7,7 @@ import dns from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import type { IncomingMessage } from "node:http";
 import type { LookupFunction } from "node:net";
 
 const MAX_REDIRECTS = 5;
@@ -180,9 +181,68 @@ function request_body(init: RequestInit | undefined): string | Uint8Array | unde
   throw new Error("blocked_url: unsupported_body");
 }
 
+function incoming_headers(incoming: IncomingMessage): Headers {
+  const response_headers = new Headers();
+  for (const [key, value] of Object.entries(incoming.headers)) {
+    if (typeof value === "string") {
+      response_headers.set(key, value);
+    } else if (Array.isArray(value) === true) {
+      for (const part of value) {
+        response_headers.append(key, part);
+      }
+    }
+  }
+  return response_headers;
+}
+
+/**
+ * Stream the socket instead of buffering until `end`. Callers that stop early
+ * (the byte clamp, a redirect) cancel this and the download stops with them.
+ */
+function stream_response_body(incoming: IncomingMessage): ReadableStream<Uint8Array> {
+  let stopped = false;
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      incoming.on("data", (chunk: Buffer) => {
+        if (stopped === true) {
+          return;
+        }
+        controller.enqueue(new Uint8Array(chunk));
+        if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+          incoming.pause();
+        }
+      });
+      incoming.on("end", () => {
+        if (stopped === true) {
+          return;
+        }
+        stopped = true;
+        controller.close();
+      });
+      incoming.on("error", (error: Error) => {
+        if (stopped === true) {
+          return;
+        }
+        stopped = true;
+        controller.error(error);
+      });
+    },
+    pull() {
+      if (stopped === false) {
+        incoming.resume();
+      }
+    },
+    cancel() {
+      stopped = true;
+      incoming.destroy();
+    },
+  });
+}
+
 /**
  * Connect with hostname kept for SNI/Host, but DNS forced to the vetted IP.
- * Does not follow redirects (caller handles Location).
+ * Does not follow redirects (caller handles Location). Resolves on headers so
+ * a huge or unfinished body cannot fill memory before the caller reads it.
  */
 function pinned_http_fetch(url: URL, ip: string, init: RequestInit): Promise<Response> {
   const lib = url.protocol === "https:" ? https : http;
@@ -190,6 +250,21 @@ function pinned_http_fetch(url: URL, ip: string, init: RequestInit): Promise<Res
   const headers = request_headers(init);
   const body = request_body(init);
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error): void => {
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
+    const succeed = (response: Response): void => {
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      resolve(response);
+    };
     const req = lib.request(
       {
         protocol: url.protocol,
@@ -201,40 +276,20 @@ function pinned_http_fetch(url: URL, ip: string, init: RequestInit): Promise<Res
         lookup: pinned_lookup(ip),
       },
       (incoming) => {
-        const chunks: Buffer[] = [];
-        incoming.on("data", (chunk: Buffer) => {
-          chunks.push(chunk);
-        });
-        incoming.on("end", () => {
-          const status = incoming.statusCode ?? 0;
-          const response_headers = new Headers();
-          for (const [key, value] of Object.entries(incoming.headers)) {
-            if (typeof value === "string") {
-              response_headers.set(key, value);
-            } else if (Array.isArray(value) === true) {
-              for (const part of value) {
-                response_headers.append(key, part);
-              }
-            }
-          }
-          resolve(new Response(Buffer.concat(chunks), { status, headers: response_headers }));
-        });
+        const status = incoming.statusCode ?? 0;
+        succeed(new Response(stream_response_body(incoming), { status, headers: incoming_headers(incoming) }));
       },
     );
-    req.on("error", reject);
+    req.on("error", fail);
     const signal = init.signal;
     if (signal !== undefined && signal !== null) {
       if (signal.aborted === true) {
         req.destroy(new Error("aborted"));
         return;
       }
-      signal.addEventListener(
-        "abort",
-        () => {
-          req.destroy(new Error("aborted"));
-        },
-        { once: true },
-      );
+      signal.addEventListener("abort", () => {
+        req.destroy(new Error("aborted"));
+      }, { once: true });
     }
     if (body !== undefined) {
       req.write(body);
@@ -272,6 +327,9 @@ export async function safe_fetch(raw_url: string, init?: RequestInit): Promise<R
     if (next === undefined) {
       return response;
     }
+    // Drop the redirect body. Waiting for it would download a payload the
+    // caller never sees, and a body that never ends would stall the next hop.
+    await response.body?.cancel().catch(() => undefined);
     current = next;
     request_init = { ...request_init, method: "GET", body: undefined };
   }

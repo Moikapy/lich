@@ -51,9 +51,11 @@ async function run_fetch_url(args: Record<string, unknown>, external?: AbortSign
   });
   const content_type = response.headers.get("content-type") ?? "";
   if (response.ok === false) {
+    await release_body(response);
     return { ok: false, output: "", error: `http_${response.status}` };
   }
   if (content_type.startsWith("image/") === true || content_type.startsWith("application/octet-stream") === true) {
+    await release_body(response);
     return { ok: false, output: "", error: `unsupported_content_type: ${content_type}` };
   }
   const byte_budget = Math.min(MAX_BODY_BYTES, max_chars * 4);
@@ -61,6 +63,10 @@ async function run_fetch_url(args: Record<string, unknown>, external?: AbortSign
   const marker = content_type.toLowerCase().includes("text/html") === true ? "[html content]\n" : "";
   const body = clamp_output(`${marker}${clamped.text}`, max_chars);
   return { ok: true, output: `${header_line(response, clamped.bytes_read)}\n${body}` };
+}
+
+async function release_body(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 function header_line(response: Response, bytes_read: number): string {
