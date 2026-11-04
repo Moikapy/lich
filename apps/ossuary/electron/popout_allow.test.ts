@@ -19,4 +19,12 @@ describe("is_allowed_popout_url", () => {
     expect(is_allowed_popout_url("file:///tmp/popout.html", origin)).toBe(false);
     expect(is_allowed_popout_url("not a url", origin)).toBe(false);
   });
+
+  it("denies a normalized escape, a trailing slash, localhost, and a bad origin", () => {
+    expect(is_allowed_popout_url(`${origin}/popout.html/../index.html`, origin)).toBe(false);
+    expect(is_allowed_popout_url(`${origin}/popout.html/`, origin)).toBe(false);
+    expect(is_allowed_popout_url(`${origin}/POPOUT.HTML`, origin)).toBe(false);
+    expect(is_allowed_popout_url("http://localhost:5173/popout.html", origin)).toBe(false);
+    expect(is_allowed_popout_url(`${origin}${POPOUT_PATH}`, "not a url")).toBe(false);
+  });
 });

@@ -62,6 +62,24 @@ describe("session_rpc", () => {
     await expect(session_list()).rejects.toThrow(/unexpected session.list result/);
   });
 
+  it("omits an absent create label and rejects malformed list and resume fields", async () => {
+    request.mockResolvedValueOnce({ session_id: "new-1" });
+    await expect(session_create("ossuary")).resolves.toBe("new-1");
+    expect(request).toHaveBeenCalledWith("session.create", { source: "ossuary" });
+
+    request.mockResolvedValueOnce({ sessions: [] });
+    await expect(session_list()).resolves.toEqual([]);
+
+    request.mockResolvedValueOnce({ sessions: [{ id: "x", mtime_ms: "10" }] });
+    await expect(session_list()).rejects.toThrow(/unexpected session.list entry/);
+
+    request.mockResolvedValueOnce({ sessions: [["a", 1]] });
+    await expect(session_list()).rejects.toThrow(/unexpected session.list entry/);
+
+    request.mockResolvedValueOnce({ session_id: "bag" });
+    await expect(session_resume("alpha")).rejects.toThrow(/unexpected session.resume result/);
+  });
+
   it("rejects create, resume, and clear results that omit required fields", async () => {
     request.mockResolvedValueOnce({ session_id: 1 });
     await expect(session_create("ossuary")).rejects.toThrow(/unexpected session.create result/);

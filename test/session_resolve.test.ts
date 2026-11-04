@@ -37,6 +37,23 @@ describe("resolve_session_path", () => {
     await expect(resolve_session_path(dir, "latest")).resolves.toBe(path.join(dir, "new-2.jsonl"));
   });
 
+  it("treats latest as the keyword even when a transcript is named latest", async () => {
+    const dir = await make_session_dir();
+    await touch_jsonl(dir, "latest", 100);
+    await touch_jsonl(dir, "newer-turn", 300);
+    await expect(resolve_session_path(dir, "latest")).resolves.toBe(path.join(dir, "newer-turn.jsonl"));
+  });
+
+  it("does not resume one session when the prefix is empty", async () => {
+    const dir = await make_session_dir();
+    await touch_jsonl(dir, "alpha", 100);
+    await touch_jsonl(dir, "beta", 200);
+    await expect(resolve_session_path(dir, "")).rejects.toMatchObject({
+      name: "SessionResolveError",
+      kind: "ambiguous",
+    });
+  });
+
   it("resolves an exact session id", async () => {
     const dir = await make_session_dir();
     await touch_jsonl(dir, "m1abc-1-tui", 100);

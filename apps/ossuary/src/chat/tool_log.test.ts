@@ -153,4 +153,46 @@ describe("apply_tool_log_event", () => {
   it("ignores non-tool events", () => {
     expect(apply_tool_log_event([], { type: "llm_start", turn: 1 })).toEqual([]);
   });
+
+  it("does not finish an earlier turn when a later row reused the call id", () => {
+    const shared = { id: "c1", name: "shell", args: { cmd: "first" } };
+    let entries = apply_tool_log_event([], {
+      type: "tool_call_start",
+      turn: 2,
+      call: shared,
+    });
+    entries = apply_tool_log_event(entries, {
+      type: "tool_call_start",
+      turn: 1,
+      call: { id: "c1", name: "shell", args: { cmd: "second" } },
+    });
+    entries = apply_tool_log_event(entries, {
+      type: "tool_call_end",
+      turn: 2,
+      call: shared,
+      result: { ok: true, output: "done-2" },
+    });
+    expect(entries.map((item) => [item.turn, item.status, item.output, item.args])).toEqual([
+      [2, "ok", "done-2", { cmd: "first" }],
+      [1, "running", undefined, { cmd: "second" }],
+    ]);
+  });
+
+  it("appends a different tool name instead of closing the running row", () => {
+    let entries = apply_tool_log_event([], {
+      type: "tool_call_start",
+      turn: 1,
+      call: { id: "c1", name: "shell", args: {} },
+    });
+    entries = apply_tool_log_event(entries, {
+      type: "tool_call_end",
+      turn: 1,
+      call: { id: "c1", name: "read", args: {} },
+      result: { ok: false, output: "", error: "missing" },
+    });
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.status).toBe("running");
+    expect(entries[0]?.name).toBe("shell");
+    expect(entries[1]).toMatchObject({ name: "read", status: "error", error: "missing" });
+  });
 });

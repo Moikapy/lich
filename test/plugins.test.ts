@@ -135,6 +135,20 @@ describe("load_plugins", () => {
     await rm(no_export, { force: true });
   });
 
+  it("refuses suffixes that only look like modules and still loads a real sibling", async () => {
+    const { plugins, errors } = await load_plugins(
+      ["good.plugin.TS", "good.plugin.ts?x=1", "good.plugin.ts.bak", "../../etc/passwd", "named.plugin.ts"],
+      FIXTURES,
+    );
+    expect(plugins.map((loaded) => loaded.plugin.name)).toEqual(["named"]);
+    expect(errors.map((error) => error.error_message)).toEqual([
+      "plugin_entry_not_a_module: good.plugin.TS",
+      "plugin_entry_not_a_module: good.plugin.ts?x=1",
+      "plugin_entry_not_a_module: good.plugin.ts.bak",
+      "plugin_entry_not_a_module: ../../etc/passwd",
+    ]);
+  });
+
   it("refuses non-module entries before import and still loads the rest", async () => {
     const { plugins, errors } = await load_plugins(
       ["notes.txt", "good.plugin.ts", "payload.json"],
