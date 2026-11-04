@@ -2,6 +2,7 @@
  * Must-fix tools: symlink escape, forbidden paths, SSRF, run_tests filter, env scrub.
  */
 import dns from "node:dns/promises";
+import { createServer, type Server } from "node:http";
 import { mkdir, mkdtemp, symlink, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +15,9 @@ import {
   safe_fetch,
   set_url_guard_fetch,
 } from "../src/tools/url_guard.js";
+import { fetch_url_tool } from "../src/tools/builtin/fetch_url.js";
 import { scrub_spawn_env } from "../src/tools/builtin/terminal.js";
+import { read_clamped_text } from "../src/tools/read_clamped.js";
 import { grep_files_tool } from "../src/tools/builtin/grep_files.js";
 import { run_tests_tool, set_test_command_runner, reset_test_command_runner } from "../src/tools/builtin/run_tests.js";
 import { TMP_BASE } from "./helpers/tmp_base.js";
@@ -185,7 +188,90 @@ describe("S-2 SSRF helpers", () => {
     expect(response.status).toBe(200);
     expect(seen).toEqual(["https://example.com/path"]);
   });
+
+  it("stops a pinned download when the body is clamped or abandoned", async () => {
+    const saved = process.env["LICH_ALLOW_PRIVATE_URLS"];
+    process.env["LICH_ALLOW_PRIVATE_URLS"] = "1";
+    const closed = { big: false, hop: false, fail: false };
+    const server = createServer((request, response) => {
+      if (request.url === "/big") {
+        response.writeHead(200, { "content-type": "text/plain" });
+        response.write("abcdefghij");
+        request.on("close", () => {
+          closed.big = true;
+        });
+        return;
+      }
+      if (request.url === "/hop") {
+        response.writeHead(302, { location: "/land" });
+        response.write("redirect-body-that-must-not-block");
+        request.on("close", () => {
+          closed.hop = true;
+        });
+        return;
+      }
+      if (request.url === "/fail") {
+        response.writeHead(500, { "content-type": "text/plain" });
+        response.write("nope");
+        request.on("close", () => {
+          closed.fail = true;
+        });
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("landed");
+    });
+    const port = await listen_local(server);
+    const base = `http://127.0.0.1:${port}`;
+    try {
+      const response = await safe_fetch(`${base}/big`);
+      const clamped = await read_clamped_text(response, 4);
+      expect(clamped.text).toBe("abcd");
+      expect(clamped.truncated).toBe(true);
+      await wait_until(() => closed.big);
+      const followed = await safe_fetch(`${base}/hop`);
+      expect(await followed.text()).toBe("landed");
+      await wait_until(() => closed.hop);
+      const failed = await fetch_url_tool.execute(
+        { url: `${base}/fail` },
+        { work_dir: process.cwd(), env: {} },
+      );
+      expect(failed.ok).toBe(false);
+      expect(failed.error).toBe("http_500");
+      await wait_until(() => closed.fail);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+      restore_private_url_env(saved);
+    }
+  });
 });
+
+function listen_local(server: Server): Promise<number> {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        throw new Error("test server did not bind");
+      }
+      resolve(address.port);
+    });
+  });
+}
+
+async function wait_until(ready: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (ready() === false) {
+    if (Date.now() > deadline) {
+      throw new Error("timed out waiting for the download to stop");
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+  }
+}
 
 describe("S-1/S-3 grep_files guards", () => {
   it("does not follow a symlink file out of work_dir", async () => {
