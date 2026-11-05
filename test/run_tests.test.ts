@@ -168,4 +168,19 @@ describe("run_tests", () => {
     expect(result.output.startsWith("x".repeat(2000))).toBe(true);
     expect(result.output).toContain("truncated");
   });
+
+  it("counts a full stderr stream in the omitted total after each stream hits 2000", async () => {
+    const { runner } = recording_runner({
+      exit_code: 0,
+      stdout: "x".repeat(5000),
+      stderr: "y".repeat(5000),
+    });
+    set_test_command_runner(runner);
+    const result = await executor.execute("run_tests", {}, { work_dir: tmp_root, env: {} });
+    // 2000 + 2000 + "\n[exit 0]" - 2000. Dropping the per-stream cap would omit 8009.
+    expect(result.ok).toBe(true);
+    expect(result.output.startsWith("x".repeat(2000))).toBe(true);
+    expect(result.output).toContain("[... truncated, 2009 chars omitted ...]");
+    expect(result.output.includes("y")).toBe(false);
+  });
 });

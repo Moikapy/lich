@@ -349,6 +349,22 @@ describe("gatekeeper plugin", () => {
     expect(staged.out).not.toContain(".env");
   });
 
+  it("rejects a colon inside a path before git add can treat it as pathspec magic", async () => {
+    const marker = "COLON-PATH-MARKER";
+    await writeFile(path.join(tmp_root, "ok:name.txt"), `${marker}\n`);
+    const result = await commit_executor().execute(
+      "git_commit",
+      { message: "add colon", paths: ["ok:name.txt"] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("invalid_path: ok:name.txt");
+    const count = await git(tmp_root, ["rev-list", "--count", "HEAD"]);
+    expect(count.out.trim()).toBe("1");
+    const shown = await git(tmp_root, ["show", "--format=", "HEAD"]);
+    expect(shown.out).not.toContain(marker);
+  });
+
   it("refuses certificate and dotenv basenames, a whole-tree path, and an oversized path list", async () => {
     const executor = commit_executor();
     await mkdir(path.join(tmp_root, "keys"));

@@ -233,6 +233,37 @@ describe("discord inbound", () => {
     await adapter.stop();
   });
 
+  it("keeps a leading mention when the bot id is unset or empty, and ignores blank content", async () => {
+    remember_env();
+    process.env.LICH_DISCORD_BOT_TOKEN = "fixture-discord-token";
+    const seen: string[] = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("fetch", async () => new Response("{}", { status: 200 }));
+    const adapter = create_discord_adapter(adapter_params(async (_platform, _chat, user, text) => {
+      seen.push(`${user}:${text}`);
+      return `echo ${text}`;
+    }));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    const emit = (content: string, author_id: string): void => {
+      socket.emit(JSON.stringify({
+        t: "MESSAGE_CREATE",
+        d: { channel_id: "c1", content, author: { id: author_id, bot: false } },
+      }));
+    };
+    emit("<@999> hello", "u1");
+    emit("   \n\t", "u2");
+    emit("plain", "u3");
+    await wait_for(() => seen.length === 2);
+    expect(seen).toEqual(["u1:<@999> hello", "u3:plain"]);
+    process.env.LICH_DISCORD_BOT_ID = "";
+    emit("<@> kept-tail", "u4");
+    emit("<@999> still-here", "u5");
+    await wait_for(() => seen.length === 4);
+    expect(seen.slice(2)).toEqual(["u4:kept-tail", "u5:<@999> still-here"]);
+    await adapter.stop();
+  });
+
   it("posts a one-line agent error when the handler throws", async () => {
     remember_env();
     process.env.LICH_DISCORD_BOT_TOKEN = "fixture-discord-token";
