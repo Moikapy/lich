@@ -433,6 +433,33 @@ describe("terminal", () => {
     expect(result.error).toBe("timeout");
     expect(Date.now() - started < 5000).toBe(true);
   });
+
+  it("caps stdout and stderr at 50000 chars before the 20000-char clamp", async () => {
+    const script = 'process.stdout.write("a".repeat(60000)); process.stderr.write("b".repeat(60000));';
+    const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`;
+    const context: ToolContext = { work_dir: tmp_root, env: {} };
+    const result = await terminal_tool.execute({ command }, context);
+    // 50000 + 50000 + "\n[exit 0]" - 20000. A missing per-stream cap would omit 100009.
+    expect(result.ok).toBe(true);
+    expect(result.output.startsWith("a".repeat(20000))).toBe(true);
+    expect(result.output).toContain("[... truncated, 80009 chars omitted ...]");
+    expect(result.output.includes("b")).toBe(false);
+  });
+
+  it("floors a non-positive timeout_ms and ignores non-numeric timeout arguments", async () => {
+    const context: ToolContext = { work_dir: tmp_root, env: {} };
+    for (const timeout_ms of [0, -4, 1.9]) {
+      const started = Date.now();
+      const result = await terminal_tool.execute({ command: "sleep 2", timeout_ms }, context);
+      expect(result.error, String(timeout_ms)).toBe("timeout");
+      expect(Date.now() - started < 1800, String(timeout_ms)).toBe(true);
+    }
+    for (const timeout_ms of ["1", true]) {
+      const result = await terminal_tool.execute({ command: "sleep 0.2", timeout_ms }, context);
+      expect(result.ok, String(timeout_ms)).toBe(true);
+      expect(result.error, String(timeout_ms)).toBeUndefined();
+    }
+  });
 });
 
 

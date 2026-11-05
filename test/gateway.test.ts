@@ -979,6 +979,46 @@ describe("webhook adapter", () => {
     }
   });
 
+  it("rejects a webhook token that is not an exact match and does not run the agent", async () => {
+    const work_dir = temp_work_dir();
+    process.env.LICH_GATEWAY_TOKEN = "sekrit";
+    let port: number | undefined;
+    const seen: string[] = [];
+    const adapter = make_adapter(work_dir, "echo", (bound) => {
+      port = bound;
+    }, async (platform, chat_id, user_id, text) => {
+      seen.push(`${platform}:${chat_id}:${user_id}:${text}`);
+      return "ok";
+    });
+    try {
+      await adapter.start();
+      if (port === undefined) {
+        throw new Error("webhook did not report a listening port");
+      }
+      const base = `http://127.0.0.1:${port}/message`;
+      const bodies = JSON.stringify({ text: "hi" });
+      for (const token of ["nope", "sek", "sekrit, extra", "xsekrit", "sekritx"]) {
+        const denied = await fetch(base, {
+          method: "POST",
+          headers: { "x-lich-token": token },
+          body: bodies,
+        });
+        expect(denied.status, token).toBe(401);
+      }
+      expect(seen).toEqual([]);
+      const allowed = await fetch(base, {
+        method: "POST",
+        headers: { "x-lich-token": "sekrit" },
+        body: bodies,
+      });
+      expect(allowed.status).toBe(200);
+      expect(seen).toEqual(["webhook:default:anonymous:hi"]);
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a message body without text and closes cleanly on stop()", async () => {
     const work_dir = temp_work_dir();
     let port: number | undefined;
