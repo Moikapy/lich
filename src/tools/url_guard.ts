@@ -55,20 +55,102 @@ function is_blocked_ipv4(address: string): boolean {
   return a >= 224;
 }
 
-/** Classify an IPv6 literal as blocked (loopback/link-local/ULA/v4-mapped). */
+/** Eight hextets, or undefined when the literal is not a plain IPv6 address. */
+function ipv6_hextets(address: string): number[] | undefined {
+  const halves = address.toLowerCase().split("::");
+  if (halves.length > 2) {
+    return undefined;
+  }
+  const head = parse_ipv6_side(halves[0] ?? "");
+  if (head === undefined) {
+    return undefined;
+  }
+  if (halves.length === 1) {
+    return head.length === 8 ? head : undefined;
+  }
+  const tail = parse_ipv6_side(halves[1] ?? "");
+  if (tail === undefined) {
+    return undefined;
+  }
+  const missing = 8 - head.length - tail.length;
+  if (missing < 1) {
+    return undefined;
+  }
+  return [...head, ...Array.from({ length: missing }, () => 0), ...tail];
+}
+
+/** One side of a `::` split. A dotted IPv4 tail becomes the last two hextets. */
+function parse_ipv6_side(side: string): number[] | undefined {
+  if (side.length === 0) {
+    return [];
+  }
+  const bits = side.split(":");
+  const hextets: number[] = [];
+  for (let index = 0; index < bits.length; index += 1) {
+    const bit = bits[index] ?? "";
+    if (bit.includes(".") === true) {
+      const dotted = dotted_hextets(bit);
+      if (dotted === undefined || index !== bits.length - 1) {
+        return undefined;
+      }
+      hextets.push(dotted[0], dotted[1]);
+      continue;
+    }
+    if (bit.length === 0 || bit.length > 4 || /^[0-9a-f]+$/.test(bit) === false) {
+      return undefined;
+    }
+    hextets.push(Number.parseInt(bit, 16));
+  }
+  return hextets;
+}
+
+function dotted_hextets(text: string): [number, number] | undefined {
+  const octets = text.split(".").map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((n) => Number.isInteger(n) === false || n < 0 || n > 255) === true) {
+    return undefined;
+  }
+  const [a, b, c, d] = octets as [number, number, number, number];
+  return [(a << 8) | b, (c << 8) | d];
+}
+
+function ipv4_from_hextets(hi: number, lo: number): string {
+  return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+}
+
+/**
+ * IPv4 carried inside a transition address, if this literal is one.
+ * Mapped (`::ffff:0:0/96`), translated (`::ffff:0:0:0/96`), NAT64
+ * (`64:ff9b::/96` and local `64:ff9b:1::/48`), and 6to4 (`2002::/16`).
+ */
+function embedded_ipv4(hextets: readonly number[]): string | undefined {
+  const mapped = hextets[0] === 0 && hextets[1] === 0 && hextets[2] === 0 && hextets[3] === 0 && hextets[4] === 0 && hextets[5] === 0xffff;
+  const translated = hextets[0] === 0 && hextets[1] === 0 && hextets[2] === 0 && hextets[3] === 0 && hextets[4] === 0xffff && hextets[5] === 0;
+  const nat64 = hextets[0] === 0x64 && hextets[1] === 0xff9b && hextets[2] === 0 && hextets[3] === 0 && hextets[4] === 0 && hextets[5] === 0;
+  const nat64_local = hextets[0] === 0x64 && hextets[1] === 0xff9b && hextets[2] === 1;
+  if (mapped === true || translated === true || nat64 === true || nat64_local === true) {
+    return ipv4_from_hextets(hextets[6] ?? 0, hextets[7] ?? 0);
+  }
+  if (hextets[0] === 0x2002) {
+    return ipv4_from_hextets(hextets[1] ?? 0, hextets[2] ?? 0);
+  }
+  return undefined;
+}
+
+/** Classify an IPv6 literal as blocked (loopback/link-local/ULA/embedded private IPv4). */
 function is_blocked_ipv6(address: string): boolean {
   const normalized = address.toLowerCase();
   if (normalized === "::" || normalized === "::1") {
     return true;
   }
-  if (normalized.startsWith("::ffff:")) {
-    const mapped = normalized.slice("::ffff:".length);
-    return net.isIPv4(mapped) === true ? is_blocked_ipv4(mapped) : true;
-  }
-  const head = Number.parseInt(normalized.split(":")[0] ?? "", 16);
-  if (Number.isFinite(head) === false) {
+  const hextets = ipv6_hextets(normalized);
+  if (hextets === undefined || hextets.slice(0, 6).every((part) => part === 0) === true) {
     return true;
   }
+  const embedded = embedded_ipv4(hextets);
+  if (embedded !== undefined) {
+    return is_blocked_ipv4(embedded);
+  }
+  const head = hextets[0] ?? 0;
   if ((head & 0xffc0) === 0xfe80) {
     return true;
   }

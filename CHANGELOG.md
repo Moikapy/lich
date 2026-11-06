@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- HTTP tools reject NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), 6to4 (`2002::/16`),
+  and IPv4-translated (`::ffff:0:0:0/96`) addresses when the embedded IPv4 is
+  private, loopback, or link-local. `http://[64:ff9b::a9fe:a9fe]/` no longer
+  passes the SSRF guard on a NAT64 network.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
