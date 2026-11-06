@@ -109,10 +109,51 @@ describe("S-2 SSRF helpers", () => {
     for (const address of blocked) {
       expect(is_blocked_ip(address), address).toBe(true);
     }
-    const public_addrs = ["172.15.255.255", "172.32.0.1", "100.63.0.1", "100.128.0.1", "223.0.0.1", "::ffff:8.8.8.8", "2001:4860:4860::8888"];
+    const public_addrs = [
+      "172.15.255.255",
+      "172.32.0.1",
+      "100.63.0.1",
+      "100.128.0.1",
+      "223.0.0.1",
+      "::ffff:8.8.8.8",
+      "::ffff:808:808",
+      "64:ff9b::808:808",
+      "2002:808:808::",
+      "2001:4860:4860::8888",
+    ];
     for (const address of public_addrs) {
       expect(is_blocked_ip(address), address).toBe(false);
     }
+  });
+
+  it("blocks transition addresses that embed a private IPv4", () => {
+    const blocked = [
+      "::ffff:7f00:1",
+      "0:0:0:0:0:ffff:127.0.0.1",
+      "::ffff:0:7f00:1",
+      "::ffff:0:169.254.169.254",
+      "64:ff9b::7f00:1",
+      "64:ff9b::a9fe:a9fe",
+      "64:ff9b::a00:1",
+      "64:ff9b:1::7f00:1",
+      "64:ff9b:1:0:0:0:a9fe:a9fe",
+      "2002:7f00:1::",
+      "2002:a9fe:a9fe::1",
+      "2002:0a00:1::",
+    ];
+    for (const address of blocked) {
+      expect(is_blocked_ip(address), address).toBe(true);
+    }
+  });
+
+  it("rejects NAT64 metadata literals before connect", async () => {
+    if (private_urls_allowed() === true) {
+      return;
+    }
+    await expect(resolve_public_ip("[64:ff9b::a9fe:a9fe]")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("64:ff9b::7f00:1")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("2002:a9fe:a9fe::")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("64:ff9b::808:808")).resolves.toBe("64:ff9b::808:808");
   });
 
   it("rejects mapped loopback and CGNAT literals before DNS", async () => {
