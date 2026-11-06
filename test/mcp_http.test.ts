@@ -38,6 +38,14 @@ describe("mcp http pipe", () => {
     await expect(pipe.request("ping", {})).rejects.toThrow("mcp error");
   });
 
+  it("uses a generic mcp error for an empty or non-string message", async () => {
+    for (const message of ["", 12, false]) {
+      const fetch_fn = (async () => new Response(JSON.stringify({ error: { message } }))) as typeof fetch;
+      const pipe = http_pipe(LOOPBACK, fetch_fn);
+      await expect(pipe.request("ping", {})).rejects.toThrow(/^mcp error$/);
+    }
+  });
+
   it("rejects an already-aborted request before fetch", async () => {
     const fetch_fn = vi.fn(async () => new Response("{}")) as typeof fetch;
     const pipe = http_pipe(LOOPBACK, fetch_fn);

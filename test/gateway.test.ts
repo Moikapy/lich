@@ -1213,6 +1213,14 @@ describe("telegram splitting", () => {
     expect(split_text("short", TELEGRAM_MAX_MESSAGE_CHARS)).toEqual(["short"]);
   });
 
+  it("cuts at a newline even when a later space sits in the same window", () => {
+    expect(split_text("ab\ncd efghijklmnop", 10)).toEqual(["ab", "cd", "efghijklmn", "op"]);
+  });
+
+  it("drops every leftover leading space after a cut", () => {
+    expect(split_text("a    b", 2)).toEqual(["a ", "b"]);
+  });
+
   it("degrades to an idle adapter when the token is missing", () => {
     const token = process.env.LICH_TELEGRAM_BOT_TOKEN;
     delete process.env.LICH_TELEGRAM_BOT_TOKEN;
