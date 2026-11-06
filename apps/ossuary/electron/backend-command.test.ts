@@ -63,6 +63,30 @@ describe("backend-command", () => {
     }
   });
 
+  it("encodes reserved characters in the websocket token", () => {
+    const boot = parse_serve_boot_line('  {"port":9,"token":"a&b c?#"}  ');
+    expect(boot).toEqual({ port: 9, token: "a&b c?#" });
+    const url = build_ws_url(boot);
+    expect(url).toBe("ws://127.0.0.1:9/?token=a%26b%20c%3F%23");
+    expect(url).not.toContain("a&b");
+    expect(url).not.toContain("?#");
+  });
+
+  it("rejects a fractional or string port without echoing the token", () => {
+    expect(() => parse_serve_boot_line('{"port":1.5,"token":"sekrit-token"}')).toThrow(
+      "invalid serve boot port",
+    );
+    expect(() => parse_serve_boot_line('{"port":"9","token":"sekrit-token"}')).toThrow(
+      "invalid serve boot port",
+    );
+    try {
+      parse_serve_boot_line('{"port":-1,"token":"sekrit-token"}');
+    } catch (error) {
+      expect(String(error)).toBe("Error: invalid serve boot port");
+      expect(String(error)).not.toContain("sekrit-token");
+    }
+  });
+
   it("extracts boot from chunked stdout", () => {
     const first = extract_boot_from_stdout('noise\n{"port":9,"tok', "");
     expect(first.boot).toBeUndefined();

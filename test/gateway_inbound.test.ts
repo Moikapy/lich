@@ -259,6 +259,37 @@ describe("discord inbound", () => {
     expect(socket.close_count).toBe(0);
     await adapter.stop();
   });
+
+  it("drops non-string content and does not coerce channel or bot flags", async () => {
+    remember_env();
+    process.env.LICH_DISCORD_BOT_TOKEN = "fixture-discord-token";
+    process.env.LICH_DISCORD_BOT_ID = "999";
+    const seen: string[] = [];
+    const urls: string[] = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      urls.push(String(url));
+      return new Response("{}", { status: 200 });
+    });
+    const adapter = create_discord_adapter(adapter_params(async (_platform, _chat, user, text) => {
+      seen.push(`${user}:${text}`);
+      return `echo ${text}`;
+    }));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    const emit = (data: Record<string, unknown>): void => {
+      socket.emit(JSON.stringify({ t: "MESSAGE_CREATE", d: data }));
+    };
+    emit({ channel_id: 9, content: "numeric-channel", author: { id: "u-num", bot: false } });
+    emit({ channel_id: "c1", content: 12, author: { id: "u1", bot: false } });
+    emit({ channel_id: "c1", content: "kept", author: { id: "u1", bot: "true" } });
+    await wait_for(() => seen.length === 2 && urls.length === 1);
+    expect(seen).toEqual(["u-num:numeric-channel", "u1:kept"]);
+    expect(urls).toEqual(["https://discord.com/api/v10/channels/c1/messages"]);
+    expect(urls.some((url) => url.includes("/channels/9/"))).toBe(false);
+    expect(urls.some((url) => url.includes("/channels//"))).toBe(false);
+    await adapter.stop();
+  });
 });
 
 describe("twitch inbound", () => {
@@ -374,6 +405,48 @@ describe("telegram inbound", () => {
     } finally {
       await adapter.stop();
       release_sleep();
+      polls.allow_exit();
+    }
+  });
+
+  it("keeps an empty text and uses the media placeholder only when text is nullish", async () => {
+    remember_env();
+    process.env.LICH_TELEGRAM_BOT_TOKEN = "fixture-telegram-token";
+    const seen: string[] = [];
+    const sent: string[] = [];
+    const polls = script_telegram_fetch(
+      [
+        {
+          status: 200,
+          body: {
+            result: [
+              { update_id: 1, message: { text: "", chat: { id: "room" }, from: { id: "user" } } },
+              { update_id: 2, message: { text: null, chat: { id: 4 }, from: { id: 5, is_bot: "true" } } },
+              { update_id: 3, message: { text: "hi", chat: { id: 6 } } },
+            ],
+          },
+        },
+      ],
+      sent,
+    );
+    const adapter = create_telegram_adapter(adapter_params(async (_platform, chat, user, text) => {
+      seen.push(`${chat}:${user}:${JSON.stringify(text)}`);
+      return text.length === 0 ? "" : `echo ${text}`;
+    }));
+    try {
+      await adapter.start();
+      await wait_for(() => seen.length === 3 && sent.length === 2);
+      expect(seen).toEqual([
+        'room:user:""',
+        '4:5:"media not supported yet"',
+        '6:unknown:"hi"',
+      ]);
+      expect(sent.map((body) => JSON.parse(body) as { chat_id: string; text: string })).toEqual([
+        { chat_id: "4", text: "echo media not supported yet" },
+        { chat_id: "6", text: "echo hi" },
+      ]);
+    } finally {
+      await adapter.stop();
       polls.allow_exit();
     }
   });

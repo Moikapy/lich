@@ -592,6 +592,30 @@ describe("forbidden file paths", () => {
     const env_local = await executor.execute("write_file", { path: ".env.local", content: "X=1\n" });
     expect(env_local.error?.startsWith("forbidden_path")).toBe(true);
   });
+
+  it("reads .env, refuses edits, and still writes names that only look similar", async () => {
+    await writeFile(path.join(tmp_root, ".env"), "DOTENV-SECRET-MARKER\n");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const read = await executor.execute("read_file", { path: ".env" });
+    expect(read.ok).toBe(true);
+    expect(read.output).toContain("DOTENV-SECRET-MARKER");
+    const edited = await executor.execute("edit_file", {
+      path: ".env",
+      old_string: "DOTENV-SECRET-MARKER",
+      new_string: "LEAKED",
+    });
+    expect(edited.ok).toBe(false);
+    expect(edited.error).toBe("forbidden_path: .env*");
+    expect(await read_temp(tmp_root, ".env")).toBe("DOTENV-SECRET-MARKER\n");
+    const suffix = await executor.execute("write_file", { path: "notes.env", content: "suffix-ok\n" });
+    expect(suffix.ok).toBe(true);
+    expect(await read_temp(tmp_root, "notes.env")).toBe("suffix-ok\n");
+    const word = await executor.execute("write_file", { path: ".environment", content: "word-ok\n" });
+    expect(word.ok).toBe(true);
+    expect(await read_temp(tmp_root, ".environment")).toBe("word-ok\n");
+  });
 });
 
 describe("grep_files", () => {
