@@ -200,6 +200,14 @@ describe("mcp refusal", () => {
     expect(plan_stdio("lab", "", [], undefined)).toMatch(/refused mcp command/);
   });
 
+  it("refuses eval flags written as one argv and flags that follow a script name", () => {
+    expect(plan_stdio("lab", "python3", ["script.py", "-c=marker"], undefined)).toMatch(/eval flag '-c=marker'/);
+    expect(plan_stdio("lab", "python2", ["-c", "marker"], undefined)).toMatch(/eval flag '-c'/);
+    expect(plan_stdio("lab", "php", ["-e=marker"], undefined)).toMatch(/eval flag '-e=marker'/);
+    expect(plan_stdio("lab", "ruby", ["-e=marker"], undefined)).toMatch(/eval flag '-e=marker'/);
+    expect(plan_stdio("lab", "perl", ["lib.pl", "-e=marker"], undefined)).toMatch(/eval flag '-e=marker'/);
+  });
+
   it("names the official install when redot is missing and never spawns", async () => {
     const work_dir = await temp_dir("mcp-missing");
     const missing = path.join(work_dir, "missing", "redot");
