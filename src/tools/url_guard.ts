@@ -11,6 +11,8 @@ import type { LookupFunction } from "node:net";
 
 const MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+/** Credential-bearing request headers. Dropped when a redirect changes origin. */
+const CROSS_ORIGIN_HEADER = /authorization|cookie|api[-_]?key|secret|token|password|credential/i;
 
 /** Optional fetch override for tests; otherwise uses pinned http(s).request. */
 let fetch_override: typeof fetch | undefined;
@@ -243,6 +245,17 @@ function pinned_http_fetch(url: URL, ip: string, init: RequestInit): Promise<Res
   });
 }
 
+/** Copy of `headers` without credentials, so a cross-origin hop cannot receive them. */
+function drop_cross_origin_headers(headers: RequestInit["headers"]): Headers {
+  const kept = new Headers(headers);
+  for (const name of [...kept.keys()]) {
+    if (CROSS_ORIGIN_HEADER.test(name) === true) {
+      kept.delete(name);
+    }
+  }
+  return kept;
+}
+
 function redirect_target(current: URL, response: Response): URL | undefined {
   if (REDIRECT_STATUSES.has(response.status) === false) {
     return undefined;
@@ -256,7 +269,8 @@ function redirect_target(current: URL, response: Response): URL | undefined {
 
 /**
  * Fetch with SSRF checks: pin each hop to a public IP, redirect:"manual",
- * re-validate every Location. Opt out with LICH_ALLOW_PRIVATE_URLS=1.
+ * re-validate every Location. A hop that changes origin drops credential
+ * headers (the body is already cleared). Opt out with LICH_ALLOW_PRIVATE_URLS=1.
  * HTTPS keeps the original hostname for TLS/SNI; the connect IP is pinned.
  */
 export async function safe_fetch(raw_url: string, init?: RequestInit): Promise<Response> {
@@ -272,8 +286,14 @@ export async function safe_fetch(raw_url: string, init?: RequestInit): Promise<R
     if (next === undefined) {
       return response;
     }
+    const cross_origin = next.origin !== current.origin;
     current = next;
-    request_init = { ...request_init, method: "GET", body: undefined };
+    request_init = {
+      ...request_init,
+      method: "GET",
+      body: undefined,
+      ...(cross_origin === true ? { headers: drop_cross_origin_headers(request_init.headers) } : {}),
+    };
   }
   throw new Error("blocked_url: too_many_redirects");
 }

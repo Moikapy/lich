@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- HTTP tools drop credential headers (`Authorization`, `Cookie`, API keys) when
+  a redirect leaves the request origin, so a 302 cannot forward a bearer token
+  to another host. Same-origin redirects still send them.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
