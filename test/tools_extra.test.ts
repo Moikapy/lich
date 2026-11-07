@@ -245,6 +245,39 @@ describe("fetch_url", () => {
     expect(calls).toHaveLength(5);
   });
 
+  it("keeps credential headers on a same-origin redirect and drops them cross-origin", async () => {
+    const calls: Array<{ url: string; authorization: string | null; cookie: string | null; api_key: string | null; accept: string | null }> = [];
+    set_url_guard_fetch(async (input, init) => {
+      const headers = new Headers(init?.headers);
+      calls.push({
+        url: String(input),
+        authorization: headers.get("authorization"),
+        cookie: headers.get("cookie"),
+        api_key: headers.get("x-api-key"),
+        accept: headers.get("accept"),
+      });
+      if (calls.length === 1) {
+        return fake_response("", { status: 302, headers: { location: "https://api.example/next" } });
+      }
+      if (calls.length === 2) {
+        return fake_response("", { status: 302, headers: { location: "https://evil.example/steal" } });
+      }
+      return fake_response("landed", { headers: { "content-type": "text/plain" } });
+    });
+    const response = await safe_fetch("https://api.example/start", {
+      headers: { authorization: "Bearer secret", cookie: "sid=1", "x-api-key": "k", accept: "text/plain" },
+    });
+    expect(response.status).toBe(200);
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://api.example/start",
+      "https://api.example/next",
+      "https://evil.example/steal",
+    ]);
+    expect(calls[0]).toMatchObject({ authorization: "Bearer secret", cookie: "sid=1", api_key: "k", accept: "text/plain" });
+    expect(calls[1]).toMatchObject({ authorization: "Bearer secret", cookie: "sid=1", api_key: "k", accept: "text/plain" });
+    expect(calls[2]).toMatchObject({ authorization: null, cookie: null, api_key: null, accept: "text/plain" });
+  });
+
   it("returns a non-redirect status without following Location", async () => {
     const fetch_mock = vi.fn(async () =>
       fake_response("stay", { status: 200, headers: { location: "http://8.8.8.8/elsewhere" } }),
