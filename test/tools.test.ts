@@ -380,6 +380,27 @@ describe("list_dir", () => {
     expect(grepped.output).not.toContain("dist-marker");
     expect(grepped.output).not.toContain("cursor-marker");
   });
+
+  it("skips .lich when listing or grepping a parent, including skills and config", async () => {
+    await write_temp(tmp_root, "ward/keep.txt", "keep-marker\n");
+    await write_temp(tmp_root, "ward/.lich/config.json", "config-secret-marker\n");
+    await write_temp(tmp_root, "ward/.lich/skills/note.md", "skill-secret-marker\n");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const listed = await executor.execute("list_dir", { path: "ward", depth: 4 });
+    expect(listed.ok).toBe(true);
+    expect(listed.output).toContain("keep.txt");
+    expect(listed.output).not.toContain(".lich");
+    expect(listed.output).not.toContain("config.json");
+    expect(listed.output).not.toContain("note.md");
+    const grepped = await executor.execute("grep_files", { pattern: "marker", path: "ward" });
+    expect(grepped.ok).toBe(true);
+    expect(grepped.output).toContain("keep-marker");
+    expect(grepped.output).not.toContain("config-secret-marker");
+    expect(grepped.output).not.toContain("skill-secret-marker");
+    expect(grepped.output).not.toContain(".lich");
+  });
 });
 
 describe("terminal", () => {
@@ -550,6 +571,14 @@ describe("forbidden file paths", () => {
     expect(read.error?.startsWith("forbidden_path")).toBe(true);
     const write = await executor.execute("write_file", { path: ".lich/config.json", content: "{}\n" });
     expect(write.error?.startsWith("forbidden_path")).toBe(true);
+    const dotted = ".lich/skills/../config.json";
+    const read_dot = await executor.execute("read_file", { path: dotted });
+    expect(read_dot.ok).toBe(false);
+    expect(read_dot.error?.startsWith("forbidden_path: .lich/config.json")).toBe(true);
+    expect(read_dot.output).not.toContain("ok");
+    const write_dot = await executor.execute("write_file", { path: dotted, content: "OVERWRITE-CONFIG-MARKER\n" });
+    expect(write_dot.error?.startsWith("forbidden_path: .lich/config.json")).toBe(true);
+    expect(await read_temp(tmp_root, ".lich/config.json")).toBe('{"ok":true}\n');
   });
 
   it("denies .lich/profiles to read and write (global identity files when work_dir is home)", async () => {

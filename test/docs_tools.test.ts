@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import { register_builtin_tools } from "../src/tools/builtin/index.js";
@@ -224,6 +224,33 @@ describe("docs_read", () => {
     const result = await docs_read_tool.execute({ path: "index.md" }, context);
     expect(result.ok).toBe(false);
     expect(result.error).toBe(DOCS_UNAVAILABLE);
+  });
+
+  it("does not follow a symlink out of the docs root", async () => {
+    const root = await mkdtemp(path.join(tmp_root, "docs-symlink-"));
+    const outside = await mkdtemp(path.join(tmp_root, "docs-outside-"));
+    await writeFile(path.join(root, "index.md"), "# Index\n\ninside the docs root\n");
+    await writeFile(path.join(outside, "secret.md"), "zqxoutside marker\n");
+    await writeFile(path.join(outside, "nested.md"), "zqxnested marker\n");
+    await symlink(path.join(outside, "secret.md"), path.join(root, "leak.md"));
+    await symlink(outside, path.join(root, "outside-dir"));
+    reset_docs_cache();
+    reset_docs_search_cache();
+    const context: ToolContext = { work_dir: empty_dir, env: { LICH_DOCS_DIR: root } };
+    const leaked = await docs_read_tool.execute({ path: "leak.md" }, context);
+    expect(leaked.ok).toBe(false);
+    expect(leaked.error).toContain("path_escape");
+    expect(leaked.output).not.toContain("zqxoutside");
+    expect(leaked.error ?? "").not.toContain("zqxoutside");
+    const nested = await docs_read_tool.execute({ path: "outside-dir/nested.md" }, context);
+    expect(nested.ok).toBe(false);
+    expect(nested.error).toContain("path_escape");
+    expect(`${nested.output}\n${nested.error ?? ""}`).not.toContain("zqxnested");
+    const searched = await docs_search_tool.execute({ query: "zqxoutside" }, context);
+    expect(searched.ok).toBe(true);
+    expect(searched.output).toBe("no results for: zqxoutside");
+    const inside = await docs_read_tool.execute({ path: "index.md" }, context);
+    expect_ok(inside, "inside the docs root");
   });
 });
 

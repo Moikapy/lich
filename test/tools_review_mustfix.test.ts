@@ -115,6 +115,38 @@ describe("S-2 SSRF helpers", () => {
     }
   });
 
+  it("blocks 192.168/16 and keeps the link-local and 10/8 edges exact", () => {
+    const blocked = [
+      "192.168.0.1",
+      "192.168.255.255",
+      "10.255.255.255",
+      "169.254.0.1",
+      "169.254.255.255",
+      "::ffff:192.168.0.1",
+    ];
+    for (const address of blocked) {
+      expect(is_blocked_ip(address), address).toBe(true);
+    }
+    const allowed = [
+      "192.167.255.255",
+      "192.169.0.1",
+      "11.0.0.1",
+      "169.253.255.255",
+      "169.255.0.1",
+      "::ffff:192.169.0.1",
+    ];
+    for (const address of allowed) {
+      expect(is_blocked_ip(address), address).toBe(false);
+    }
+  });
+
+  it("rejects a 192.168 literal before DNS", async () => {
+    if (private_urls_allowed() === true) {
+      return;
+    }
+    await expect(resolve_public_ip("192.168.1.20")).rejects.toThrow(/blocked_url: 192\.168\.1\.20/);
+  });
+
   it("rejects mapped loopback and CGNAT literals before DNS", async () => {
     if (private_urls_allowed() === true) {
       return;
@@ -288,6 +320,23 @@ describe("S-4 terminal env scrub", () => {
     expect(scrubbed.LICH_DISCORD_BOT_TOKEN).toBeUndefined();
     expect(scrubbed.LICH_TELEGRAM_BOT_TOKEN).toBeUndefined();
     expect(scrubbed.LICH_TWITCH_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("drops password, credential, and auth names from process and tool context", () => {
+    const scrubbed = scrub_spawn_env(
+      { PATH: "/usr/bin", DB_PASSWORD: "from-process" },
+      { PATH: "/opt/bin", DB_PASSWORD: "from-context", AWS_CREDENTIAL: "cred-value", PROXY_AUTH: "auth-value", VISIBLE: "kept" },
+    );
+    expect(scrubbed.PATH).toBe("/opt/bin");
+    expect(scrubbed.VISIBLE).toBe("kept");
+    expect(scrubbed.DB_PASSWORD).toBeUndefined();
+    expect(scrubbed.AWS_CREDENTIAL).toBeUndefined();
+    expect(scrubbed.PROXY_AUTH).toBeUndefined();
+    const flat = JSON.stringify(scrubbed);
+    expect(flat).not.toContain("from-process");
+    expect(flat).not.toContain("from-context");
+    expect(flat).not.toContain("cred-value");
+    expect(flat).not.toContain("auth-value");
   });
 });
 
