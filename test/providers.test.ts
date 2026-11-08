@@ -212,6 +212,52 @@ describe("openai compat provider", () => {
     expect(new Set(ids).size).toBe(3);
   });
 
+  it("treats an empty arguments string as {} and sums a missing usage total", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                { id: "c-empty", type: "function", function: { name: "list_dir", arguments: "" } },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: { prompt_tokens: 2, completion_tokens: 3 },
+      },
+    }));
+    const provider = new OpenAICompatProvider(openai_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.content).toBe("");
+    expect(result.message.tool_calls).toEqual([{ id: "c-empty", name: "list_dir", args: {} }]);
+    expect(result.usage).toEqual({ prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 });
+  });
+
+  it("keeps an explicit zero usage total and rejects a success body with no choices", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        choices: [{ message: { role: "assistant", content: "hi" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 4, completion_tokens: 1, total_tokens: 0 },
+      },
+    }));
+    const provider = new OpenAICompatProvider(openai_config({ fetch_fn }));
+    const kept = await provider.chat([{ role: "user", content: "go" }], []);
+    expect(kept.usage).toEqual({ prompt_tokens: 4, completion_tokens: 1, total_tokens: 0 });
+
+    const empty = mock_fetch(() => ({ status: 200, body: { choices: [] } }));
+    const empty_provider = new OpenAICompatProvider(openai_config({ fetch_fn: empty.fetch_fn }));
+    const failure = await empty_provider.chat([{ role: "user", content: "go" }], []).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ProviderError);
+    expect((failure as ProviderError).kind).toBe("bad_request");
+    expect((failure as ProviderError).message).toBe("provider returned a success response without choices");
+  });
+
   it("omits executable tool calls and appends a note when arguments do not parse", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,
@@ -564,6 +610,26 @@ describe("anthropic provider", () => {
     const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
     expect(result.message.tool_calls).toBeUndefined();
     expect(result.message.content).toContain("[unparseable tool arguments]");
+  });
+
+  it("does not execute a tool_use block whose input is null or missing", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        content: [
+          { type: "tool_use", id: "tu_null", name: "list_dir", input: null },
+          { type: "tool_use", id: "tu_miss", name: "write_file" },
+          { type: "tool_use", id: "tu_ok", name: "list_dir", input: { path: "." } },
+        ],
+        stop_reason: "tool_use",
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.tool_calls).toEqual([{ id: "tu_ok", name: "list_dir", args: { path: "." } }]);
+    expect(result.message.content).toContain("[unparseable tool arguments]");
+    expect(result.message.content).not.toContain("tu_null");
+    expect(result.message.content).not.toContain("tu_miss");
   });
 
   it("defaults max_tokens to 16384 and omits temperature unless send_temperature", async () => {

@@ -279,6 +279,51 @@ describe("ollama provider", () => {
     expect(result.message.content).toBe("working");
   });
 
+  it("does not execute empty or null tool arguments", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: ok_body({
+        message: {
+          role: "assistant",
+          content: "trying",
+          tool_calls: [
+            { function: { name: "list_dir", arguments: "" } },
+            { function: { name: "list_dir", arguments: null } },
+          ],
+        },
+      }),
+    }));
+    const provider = new OllamaProvider(ollama_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.tool_calls).toBeUndefined();
+    expect(result.message.content).toContain("[unparseable tool arguments]");
+    expect(result.finish_reason).toBe("stop");
+  });
+
+  it("rejects a 200 body that reports an error or omits the message", async () => {
+    const tail = "TAIL-SECRET-MARKER";
+    const error_mock = mock_fetch(() => ({
+      status: 200,
+      body: ok_body({ error: `${"x".repeat(520)}${tail}`, message: { role: "assistant", content: "hidden" } }),
+    }));
+    const error_provider = new OllamaProvider(ollama_config({ fetch_fn: error_mock.fetch_fn }));
+    const error_failure = await error_provider.chat([{ role: "user", content: "go" }], []).catch((error: unknown) => error);
+    expect(error_failure).toBeInstanceOf(ProviderError);
+    const reported = error_failure as ProviderError;
+    expect(reported.kind).toBe("bad_request");
+    expect(reported.message.startsWith("ollama reported an error in a 200 response:")).toBe(true);
+    expect(reported.message).toContain("[... truncated,");
+    expect(reported.message).not.toContain(tail);
+    expect(reported.message).not.toContain("hidden");
+
+    const missing_mock = mock_fetch(() => ({ status: 200, body: ok_body({ message: undefined }) }));
+    const missing_provider = new OllamaProvider(ollama_config({ fetch_fn: missing_mock.fetch_fn }));
+    const missing = await missing_provider.chat([{ role: "user", content: "go" }], []).catch((error: unknown) => error);
+    expect(missing).toBeInstanceOf(ProviderError);
+    expect((missing as ProviderError).kind).toBe("bad_request");
+    expect((missing as ProviderError).message).toBe("provider returned a success response without a message");
+  });
+
   it("omits executable tool calls on unparseable string arguments", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,

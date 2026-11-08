@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gatekeeper_plugin } from "../src/plugins/builtin/gatekeeper.plugin.js";
 import type { AfterToolCallInfo, BeforeToolCallInfo, HookContext, Plugin } from "../src/plugins/types.js";
@@ -429,6 +429,54 @@ describe("gatekeeper plugin", () => {
     expect(shown.out).not.toContain("P12-SECRET-MARKER");
     expect(shown.out).not.toContain("ENV-LOCAL-SECRET-MARKER");
     expect(shown.out).not.toContain("RSA-PUB-SECRET-MARKER");
+  });
+
+  it("refuses a directory and a path that resolves to the work tree", async () => {
+    const marker = "DIR-TREE-SECRET-MARKER";
+    await mkdir(path.join(tmp_root, "keys"), { recursive: true });
+    await writeFile(path.join(tmp_root, "keys", ".env"), `${marker}\n`);
+    await mkdir(path.join(tmp_root, "nested"), { recursive: true });
+    await writeFile(path.join(tmp_root, "nested", "note.txt"), "visible\n");
+    await symlink(path.join(tmp_root, "keys"), path.join(tmp_root, "keys-alias"));
+
+    const directory = await commit_executor().execute(
+      "git_commit",
+      { message: "add dir", paths: ["keys"] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(directory.ok).toBe(false);
+    expect(directory.error).toBe("invalid_path: keys is not a file");
+
+    const slash = await commit_executor().execute(
+      "git_commit",
+      { message: "add slash", paths: ["keys/"] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(slash.ok).toBe(false);
+    expect(slash.error).toBe("invalid_path: keys/ is not a file");
+
+    const alias = await commit_executor().execute(
+      "git_commit",
+      { message: "add alias", paths: ["keys-alias"] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(alias.ok).toBe(false);
+    expect(alias.error).toBe("invalid_path: keys-alias is not a file");
+
+    const parent = await commit_executor().execute(
+      "git_commit",
+      { message: "add parent", paths: ["nested/.."] },
+      { work_dir: tmp_root, env: {} },
+    );
+    expect(parent.ok).toBe(false);
+    expect(parent.error).toBe("invalid_path: nested/.. resolves to work_dir");
+
+    const count = await git(tmp_root, ["rev-list", "--count", "HEAD"]);
+    expect(count.out.trim()).toBe("1");
+    const staged = await git(tmp_root, ["diff", "--cached", "--name-only"]);
+    expect(staged.out).toBe("");
+    const shown = await git(tmp_root, ["show", "--format=", "HEAD"]);
+    expect(shown.out).not.toContain(marker);
   });
 
   it("does not run an executable post-commit hook", async () => {

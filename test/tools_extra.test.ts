@@ -394,6 +394,10 @@ describe("http_request", () => {
     const bad = await executor.execute("http_request", { url: "https://api.example.com/ping", method: "TRACE" });
     expect(bad.ok).toBe(false);
     expect(bad.error?.startsWith("invalid_method")).toBe(true);
+    const connect = await executor.execute("http_request", { url: "https://api.example.com/ping", method: "connect" });
+    expect(connect.ok).toBe(false);
+    expect(connect.error).toBe("invalid_method: CONNECT");
+    expect(fetch_mock).toHaveBeenCalledTimes(1);
   });
 });
 
