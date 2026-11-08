@@ -232,6 +232,18 @@ describe("serve websocket transport", () => {
     ).rejects.toThrow(/HTTP 403/);
   });
 
+  it("rejects a second x-lich-token even when that copy is exact", async () => {
+    const token = "header-once-token";
+    const server = create_serve_server({ port: 0, boot_stdout: null, token });
+    servers.push(server);
+    const boot = await server.start();
+    const host = `127.0.0.1:${boot.port}`;
+    const second_is_real = await read_upgrade_status(boot.port, upgrade_request_with_tokens(["extra", token], host));
+    expect(second_is_real).toBe(401);
+    const first_is_real = await read_upgrade_status(boot.port, upgrade_request_with_tokens([token, "extra"], host));
+    expect(first_is_real).toBe(401);
+  });
+
   it("rejects a token prefix and an empty query token with 401", async () => {
     const token = "secret-token-value";
     const server = create_serve_server({ port: 0, boot_stdout: null, token });
@@ -556,6 +568,20 @@ async function rpc_over_ws(
 }
 
 const WS_KEY = "dGhlIHNhbXBsZSBub25jZQ==";
+
+function upgrade_request_with_tokens(tokens: readonly string[], host: string): string {
+  const token_lines = tokens.map((token) => `x-lich-token: ${token}\r\n`).join("");
+  return (
+    "GET / HTTP/1.1\r\n" +
+    `Host: ${host}\r\n` +
+    token_lines +
+    "Upgrade: websocket\r\n" +
+    "Connection: Upgrade\r\n" +
+    "Sec-WebSocket-Version: 13\r\n" +
+    `Sec-WebSocket-Key: ${WS_KEY}\r\n` +
+    "\r\n"
+  );
+}
 
 function upgrade_request(token: string, host: string | undefined): string {
   const host_line = host === undefined ? "" : `Host: ${host}\r\n`;
