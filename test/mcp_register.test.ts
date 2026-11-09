@@ -35,4 +35,71 @@ describe("register_listed", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain("editor/open_file");
   });
+
+  it("keeps the first server when two servers sanitize to one tool name", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const first = vi.fn(async (name: string) => `first ${name}`);
+    const second = vi.fn(async () => "second");
+    const registry = new ToolRegistry();
+    register_listed(
+      registry,
+      "a_b",
+      [{ name: "c", description: "first", parameters }],
+      "all",
+      { call_tool: first } as unknown as McpSession,
+    );
+    register_listed(
+      registry,
+      "a",
+      [{ name: "b_c", description: "second", parameters }],
+      "all",
+      { call_tool: second } as unknown as McpSession,
+    );
+    expect(registry.list().map((tool) => tool.name)).toEqual(["mcp_a_b_c"]);
+    const result = await registry.get("mcp_a_b_c")?.execute({ path: "notes.md" }, { work_dir: "/tmp", env: {} });
+    expect(result).toEqual({ ok: true, output: "first c" });
+    expect(first).toHaveBeenCalledWith("c", { path: "notes.md" }, undefined);
+    expect(second).not.toHaveBeenCalled();
+    expect(String(warn.mock.calls.at(-1)?.[0])).toContain("a/b_c");
+  });
+
+  it("enables a tool only under its sanitized name", () => {
+    const registry = new ToolRegistry();
+    register_listed(
+      registry,
+      "lab",
+      [{ name: "open-file", description: "open", parameters }],
+      ["mcp_lab_open-file"],
+      session,
+    );
+    expect(registry.list()).toEqual([]);
+    register_listed(
+      registry,
+      "lab",
+      [{ name: "open-file", description: "open", parameters }],
+      ["mcp_lab_open_file"],
+      session,
+    );
+    expect(registry.list().map((tool) => tool.name)).toEqual(["mcp_lab_open_file"]);
+  });
+
+  it("drops only the catalog's exact excluded tool name for a redot command", async () => {
+    const call_tool = vi.fn(async (name: string) => `called ${name}`);
+    const registry = new ToolRegistry();
+    register_listed(
+      registry,
+      "lab",
+      [
+        { name: "execute", description: "run", parameters },
+        { name: "execute_now", description: "keep", parameters },
+      ],
+      "all",
+      { call_tool } as unknown as McpSession,
+      "/opt/redot",
+    );
+    expect(registry.list().map((tool) => tool.name)).toEqual(["mcp_lab_execute_now"]);
+    const result = await registry.get("mcp_lab_execute_now")?.execute({}, { work_dir: "/tmp", env: {} });
+    expect(result).toEqual({ ok: true, output: "called execute_now" });
+    expect(call_tool).toHaveBeenCalledWith("execute_now", {}, undefined);
+  });
 });

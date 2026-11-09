@@ -303,6 +303,29 @@ describe("twitch inbound", () => {
     expect(socket.sent.some((line) => line.includes("oauth:oauth:"))).toBe(false);
     await adapter.stop();
   });
+
+  it("joins every non-empty channel in order and answers on the later one", async () => {
+    remember_env();
+    process.env.LICH_TWITCH_OAUTH_TOKEN = "fixture-twitch-token";
+    process.env.LICH_TWITCH_NICK = "lichbot";
+    process.env.LICH_TWITCH_CHANNELS = "Lobby, , Other";
+    const seen: string[] = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const adapter = create_twitch_adapter(adapter_params(async (_platform, channel, user, text) => {
+      seen.push(`${channel}:${user}:${text}`);
+      return "ok";
+    }));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    expect(socket.sent.filter((line) => line.startsWith("JOIN "))).toEqual(["JOIN #lobby", "JOIN #other"]);
+    expect(socket.sent.some((line) => line.startsWith("JOIN ") && line.includes("fixture-twitch-token"))).toBe(false);
+    socket.emit(":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #other :ping\r\n");
+    const replies = (): string[] => socket.sent.filter((line) => line.startsWith("PRIVMSG #"));
+    await wait_for(() => seen.length === 1 && replies().length === 1);
+    expect(seen).toEqual(["other:viewer:ping"]);
+    expect(replies()).toEqual(["PRIVMSG #other :ok"]);
+    await adapter.stop();
+  });
 });
 
 describe("telegram inbound", () => {
