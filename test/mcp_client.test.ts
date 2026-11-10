@@ -10,6 +10,7 @@ import { parse_agent_config } from "../src/agent/config.js";
 import { catalog_client_entry } from "../src/mcp/mcp_catalog_entry.js";
 import { plan_stdio } from "../src/mcp/mcp_plan.js";
 import { create_line_queue } from "../src/mcp/mcp_lines.js";
+import { assert_handshake, init_params } from "../src/mcp/mcp_handshake.js";
 import { attach_enabled_mcp_tools } from "../src/mcp/mcp_tools.js";
 import type { LineSpawner } from "../src/mcp/mcp_stdio.js";
 import { ToolRegistry } from "../src/tools/registry.js";
@@ -92,6 +93,37 @@ function mock_spawner(record: SpawnRecord, tools = REDOT_TOOLS, handshake = true
 
 function empty_record(): SpawnRecord {
   return { calls: 0, methods: [], tool_names: [], stopped: 0 };
+}
+
+/** Stdio double that lists `tools_for(basename)` and records `server:wire_name` calls. */
+function listed_spawner(tools_for: (server: string) => readonly string[], called: string[]): LineSpawner {
+  return (command) => {
+    const queue = create_line_queue();
+    const server = path.basename(command);
+    return {
+      write_line(line: string): void {
+        const msg = JSON.parse(line) as { id?: number; method?: string; params?: { name?: string } };
+        if (msg.method === "notifications/initialized") {
+          return;
+        }
+        if (msg.method === "tools/call" && typeof msg.params?.name === "string") {
+          called.push(`${server}:${msg.params.name}`);
+        }
+        const names = tools_for(server);
+        const result = msg.method === "initialize"
+          ? { protocolVersion: "2024-11-05", serverInfo: { name: server } }
+          : msg.method === "tools/list"
+            ? { tools: names.map((name) => ({ name, description: name, inputSchema: { type: "object" } })) }
+            : { content: [{ type: "text", text: "ok" }] };
+        queue.push(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }));
+      },
+      read_line: () => queue.read(),
+      stop(): void {
+        queue.close();
+      },
+      failed: () => undefined,
+    };
+  };
 }
 
 function boom_spawn(): LineSpawner {
@@ -247,6 +279,89 @@ describe("mcp catalog", () => {
 });
 
 describe("mcp handshake", () => {
+  it("accepts a named server and rejects empty or non-object handshakes", () => {
+    const params = init_params();
+    expect(params.protocolVersion).toBe("2024-11-05");
+    expect(params.clientInfo).toEqual({ name: "lich", version: "1" });
+    expect(() => assert_handshake({
+      protocolVersion: params.protocolVersion,
+      serverInfo: { name: "lab" },
+    })).not.toThrow();
+    const rejected = [
+      null,
+      "nope",
+      [],
+      { protocolVersion: "", serverInfo: { name: "lab" } },
+      { protocolVersion: "2024-11-05", serverInfo: { name: "" } },
+      { protocolVersion: "2024-11-05", serverInfo: { name: 1 } },
+      { protocolVersion: "2024-11-05" },
+    ];
+    for (const body of rejected) {
+      expect(() => assert_handshake(body)).toThrow(/mcp handshake rejected/);
+    }
+  });
+
+  it("keeps the first tool when sanitized names collide", async () => {
+    const work_dir = await temp_dir("mcp-name-collide");
+    const binary = path.join(work_dir, "lab");
+    await writeFile(binary, "");
+    const called: string[] = [];
+    const config = parse_agent_config({
+      providers,
+      work_dir,
+      log_level: "error",
+      tools_enabled: "all",
+      mcp_servers: { lab: { enabled: true, command: binary, args: ["--stdio"] } },
+    });
+    const registry = new ToolRegistry();
+    const sessions = await attach_enabled_mcp_tools(registry, config, {
+      spawn: listed_spawner(() => ["a-b", "a_b"], called),
+    });
+    try {
+      expect(registry.list().map((tool) => tool.name)).toEqual(["mcp_lab_a_b"]);
+      const result = await registry.get("mcp_lab_a_b")?.execute({}, { work_dir, env: {} });
+      expect(result).toEqual({ ok: true, output: "ok" });
+      expect(called).toEqual(["lab:a-b"]);
+    } finally {
+      for (const session of sessions) {
+        session.close();
+      }
+    }
+  });
+
+  it("keeps the first server when two servers sanitize to one tool name", async () => {
+    const work_dir = await temp_dir("mcp-server-collide");
+    const first = path.join(work_dir, "first");
+    const second = path.join(work_dir, "second");
+    await writeFile(first, "");
+    await writeFile(second, "");
+    const called: string[] = [];
+    const config = parse_agent_config({
+      providers,
+      work_dir,
+      log_level: "error",
+      tools_enabled: "all",
+      mcp_servers: {
+        a_b: { enabled: true, command: first, args: ["--stdio"] },
+        a: { enabled: true, command: second, args: ["--stdio"] },
+      },
+    });
+    const registry = new ToolRegistry();
+    const sessions = await attach_enabled_mcp_tools(registry, config, {
+      spawn: listed_spawner((server) => (server === "first" ? ["c"] : ["b_c"]), called),
+    });
+    try {
+      expect(registry.list().map((tool) => tool.name)).toEqual(["mcp_a_b_c"]);
+      const result = await registry.get("mcp_a_b_c")?.execute({}, { work_dir, env: {} });
+      expect(result).toEqual({ ok: true, output: "ok" });
+      expect(called).toEqual(["first:c"]);
+    } finally {
+      for (const session of sessions) {
+        session.close();
+      }
+    }
+  });
+
   it("lists tools, prefixes names, and calls the unprefixed wire name", async () => {
     const work_dir = await temp_dir("mcp-shake");
     const binary = path.join(work_dir, "redot");
