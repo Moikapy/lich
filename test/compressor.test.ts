@@ -7,7 +7,7 @@ import {
   truncate_head_tail,
   type ChatFn,
 } from "../src/context/compressor.js";
-import { estimate_text_tokens } from "../src/context/tokens.js";
+import { estimate_message_tokens, estimate_messages_tokens, estimate_text_tokens } from "../src/context/tokens.js";
 import type { ChatResult, Message, SystemMessage, UserMessage } from "../src/providers/types.js";
 import { ProviderError } from "../src/providers/types.js";
 
@@ -34,6 +34,23 @@ describe("estimate_text_tokens", () => {
     expect(estimate_text_tokens("abcdefgh")).toBe(2);
     expect(estimate_text_tokens("abcdefg")).toBe(2);
     expect(estimate_text_tokens("")).toBe(0);
+  });
+});
+
+describe("estimate_message_tokens", () => {
+  it("counts assistant tool-call payloads and tool-message overhead", () => {
+    const content = "abcd";
+    const calls = [{ id: "1", name: "read_file", args: { path: "secret.txt" } }];
+    const user = estimate_message_tokens({ role: "user", content });
+    const assistant = estimate_message_tokens({ role: "assistant", content, tool_calls: calls });
+    const tool = estimate_message_tokens({ role: "tool", tool_call_id: "1", name: "read_file", content });
+    expect(user).toBe(1);
+    expect(assistant).toBe(user + estimate_text_tokens(JSON.stringify(calls)));
+    expect(tool - user).toBe(8);
+    expect(estimate_messages_tokens([
+      { role: "user", content },
+      { role: "tool", tool_call_id: "1", name: "read_file", content },
+    ])).toBe(user + tool);
   });
 });
 
