@@ -168,7 +168,9 @@ export function with_timeout<T>(
       reject(new ToolTimeoutError(label, timeout_ms));
     }, timeout_ms);
   });
-  const raced = promise_factory(controller.signal);
+  // A factory that throws, or returns a non-promise, must not skip the timer
+  // cleanup. Otherwise the timeout rejects with nobody listening and Node exits.
+  const raced = Promise.resolve().then(() => promise_factory(controller.signal));
   raced.catch(() => undefined);
   return Promise.race([raced, timeout_promise]).finally(() => {
     const timer = holder.timer;

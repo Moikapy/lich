@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A tool whose `execute` throws before returning a promise no longer crashes
+  the process when its timeout later fires. The call fails and lich stays up.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
