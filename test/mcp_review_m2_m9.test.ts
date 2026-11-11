@@ -2,8 +2,8 @@
  * Review M-2 / M-3 / M-8 / M-9 coverage for the MCP client.
  */
 import { describe, expect, it } from "vitest";
+import { spawn_failure, type LineChild } from "../src/mcp/mcp_child.js";
 import { create_line_queue } from "../src/mcp/mcp_lines.js";
-import type { LineChild } from "../src/mcp/mcp_child.js";
 import { stdio_pipe } from "../src/mcp/mcp_pipe.js";
 import { MCP_NAME_MAX, MCP_SCHEMA_JSON_MAX, parse_tools } from "../src/mcp/mcp_result.js";
 import { content_text } from "../src/mcp/mcp_content.js";
@@ -85,6 +85,103 @@ describe("mcp_pipe id map (M-2)", () => {
     expect(reads).toBe(1);
     pipe.close();
   });
+
+  it("rejects JSON-RPC errors and skips notifications and garbage lines", async () => {
+    const queue = create_line_queue();
+    const child: LineChild = {
+      write_line(line: string): void {
+        const msg = JSON.parse(line) as { id: number; method: string };
+        queue.push("not-json");
+        queue.push(JSON.stringify({ jsonrpc: "2.0", method: "notifications/progress" }));
+        queue.push(JSON.stringify({ jsonrpc: "2.0", id: 99, result: { stray: true } }));
+        if (msg.method === "blank") {
+          queue.push(JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { message: "" } }));
+          return;
+        }
+        if (msg.method === "weird") {
+          queue.push(JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { message: 12 } }));
+          return;
+        }
+        queue.push(JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { message: "denied" } }));
+      },
+      read_line: () => queue.read(),
+      stop(): void {
+        queue.close();
+      },
+      failed: () => undefined,
+    };
+    const pipe = stdio_pipe(child);
+    await expect(pipe.request("tools/call", {})).rejects.toThrow("denied");
+    await expect(pipe.request("blank", {})).rejects.toThrow("mcp error");
+    await expect(pipe.request("weird", {})).rejects.toThrow("mcp error");
+    pipe.close();
+  });
+
+  it("does not write a request that is already aborted", async () => {
+    const queue = create_line_queue();
+    let writes = 0;
+    const child: LineChild = {
+      write_line(): void {
+        writes += 1;
+      },
+      read_line: () => queue.read(),
+      stop(): void {
+        queue.close();
+      },
+      failed: () => undefined,
+    };
+    const pipe = stdio_pipe(child);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(pipe.request("ping", {}, controller.signal)).rejects.toThrow("cancelled");
+    expect(writes).toBe(0);
+    pipe.close();
+  });
+
+  it("rejects in-flight requests when close() runs before a response", async () => {
+    const queue = create_line_queue();
+    let stopped = 0;
+    const child: LineChild = {
+      write_line(): void {
+        return undefined;
+      },
+      read_line: () => queue.read(),
+      stop(): void {
+        stopped += 1;
+        queue.close();
+      },
+      failed: () => undefined,
+    };
+    const pipe = stdio_pipe(child);
+    const pending = pipe.request("hang", { a: 1 });
+    pipe.close();
+    await expect(pending).rejects.toThrow("mcp closed the pipe");
+    expect(stopped).toBe(1);
+    queue.push(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { late: true } }));
+    await expect(pipe.request("later", {})).rejects.toThrow("mcp closed the pipe");
+  });
+
+  it("rejects in-flight requests with the child spawn failure", async () => {
+    const queue = create_line_queue();
+    let failure: string | undefined;
+    const child: LineChild = {
+      write_line(): void {
+        failure = spawn_failure("ENOENT");
+        queue.push("");
+      },
+      read_line: () => queue.read(),
+      stop(): void {
+        queue.close();
+      },
+      failed: () => failure,
+    };
+    const pipe = stdio_pipe(child);
+    await expect(pipe.request("initialize", {})).rejects.toThrow("mcp command not found");
+    await expect(pipe.request("tools/list", {})).rejects.toThrow("mcp command not found");
+    expect(spawn_failure("EACCES")).toBe("mcp spawn failed");
+    expect(spawn_failure(undefined)).toBe("mcp spawn failed");
+    pipe.close();
+  });
 });
 
 describe("mcp metadata bounds (M-9)", () => {
@@ -130,6 +227,23 @@ describe("mcp metadata bounds (M-9)", () => {
       properties: { path: { type: "string" } },
       required: ["path"],
       additionalProperties: false,
+    });
+  });
+
+  it("replaces a circular inputSchema instead of rejecting the whole list", () => {
+    const schema: Record<string, unknown> = { type: "object" };
+    schema.self = schema;
+    const tools = parse_tools({
+      tools: [
+        { name: "cycle", description: "loop", inputSchema: schema },
+        { name: "plain", description: "ok", inputSchema: { type: "object", properties: { q: { type: "string" } } } },
+      ],
+    });
+    expect(tools.map((tool) => tool.name)).toEqual(["cycle", "plain"]);
+    expect(tools[0]?.parameters).toEqual({ type: "object" });
+    expect(tools[1]?.parameters).toEqual({
+      type: "object",
+      properties: { q: { type: "string" } },
     });
   });
 
