@@ -159,6 +159,25 @@ describe("guard", () => {
     ).rejects.toThrow(/timeout: test/);
     expect(Date.now() - started < 2000).toBe(true);
   });
+
+  it("with_timeout does not leave a timer when the factory throws", async () => {
+    const rejections: unknown[] = [];
+    const on_rejection = (error: unknown): void => {
+      rejections.push(error);
+    };
+    process.on("unhandledRejection", on_rejection);
+    try {
+      await expect(
+        with_timeout(() => {
+          throw new Error("sync boom");
+        }, 30, "sync"),
+      ).rejects.toThrow(/sync boom/);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", on_rejection);
+    }
+  });
 });
 
 describe("registry", () => {
