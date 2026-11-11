@@ -35,4 +35,30 @@ describe("register_listed", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain("editor/open_file");
   });
+
+  it("does not call the server when the tool context is already aborted", async () => {
+    let calls = 0;
+    const live = {
+      call_tool: async () => {
+        calls += 1;
+        return "ran";
+      },
+    } as unknown as McpSession;
+    const registry = new ToolRegistry();
+    register_listed(
+      registry,
+      "lab",
+      [{ name: "ping", description: "ping", parameters }],
+      "all",
+      live,
+    );
+    const controller = new AbortController();
+    controller.abort();
+    const result = await registry.get("mcp_lab_ping")?.execute(
+      { path: "secret" },
+      { work_dir: "/tmp", env: {}, signal: controller.signal },
+    );
+    expect(result).toEqual({ ok: false, output: "", error: "cancelled" });
+    expect(calls).toBe(0);
+  });
 });
