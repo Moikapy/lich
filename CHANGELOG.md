@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `lich serve`: `session.resume` waits for an in-flight `prompt.submit` that is
+  still writing the transcript it resolves to. An exact id on the same socket
+  already waited; `latest`, a unique prefix, and a resume from another
+  connection forked the file mid-run and dropped that turn's user line.
+  `create_serve_server` shares that run queue. `create_serve_prompt_service`
+  and `create_serve_session_store` take it as an optional argument.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
