@@ -9,6 +9,7 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { LICH_VERSION } from "../version.js";
 import { create_agent_with_plugins, type Agent } from "../agent/agent.js";
 import type { AgentConfig } from "../agent/config.js";
+import { create_session_manager } from "../session/manager.js";
 import { logger } from "../util/log.js";
 import { safe_json_parse } from "../util/json.js";
 import { create_serve_prompt_service, type ServePromptService } from "./prompts.js";
@@ -97,7 +98,10 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
   const token = options.token ?? randomBytes(TOKEN_BYTES).toString("hex");
   const version = options.version ?? LICH_VERSION;
   const session_dir = options.session_dir ?? path.join(process.cwd(), ".lich", "sessions");
-  const sessions = create_serve_session_store(session_dir, options.max_session_bags);
+  // One queue so session.resume waits out a prompt.submit that is still
+  // appending the transcript it resolved (latest, a prefix, or another socket).
+  const runs = create_session_manager();
+  const sessions = create_serve_session_store(session_dir, options.max_session_bags, runs);
   assert_loopback_host(host);
 
   let http_server: Server | undefined;
@@ -128,7 +132,7 @@ export function create_serve_server(options: ServeOptions = {}): ServeServer {
       if (agent !== undefined && options.agent === undefined) {
         owned_agent = agent;
       }
-      prompts = agent === undefined ? undefined : create_serve_prompt_service(agent, sessions);
+      prompts = agent === undefined ? undefined : create_serve_prompt_service(agent, sessions, runs);
       http_server = createServer((_req, res) => {
         res.statusCode = 404;
         res.end();
@@ -274,8 +278,9 @@ function attach_client(
 
 /**
  * Lane for a frame. `prompt.submit` / `session.clear` use `params.session_id`.
- * `session.resume` uses `params.id` (the transcript being read) so a resume of
- * the file an in-flight submit is appending waits until that run finishes.
+ * `session.resume` uses `params.id` on this connection. The shared run queue
+ * waits on the transcript that id resolves to, so `latest`, a unique prefix,
+ * and a resume from another connection also wait out an in-flight submit.
  * Other frames share "".
  */
 function frame_lane(data: RawData): string {

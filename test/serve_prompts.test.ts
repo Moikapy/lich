@@ -1456,6 +1456,85 @@ describe("serve prompt over websocket", () => {
     }
   });
 
+  it("waits to resume when the id is latest, a prefix, or from another connection", async () => {
+    const work_dir = await make_temp_dir("serve-ws-resume-resolved");
+    const session_dir = path.join(work_dir, "sessions");
+    let release_hang!: () => void;
+    const hang = new Promise<void>((resolve) => {
+      release_hang = resolve;
+    });
+    let hang_started!: () => void;
+    const started = new Promise<void>((resolve) => {
+      hang_started = resolve;
+    });
+    const fetch_fn: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: string }> };
+      if (body.messages.some((message) => message.content === "hang")) {
+        hang_started();
+        await hang;
+      }
+      return new Response(
+        JSON.stringify({
+          model: "mock-model",
+          choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200 },
+      );
+    };
+    const agent = mock_agent(work_dir, fetch_fn);
+    const server = create_serve_server({ port: 0, boot_stdout: null, session_dir, agent, version: "9.9.9" });
+    servers.push(server);
+    const boot = await server.start();
+    const url = `ws://127.0.0.1:${boot.port}/?token=${encodeURIComponent(boot.token)}`;
+    const ws = await open_ws(url);
+    const other = await open_ws(url);
+    try {
+      const live = (
+        (await request_rpc(ws, { jsonrpc: "2.0", id: 1, method: "session.create", params: { source: "test" } }))
+          .result as { session_id: string }
+      ).session_id;
+      const slow = request_rpc(ws, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompt.submit",
+        params: { session_id: live, text: "hang" },
+      });
+      await started;
+      let finished = 0;
+      const track = (pending: Promise<Record<string, unknown>>): Promise<Record<string, unknown>> =>
+        pending.then((body) => {
+          finished += 1;
+          return body;
+        });
+      const resumes = [
+        track(request_rpc(other, { jsonrpc: "2.0", id: 3, method: "session.resume", params: { id: live } })),
+        track(request_rpc(ws, { jsonrpc: "2.0", id: 4, method: "session.resume", params: { id: "latest" } })),
+        track(
+          request_rpc(ws, {
+            jsonrpc: "2.0",
+            id: 5,
+            method: "session.resume",
+            params: { id: live.slice(0, 8) },
+          }),
+        ),
+      ];
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(finished).toBe(0);
+      release_hang();
+      expect((await slow).result).toMatchObject({ session_id: live, stopped_reason: "final" });
+      for (const pending of resumes) {
+        const result = (await pending).result as { message_count: number; resumed_id: string };
+        expect(result.resumed_id).toBe(live);
+        expect(result.message_count).toBeGreaterThanOrEqual(2);
+      }
+    } finally {
+      release_hang();
+      ws.close();
+      other.close();
+    }
+  });
+
   it("holds later frames on a session until its in-flight submit finishes", async () => {
     const work_dir = await make_temp_dir("serve-ws-lane-order");
     const session_dir = path.join(work_dir, "sessions");

@@ -3,7 +3,9 @@
  * In-memory bags are capped (LRU): the oldest idle bag is evicted first.
  * `pin` holds a bag for an in-flight prompt so a create cannot drop it before
  * the turn writes its history back. The map may sit above the cap until those
- * pins release. Evicted transcripts stay on disk and can be resumed again.
+ * pins release. Resume reads wait on the same run queue as prompt.submit for
+ * the transcript they resolve to. Evicted transcripts stay on disk and can be
+ * resumed again.
  */
 import path from "node:path";
 import { writeFile } from "node:fs/promises";
@@ -13,6 +15,7 @@ import { is_enoent } from "../util/fs.js";
 import { safe_stringify } from "../util/json.js";
 import { mark_session_seeded } from "../session/recorder.js";
 import { list_session_files, resolve_session_path, SessionResolveError } from "../session/resolve.js";
+import { create_session_manager, type SessionManager } from "../session/manager.js";
 import { open_session, read_session_messages, type SessionHandle } from "../session/store.js";
 import type {
   SessionClearParams,
@@ -115,6 +118,7 @@ export const DEFAULT_SERVE_SESSION_LIMIT = 32;
 export function create_serve_session_store(
   session_dir: string,
   max_bags: number = DEFAULT_SERVE_SESSION_LIMIT,
+  runs: SessionManager = create_session_manager(),
 ): ServeSessionStore {
   const bags = new Map<string, ServeSessionBag>();
   /** session_id → in-flight submits that must survive LRU eviction. */
@@ -165,6 +169,41 @@ export function create_serve_session_store(
     evict_overflow(id);
   }
 
+  /** Read `transcript` and fork it. Caller holds the run queue for that file. */
+  async function fork_transcript(
+    transcript: string,
+    params: SessionResumeParams,
+  ): Promise<SessionResumeResult> {
+    let messages: Message[];
+    try {
+      messages = await read_session_messages(transcript);
+    } catch (error) {
+      // File vanished between resolve and read → same as not found.
+      if (is_enoent(error) === true) {
+        throw new ServeSessionError("not_found", CLIENT_MESSAGES.not_found);
+      }
+      logger.warn("serve session transcript unreadable", error);
+      throw new ServeSessionError("unreadable", CLIENT_MESSAGES.unreadable);
+    }
+    let handle: SessionHandle;
+    try {
+      handle = await open_session(session_dir, "resume");
+      // Write the filtered bag history (not a raw copy) so the fork matches
+      // in-memory state; mark seeded so prompt.submit's recorder.seed
+      // appends only the new turn.
+      await write_fork_transcript(handle.path, messages);
+      mark_session_seeded(handle);
+    } catch (error) {
+      throw client_error(error);
+    }
+    put(handle.id, { handle, source: params.source ?? "resume", history: [...messages], epoch: 0 });
+    return {
+      session_id: handle.id,
+      message_count: messages.length,
+      resumed_id: path.basename(transcript, ".jsonl"),
+    };
+  }
+
   return {
     create: async (params) => {
       let handle: SessionHandle;
@@ -208,34 +247,11 @@ export function create_serve_session_store(
       } catch (error) {
         throw client_error(error);
       }
-      let messages: Message[];
-      try {
-        messages = await read_session_messages(transcript);
-      } catch (error) {
-        // File vanished between resolve and read → same as not found.
-        if (is_enoent(error) === true) {
-          throw new ServeSessionError("not_found", CLIENT_MESSAGES.not_found);
-        }
-        logger.warn("serve session transcript unreadable", error);
-        throw new ServeSessionError("unreadable", CLIENT_MESSAGES.unreadable);
-      }
-      let handle: SessionHandle;
-      try {
-        handle = await open_session(session_dir, "resume");
-        // Write the filtered bag history (not a raw copy) so the fork matches
-        // in-memory state; mark seeded so #83 prompt.submit's recorder.seed
-        // appends only the new turn.
-        await write_fork_transcript(handle.path, messages);
-        mark_session_seeded(handle);
-      } catch (error) {
-        throw client_error(error);
-      }
-      put(handle.id, { handle, source: params.source ?? "resume", history: [...messages], epoch: 0 });
-      return {
-        session_id: handle.id,
-        message_count: messages.length,
-        resumed_id: path.basename(transcript, ".jsonl"),
-      };
+      // prompt.submit queues on the transcript id. Resolve latest/prefix first
+      // so this read waits out the run that is still appending that file,
+      // including a resume from another connection.
+      const transcript_id = path.basename(transcript, ".jsonl");
+      return runs.enqueue(transcript_id, () => fork_transcript(transcript, params));
     },
     get: (session_id) => {
       touch(session_id);
