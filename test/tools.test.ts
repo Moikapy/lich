@@ -623,4 +623,20 @@ describe("grep_files", () => {
     expect(bad.ok).toBe(false);
     expect(bad.error?.includes("invalid_regex")).toBe(true);
   });
+
+  it("treats only the first glob star as a wildcard", async () => {
+    await write_temp(tmp_root, "grep3/ab*c.txt", "marker_here\n");
+    await write_temp(tmp_root, "grep3/axbxc.txt", "marker_here\n");
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const result = await executor.execute("grep_files", {
+      pattern: "marker_here",
+      path: "grep3",
+      glob: "a*b*c.txt",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("ab*c.txt:1: marker_here");
+    expect(result.output).not.toContain("axbxc.txt");
+  });
 });

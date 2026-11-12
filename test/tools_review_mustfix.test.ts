@@ -115,11 +115,26 @@ describe("S-2 SSRF helpers", () => {
     }
   });
 
+  it("blocks private IPv4 written as hex groups after ::ffff:", () => {
+    const blocked = [
+      "::ffff:7f00:1",
+      "::ffff:a00:1",
+      "::ffff:ac10:1",
+      "::ffff:a9fe:a9fe",
+      "::ffff:c0a8:1",
+    ];
+    for (const address of blocked) {
+      expect(is_blocked_ip(address), address).toBe(true);
+    }
+  });
+
   it("rejects mapped loopback and CGNAT literals before DNS", async () => {
     if (private_urls_allowed() === true) {
       return;
     }
     await expect(resolve_public_ip("::ffff:127.0.0.1")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("::ffff:7f00:1")).rejects.toThrow("blocked_url: ::ffff:7f00:1");
+    await expect(resolve_public_ip("[::ffff:7f00:1]")).rejects.toThrow("blocked_url: ::ffff:7f00:1");
     await expect(resolve_public_ip("100.64.0.1")).rejects.toThrow(/blocked_url/);
     await expect(resolve_public_ip("172.16.0.1")).rejects.toThrow(/blocked_url/);
     await expect(resolve_public_ip("8.8.8.8")).resolves.toBe("8.8.8.8");
