@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ToolExecutor } from "../src/tools/executor.js";
@@ -59,6 +59,25 @@ describe("docs_search skills source", () => {
     const second = await search("yymzfirstphrase");
     expect(second.ok).toBe(true);
     expect(second.output).toContain("late-skill.md");
+  });
+
+  it("does not index a skill symlink that leaves the skills directory", async () => {
+    const outside = path.join(tmp_root, "outside");
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, "nested.md"), "# nested\n\n## Hidden\nzqxskilloutside lives here.\n");
+    const skills = path.join(tmp_root, ".lich", "skills");
+    await mkdir(skills, { recursive: true });
+    await symlink(path.join(outside, "nested.md"), path.join(skills, "leak.md"));
+    await symlink(outside, path.join(skills, "alias"));
+    await writeFile(path.join(skills, "kept.md"), "# kept\n\n## Note\nzqxskillkept stays inside.\n");
+    const leaked = await search("zqxskilloutside");
+    expect(leaked.ok).toBe(true);
+    expect(leaked.output).toBe("no results for: zqxskilloutside");
+    const kept = await search("zqxskillkept");
+    expect(kept.ok).toBe(true);
+    expect(kept.output).toContain("kept.md");
+    expect(kept.output).not.toContain("zqxskilloutside");
+    expect(kept.output).not.toContain("leak.md");
   });
 
   it("keeps working when no skills dir exists", async () => {

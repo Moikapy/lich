@@ -203,6 +203,22 @@ describe("fetch_url", () => {
     expect(fetch_mock).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks a protocol-relative loopback redirect and ignores an empty Location", async () => {
+    const relative = vi.fn(async () =>
+      fake_response("redir", { status: 302, headers: { location: "//127.0.0.1/secret" } }),
+    );
+    set_url_guard_fetch(relative);
+    await expect(safe_fetch("http://1.1.1.1/start")).rejects.toThrow("blocked_url: 127.0.0.1");
+    expect(relative).toHaveBeenCalledTimes(1);
+
+    const empty_location = vi.fn(async () => fake_response("stay-here", { status: 302, headers: { location: "" } }));
+    set_url_guard_fetch(empty_location);
+    const response = await safe_fetch("http://1.1.1.1/start");
+    expect(response.status).toBe(302);
+    expect(await response.text()).toBe("stay-here");
+    expect(empty_location).toHaveBeenCalledTimes(1);
+  });
+
   it("stops after five redirects and does not replay a POST body", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
     set_url_guard_fetch(async (input, init) => {

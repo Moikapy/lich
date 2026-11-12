@@ -162,6 +162,30 @@ describe("HookedToolRunner", () => {
     expect(calls).toEqual([]);
   });
 
+  it("uses the plugin-less reason when a block omits one and summarizes errors, not output", async () => {
+    const { runner, calls } = spy_runner("untouched");
+    const blocked = new HookedToolRunner(runner, [
+      plugin_with({ before_tool_call: async () => ({ block: true }) }),
+    ]);
+    const result = await blocked.execute("blocked_tool", {});
+    expect(result).toEqual({ ok: false, output: "", error: "blocked_by_plugin: plugin-less" });
+    expect(calls).toEqual([]);
+
+    const seen: string[] = [];
+    const failing: WrappedToolRunner = {
+      execute: async () => ({ ok: false, output: "SECRET-OUTPUT-MARKER", error: "denied" }),
+    };
+    const hooked = new HookedToolRunner(failing, [
+      plugin_with({
+        after_tool_call: async (info) => {
+          seen.push(info.result_summary);
+        },
+      }),
+    ]);
+    await hooked.execute("write_file", {});
+    expect(seen).toEqual(["denied"]);
+  });
+
   it("passes non-blocking calls through and feeds after hooks a summary", async () => {
     const log: string[] = [];
     const { runner, calls } = spy_runner("tool output");
