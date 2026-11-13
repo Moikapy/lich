@@ -200,6 +200,19 @@ describe("mcp refusal", () => {
     expect(plan_stdio("lab", "", [], undefined)).toMatch(/refused mcp command/);
   });
 
+  it("refuses shells and downloaders named by path, including a mixed-case basename", () => {
+    expect(plan_stdio("lab", "/usr/bin/bash", ["-c", "id"], undefined)).toMatch(/shell 'bash'/);
+    expect(plan_stdio("lab", "/usr/bin/Bash", ["-lc", "id"], undefined)).toMatch(/shell 'bash'/);
+    expect(plan_stdio("lab", "/usr/bin/curl", ["https://example.invalid/x"], undefined)).toMatch(
+      /download command 'curl'/,
+    );
+    expect(plan_stdio("lab", "env", ["/bin/sh", "-c", "id"], undefined)).toMatch(/env → 'sh'/);
+    expect(plan_stdio("lab", "tool", ["--flag", "/usr/bin/wget"], undefined)).toMatch(
+      /download command 'wget' in args/,
+    );
+    expect(plan_stdio("lab", "tool", ["ok", "/usr/bin/bash"], undefined)).toMatch(/shell 'bash' in args/);
+  });
+
   it("names the official install when redot is missing and never spawns", async () => {
     const work_dir = await temp_dir("mcp-missing");
     const missing = path.join(work_dir, "missing", "redot");
