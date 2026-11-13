@@ -554,7 +554,10 @@ describe("forbidden file paths", () => {
 
   it("denies .lich/profiles to read and write (global identity files when work_dir is home)", async () => {
     await mkdir(path.join(tmp_root, ".lich", "profiles"), { recursive: true });
+    await mkdir(path.join(tmp_root, ".lich", "skills"), { recursive: true });
     await writeFile(path.join(tmp_root, ".lich", "profiles", "coder.md"), "soul\n", "utf8");
+    await writeFile(path.join(tmp_root, ".lich", "config.json"), "{\"api_key\":\"sk-disk-secret\"}\n", "utf8");
+    await writeFile(path.join(tmp_root, ".lich", "skills", "kept.md"), "kept\n", "utf8");
     const registry = new ToolRegistry();
     register_builtin_tools(registry);
     const executor = make_executor(registry);
@@ -573,7 +576,11 @@ describe("forbidden file paths", () => {
     const parent = await executor.execute("disk_usage", { path: ".lich" });
     if (parent.error !== "du_unavailable") {
       expect(parent.ok).toBe(true);
+      expect(parent.output).toContain("skills");
       expect(parent.output).not.toContain("profiles");
+      expect(parent.output).not.toContain("config.json");
+      expect(parent.output).not.toContain("coder.md");
+      expect(parent.output).not.toContain("sk-disk-secret");
     }
   });
 

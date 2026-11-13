@@ -133,6 +133,97 @@ describe("openai compat provider", () => {
     ]);
   });
 
+  it("sends OPENAI_API_KEY only when the host is api.openai.com", async () => {
+    const saved = process.env["OPENAI_API_KEY"];
+    process.env["OPENAI_API_KEY"] = "sk-env-only-marker";
+    const marker = "sk-env-only-marker";
+    try {
+      const official = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      await new OpenAICompatProvider(openai_config({ api_key: undefined, fetch_fn: official.fetch_fn })).chat(
+        [{ role: "user", content: "hi" }],
+        [],
+      );
+      expect(official.requests[0]?.url).toBe("https://api.openai.com/v1/chat/completions");
+      expect(request_headers(official.requests[0]!).authorization).toBe(`Bearer ${marker}`);
+
+      const folded = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      await new OpenAICompatProvider(
+        openai_config({ api_key: "", base_url: "https://API.OPENAI.COM/v1", fetch_fn: folded.fetch_fn }),
+      ).chat([{ role: "user", content: "hi" }], []);
+      expect(folded.requests[0]?.url).toBe("https://API.OPENAI.COM/v1/chat/completions");
+      expect(request_headers(folded.requests[0]!).authorization).toBe(`Bearer ${marker}`);
+
+      const default_port = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      await new OpenAICompatProvider(
+        openai_config({ api_key: undefined, base_url: "https://api.openai.com:443/v1", fetch_fn: default_port.fetch_fn }),
+      ).chat([{ role: "user", content: "hi" }], []);
+      expect(request_headers(default_port.requests[0]!).authorization).toBe(`Bearer ${marker}`);
+
+      const explicit = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      await new OpenAICompatProvider(openai_config({ api_key: "sk-explicit", fetch_fn: explicit.fetch_fn })).chat(
+        [{ role: "user", content: "hi" }],
+        [],
+      );
+      const explicit_request = JSON.stringify(explicit.requests[0]);
+      expect(request_headers(explicit.requests[0]!).authorization).toBe("Bearer sk-explicit");
+      expect(explicit_request).not.toContain(marker);
+
+      for (const base_url of [
+        "https://api.openai.com.evil.example/v1",
+        "https://api.openai.com@evil.example/v1",
+        "https://api.openai.com:8443/v1",
+      ]) {
+        const diverted = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+        await new OpenAICompatProvider(
+          openai_config({ api_key: undefined, base_url, fetch_fn: diverted.fetch_fn }),
+        ).chat([{ role: "user", content: "hi" }], []);
+        const captured = diverted.requests[0];
+        expect(captured?.url).toBe(`${base_url}/chat/completions`);
+        expect(request_headers(captured!).authorization).toBeUndefined();
+        expect(JSON.stringify(captured)).not.toContain(marker);
+      }
+    } finally {
+      if (saved === undefined) {
+        delete process.env["OPENAI_API_KEY"];
+      } else {
+        process.env["OPENAI_API_KEY"] = saved;
+      }
+    }
+  });
+
+  it("does not call the official host when OPENAI_API_KEY is missing or blank", async () => {
+    const saved = process.env["OPENAI_API_KEY"];
+    delete process.env["OPENAI_API_KEY"];
+    try {
+      const missing = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      const missing_error = await new OpenAICompatProvider(
+        openai_config({ api_key: undefined, fetch_fn: missing.fetch_fn }),
+      )
+        .chat([{ role: "user", content: "hi" }], [])
+        .catch((error: unknown) => error);
+      expect(missing_error).toBeInstanceOf(ProviderError);
+      expect(missing_error).toMatchObject({ kind: "auth", provider_name: "openai-main" });
+      expect((missing_error as ProviderError).message).toContain("OPENAI_API_KEY");
+      expect(missing.requests).toHaveLength(0);
+
+      process.env["OPENAI_API_KEY"] = "";
+      const blank = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      const blank_error = await new OpenAICompatProvider(
+        openai_config({ api_key: "", fetch_fn: blank.fetch_fn }),
+      )
+        .chat([{ role: "user", content: "hi" }], [])
+        .catch((error: unknown) => error);
+      expect(blank_error).toMatchObject({ kind: "auth" });
+      expect(blank.requests).toHaveLength(0);
+    } finally {
+      if (saved === undefined) {
+        delete process.env["OPENAI_API_KEY"];
+      } else {
+        process.env["OPENAI_API_KEY"] = saved;
+      }
+    }
+  });
+
   it("uses a custom base_url without requiring an api key", async () => {
     const { fetch_fn, requests } = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
     const provider = new OpenAICompatProvider(

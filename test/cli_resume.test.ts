@@ -123,6 +123,9 @@ describe("run_cli --resume mode guard", () => {
     await expect(run_cli(["update", "--resume", "latest"])).rejects.toThrow(
       "--resume is only supported in TUI mode (not update)",
     );
+    await expect(run_cli(["profile", "list", "--resume", "latest"])).rejects.toThrow(
+      "--resume is only supported in TUI mode (not profile)",
+    );
   });
 });
 
