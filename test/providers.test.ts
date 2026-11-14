@@ -87,6 +87,14 @@ function as_array(value: unknown): unknown[] {
   return value as unknown[];
 }
 
+function restore_env(name: string, saved: string | undefined): void {
+  if (saved === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = saved;
+  }
+}
+
 describe("openai compat provider", () => {
   it("maps messages, tool calls, and tools into the request body", async () => {
     const { fetch_fn, requests } = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
@@ -196,6 +204,8 @@ describe("openai compat provider", () => {
                 { type: "function", function: { name: "list_dir", arguments: "{}" } },
                 { id: "", type: "function", function: { name: "read_file", arguments: "{}" } },
                 { id: null, type: "function", function: { name: "list_dir", arguments: "{}" } },
+                { id: 12, type: "function", function: { name: "grep_files", arguments: '{"pattern":"a"}' } },
+                { id: " ", type: "function", function: { name: "list_dir", arguments: '{"path":"."}' } },
               ],
             },
             finish_reason: "tool_calls",
@@ -206,10 +216,13 @@ describe("openai compat provider", () => {
     }));
     const provider = new OpenAICompatProvider(openai_config({ fetch_fn }));
     const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
-    const ids = (result.message.tool_calls ?? []).map((call) => call.id);
-    expect(ids).toHaveLength(3);
+    const calls = result.message.tool_calls ?? [];
+    const ids = calls.map((call) => call.id);
+    expect(ids).toHaveLength(5);
     expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
-    expect(new Set(ids).size).toBe(3);
+    expect(new Set(ids).size).toBe(5);
+    expect(calls[3]).toEqual({ id: ids[3], name: "grep_files", args: { pattern: "a" } });
+    expect(calls[4]).toEqual({ id: " ", name: "list_dir", args: { path: "." } });
   });
 
   it("omits executable tool calls and appends a note when arguments do not parse", async () => {
@@ -348,6 +361,58 @@ describe("openai compat provider", () => {
     await provider.chat([{ role: "user", content: "go" }], []);
     const [first_request] = requests;
     expect(first_request?.init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("falls through a blank named env to OPENAI_API_KEY only on the well-known host", async () => {
+    const named = "LICH_OPENAI_NAMED";
+    const saved = { named: process.env[named], well: process.env["OPENAI_API_KEY"] };
+    process.env[named] = "";
+    process.env["OPENAI_API_KEY"] = "sk-well-known-marker";
+    try {
+      const well_known = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      await new OpenAICompatProvider(openai_config({
+        api_key: undefined,
+        api_key_env: named,
+        fetch_fn: well_known.fetch_fn,
+      })).chat([{ role: "user", content: "hi" }], []);
+      expect(request_headers(well_known.requests[0]!).authorization).toBe("Bearer sk-well-known-marker");
+
+      delete process.env[named];
+      const unset_named = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      await new OpenAICompatProvider(openai_config({
+        api_key: undefined,
+        api_key_env: named,
+        fetch_fn: unset_named.fetch_fn,
+      })).chat([{ role: "user", content: "hi" }], []);
+      expect(request_headers(unset_named.requests[0]!).authorization).toBe("Bearer sk-well-known-marker");
+
+      const custom = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      await new OpenAICompatProvider(openai_config({
+        api_key: undefined,
+        api_key_env: named,
+        base_url: "http://127.0.0.1:9000/v1/",
+        fetch_fn: custom.fetch_fn,
+      })).chat([{ role: "user", content: "hi" }], []);
+      const custom_headers = request_headers(custom.requests[0]!);
+      expect(custom.requests[0]?.url).toBe("http://127.0.0.1:9000/v1/chat/completions");
+      expect(custom_headers.authorization).toBeUndefined();
+      expect(JSON.stringify(custom_headers)).not.toContain("sk-well-known-marker");
+
+      process.env[named] = "sk-named-marker";
+      const explicit = mock_fetch(() => ({ status: 200, body: OPENAI_OK_BODY }));
+      await new OpenAICompatProvider(openai_config({
+        api_key: "sk-explicit",
+        api_key_env: named,
+        fetch_fn: explicit.fetch_fn,
+      })).chat([{ role: "user", content: "hi" }], []);
+      const explicit_headers = request_headers(explicit.requests[0]!);
+      expect(explicit_headers.authorization).toBe("Bearer sk-explicit");
+      expect(JSON.stringify(explicit_headers)).not.toContain("sk-named-marker");
+      expect(JSON.stringify(explicit_headers)).not.toContain("sk-well-known-marker");
+    } finally {
+      restore_env(named, saved.named);
+      restore_env("OPENAI_API_KEY", saved.well);
+    }
   });
 });
 
@@ -711,6 +776,61 @@ describe("anthropic provider", () => {
       if (saved_key !== undefined) {
         process.env["ANTHROPIC_API_KEY"] = saved_key;
       }
+    }
+  });
+
+  it("rejects a blank Anthropic key, does not fall through a blank override, and keeps an explicit key", async () => {
+    const saved_key = process.env["ANTHROPIC_API_KEY"];
+    const named = "LICH_ANTHROPIC_NAMED";
+    const saved_named = process.env[named];
+    process.env["ANTHROPIC_API_KEY"] = "";
+    delete process.env[named];
+    try {
+      const blank = mock_fetch(() => ({ status: 200, body: {} }));
+      const blank_provider = new AnthropicProvider(anthropic_config({ api_key: undefined, fetch_fn: blank.fetch_fn }));
+      const blank_failure = await blank_provider.chat([{ role: "user", content: "hi" }], []).catch((error: unknown) => error);
+      expect(blank_failure).toBeInstanceOf(ProviderError);
+      expect((blank_failure as ProviderError).kind).toBe("auth");
+      expect(blank.requests).toHaveLength(0);
+
+      process.env[named] = "";
+      process.env["ANTHROPIC_API_KEY"] = "ak-env-marker";
+      const blank_named = mock_fetch(() => ({ status: 200, body: {} }));
+      const blank_named_failure = await new AnthropicProvider(anthropic_config({
+        api_key: undefined,
+        api_key_env: named,
+        fetch_fn: blank_named.fetch_fn,
+      })).chat([{ role: "user", content: "hi" }], []).catch((error: unknown) => error);
+      expect(blank_named_failure).toBeInstanceOf(ProviderError);
+      expect((blank_named_failure as ProviderError).kind).toBe("auth");
+      expect(blank_named.requests).toHaveLength(0);
+
+      process.env[named] = "ak-named-marker";
+      const trailing = mock_fetch(() => ({ status: 200, body: { content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" } }));
+      await new AnthropicProvider(anthropic_config({
+        api_key: undefined,
+        api_key_env: named,
+        base_url: "https://api.anthropic.com/",
+        fetch_fn: trailing.fetch_fn,
+      })).chat([{ role: "user", content: "hi" }], []);
+      expect(trailing.requests[0]?.url).toBe("https://api.anthropic.com/v1/messages");
+      expect(request_headers(trailing.requests[0]!)["x-api-key"]).toBe("ak-named-marker");
+      expect(JSON.stringify(request_headers(trailing.requests[0]!))).not.toContain("ak-env-marker");
+
+      process.env[named] = "ak-named-marker";
+      const explicit = mock_fetch(() => ({ status: 200, body: { content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" } }));
+      await new AnthropicProvider(anthropic_config({
+        api_key: "ak-explicit",
+        api_key_env: named,
+        fetch_fn: explicit.fetch_fn,
+      })).chat([{ role: "user", content: "hi" }], []);
+      const explicit_headers = request_headers(explicit.requests[0]!);
+      expect(explicit_headers["x-api-key"]).toBe("ak-explicit");
+      expect(JSON.stringify(explicit_headers)).not.toContain("ak-named-marker");
+      expect(JSON.stringify(explicit_headers)).not.toContain("ak-env-marker");
+    } finally {
+      restore_env("ANTHROPIC_API_KEY", saved_key);
+      restore_env(named, saved_named);
     }
   });
 

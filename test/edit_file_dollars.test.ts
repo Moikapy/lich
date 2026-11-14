@@ -28,4 +28,18 @@ describe("edit_file dollar replacements (S-10)", () => {
     expect(cleared.ok).toBe(true);
     expect(await readFile(path.join(work, "a.txt"), "utf8")).toBe("");
   });
+
+  it("keeps $& and $$ literal when replace_all rewrites every match", async () => {
+    await mkdir(TMP_BASE, { recursive: true });
+    const work = await mkdtemp(path.join(TMP_BASE, "edit-dollar-all-"));
+    dirs.push(work);
+    await writeFile(path.join(work, "a.txt"), "OLD and OLD");
+    const replaced = await edit_file_tool.execute(
+      { path: "a.txt", old_string: "OLD", new_string: "$&-$$", replace_all: true },
+      { work_dir: work, env: {} },
+    );
+    expect(replaced.ok).toBe(true);
+    expect(replaced.output).toBe("edited a.txt (replaced 2 occurrence(s))");
+    expect(await readFile(path.join(work, "a.txt"), "utf8")).toBe("$&-$$ and $&-$$");
+  });
 });

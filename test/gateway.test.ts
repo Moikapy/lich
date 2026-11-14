@@ -684,6 +684,26 @@ describe("gateway access", () => {
     }
   });
 
+  it("matches public allowlist ids exactly", () => {
+    const work_dir = temp_work_dir();
+    try {
+      const config = config_for(work_dir, {
+        allowed_users: { discord: ["user-1"], telegram: ["user-1"] },
+        allowed_chats: { twitch: ["lobby"] },
+      });
+      expect(is_gateway_sender_allowed(config, "discord", "c", "user-1")).toBe(true);
+      expect(is_gateway_sender_allowed(config, "discord", "c", "user-10")).toBe(false);
+      expect(is_gateway_sender_allowed(config, "discord", "c", "user-1 ")).toBe(false);
+      expect(is_gateway_sender_allowed(config, "discord", "c", "User-1")).toBe(false);
+      expect(is_gateway_sender_allowed(config, "telegram", "c", "user-1\n")).toBe(false);
+      expect(is_gateway_sender_allowed(config, "twitch", "lobby", "anyone")).toBe(true);
+      expect(is_gateway_sender_allowed(config, "twitch", "lobby ", "anyone")).toBe(false);
+      expect(is_gateway_sender_allowed(config, "twitch", "lob", "anyone")).toBe(false);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("logs a denial when the policy refuses a public-platform sender", () => {
     const work_dir = temp_work_dir();
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);

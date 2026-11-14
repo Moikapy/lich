@@ -34,6 +34,14 @@ const SAMPLE_MESSAGES: Message[] = [
   { role: "tool", tool_call_id: "call_1", name: "list_dir", content: "b.txt", is_error: true },
 ];
 
+function restore_env(name: string, saved: string | undefined): void {
+  if (saved === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = saved;
+  }
+}
+
 function mock_fetch(responder: (request: CapturedRequest) => MockReply): {
   fetch_fn: typeof fetch;
   requests: CapturedRequest[];
@@ -168,6 +176,41 @@ describe("ollama provider", () => {
       return;
     }
     expect(request_headers(first_request)["authorization"]).toBeUndefined();
+  });
+
+  it("does not attach a blank key or another provider's env key", async () => {
+    const named = "LICH_OLLAMA_NAMED";
+    const saved = {
+      named: process.env[named],
+      openai: process.env["OPENAI_API_KEY"],
+      anthropic: process.env["ANTHROPIC_API_KEY"],
+    };
+    process.env[named] = "";
+    process.env["OPENAI_API_KEY"] = "sk-openai-marker";
+    process.env["ANTHROPIC_API_KEY"] = "ak-anthropic-marker";
+    try {
+      const blank_key = mock_fetch(() => ({ status: 200, body: ok_body() }));
+      await new OllamaProvider(ollama_config({ fetch_fn: blank_key.fetch_fn, api_key: "" })).chat(
+        [{ role: "user", content: "hi" }],
+        [],
+      );
+      const named_blank = mock_fetch(() => ({ status: 200, body: ok_body() }));
+      await new OllamaProvider(ollama_config({
+        fetch_fn: named_blank.fetch_fn,
+        api_key: undefined,
+        api_key_env: named,
+      })).chat([{ role: "user", content: "hi" }], []);
+      for (const request of [...blank_key.requests, ...named_blank.requests]) {
+        const headers = request_headers(request);
+        expect(headers.authorization).toBeUndefined();
+        expect(JSON.stringify(headers)).not.toContain("sk-openai-marker");
+        expect(JSON.stringify(headers)).not.toContain("ak-anthropic-marker");
+      }
+    } finally {
+      restore_env(named, saved.named);
+      restore_env("OPENAI_API_KEY", saved.openai);
+      restore_env("ANTHROPIC_API_KEY", saved.anthropic);
+    }
   });
 
   it("resolves the bearer header from api_key_env when the env var is present", async () => {
