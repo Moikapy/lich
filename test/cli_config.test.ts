@@ -365,6 +365,10 @@ describe("load_layered_config profiles", () => {
     const work = make_temp_dir("work");
     expect(() => load_layered_config(work, "ghost")).toThrow(/^profile not found: ghost$/);
     expect(() => load_layered_config(work, "../x")).toThrow("invalid profile name");
+    for (const name of ["A", "-coder", "coder/soul", "coder.json", ".", ".."]) {
+      expect(() => load_layered_config(work, name)).toThrow(`invalid profile name "${name}"`);
+    }
+    expect(existsSync(profiles())).toBe(false);
   });
 
   it("loads a soul-only profile as the system prompt and lists only the markdown file", () => {
