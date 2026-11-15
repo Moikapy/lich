@@ -8,6 +8,22 @@ describe("serve protocol JSON Schema", () => {
     expect(readFileSync(serve_schema_path, "utf8")).toBe(build_serve_schema());
   }, 60_000);
 
+  it("pins each request method to that method's params and result", () => {
+    const { definitions } = JSON.parse(readFileSync(serve_schema_path, "utf8"));
+    const map = definitions.ServeMethodMap.properties;
+    for (const method of SERVE_METHODS) {
+      const request = definitions.ServeRequest.anyOf.find(
+        (entry: { properties: { method: { const: string } } }) => entry.properties.method.const === method,
+      );
+      expect(request.properties.params).toEqual(map[method].properties.params);
+      expect(request.required).toEqual(["jsonrpc", "id", "method", "params"]);
+      expect(request.additionalProperties).toBe(false);
+    }
+    expect(
+      definitions.ServeSuccess.anyOf.map((entry: { properties: { result: unknown } }) => entry.properties.result),
+    ).toEqual(SERVE_METHODS.map((method) => map[method].properties.result));
+  });
+
   it("covers every method and the event notification", () => {
     const { definitions } = JSON.parse(readFileSync(serve_schema_path, "utf8"));
     expect(definitions.ServeMethod.enum).toEqual([...SERVE_METHODS]);

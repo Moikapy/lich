@@ -321,6 +321,34 @@ describe("serve session rpc", () => {
     expect(sessions.get(extra.session_id)).toBeUndefined();
   });
 
+  it("holds a bag until every in-flight pin is released", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-pin-refcount"), "sessions");
+    const sessions = create_serve_session_store(session_dir, 1);
+    const live = await sessions.create({ source: "live" });
+    sessions.pin(live.session_id);
+    sessions.pin(live.session_id);
+    const during = await sessions.create({ source: "during" });
+    expect(sessions.get(during.session_id)?.source).toBe("during");
+    sessions.unpin(live.session_id);
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(during.session_id)).toBeUndefined();
+    const next = await sessions.create({ source: "next" });
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(next.session_id)?.source).toBe("next");
+    sessions.unpin(live.session_id);
+    expect(sessions.get(live.session_id)?.source).toBe("live");
+    expect(sessions.get(next.session_id)).toBeUndefined();
+  });
+
+  it("does not evict bags when the cap is disabled", async () => {
+    const session_dir = path.join(await make_temp_dir("serve-uncapped"), "sessions");
+    const sessions = create_serve_session_store(session_dir, 0);
+    const first = await sessions.create({ source: "first" });
+    const second = await sessions.create({ source: "second" });
+    expect(sessions.get(first.session_id)?.source).toBe("first");
+    expect(sessions.get(second.session_id)?.source).toBe("second");
+  });
+
   it("evicts the least recently used bag beyond the cap", async () => {
     const session_dir = path.join(await make_temp_dir("serve-lru"), "sessions");
     const context = rpc_context(session_dir, 2);
