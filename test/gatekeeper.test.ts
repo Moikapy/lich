@@ -296,17 +296,17 @@ describe("gatekeeper plugin", () => {
     expect(files.out).toContain("committed.txt");
   });
 
-  it("commits dotenv templates, which are not secrets", async () => {
+  it("commits dotenv templates and basenames that only resemble secrets", async () => {
     const executor = commit_executor();
-    for (const template of [".env.example", ".env.sample", ".env.template"]) {
-      await writeFile(path.join(tmp_root, template), "API_KEY=\n");
+    for (const rel of [".env.example", ".env.sample", ".env.template", "my_id_rsa.txt", "env.production"]) {
+      await writeFile(path.join(tmp_root, rel), "API_KEY=\n");
       const result = await executor.execute(
         "git_commit",
-        { message: `add ${template}`, paths: [template] },
+        { message: `add ${rel}`, paths: [rel] },
         { work_dir: tmp_root, env: {} },
       );
       expect(result.ok).toBe(true);
-      expect(result.output.endsWith(` ${template}`)).toBe(true);
+      expect(result.output.endsWith(` ${rel}`)).toBe(true);
     }
   });
 
@@ -363,6 +363,9 @@ describe("gatekeeper plugin", () => {
       { rel: "keys/ID_RSA", marker: "UPPER-RSA-SECRET-MARKER" },
       { rel: "keys/Server.PEM", marker: "UPPER-PEM-SECRET-MARKER" },
       { rel: "keys/id_rsa2", marker: "RSA2-SECRET-MARKER" },
+      { rel: ".ENV", marker: "UPPER-ENV-SECRET-MARKER" },
+      { rel: "keys/id_dsa", marker: "DSA-SECRET-MARKER" },
+      { rel: ".env.example.bak", marker: "ENV-EXAMPLE-BAK-SECRET-MARKER" },
     ];
     for (const secret of secrets) {
       await writeFile(path.join(tmp_root, secret.rel), `${secret.marker}\n`);
