@@ -212,6 +212,32 @@ describe("openai compat provider", () => {
     expect(new Set(ids).size).toBe(3);
   });
 
+  it("does not execute a tool call whose arguments are a JSON array or scalar", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                { id: "bad", type: "function", function: { name: "list_dir", arguments: "[1]" } },
+                { id: "ok", type: "function", function: { name: "list_dir", arguments: '{"path":"."}' } },
+                { id: "num", type: "function", function: { name: "list_dir", arguments: "1" } },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+      },
+    }));
+    const provider = new OpenAICompatProvider(openai_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.tool_calls).toEqual([{ id: "ok", name: "list_dir", args: { path: "." } }]);
+    expect(result.message.content.split("[unparseable tool arguments]")).toHaveLength(3);
+  });
+
   it("omits executable tool calls and appends a note when arguments do not parse", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,
@@ -550,6 +576,24 @@ describe("anthropic provider", () => {
     expect(await run_case("max_tokens")).toBe("length");
     expect(await run_case("end_turn")).toBe("stop");
     expect(await run_case("something_else")).toBe("unknown");
+  });
+
+  it("does not execute a tool_use block whose input is an array or null", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: {
+        content: [
+          { type: "tool_use", id: "bad", name: "list_dir", input: ["."] },
+          { type: "tool_use", id: "ok", name: "list_dir", input: { path: "." } },
+          { type: "tool_use", id: "nil", name: "list_dir", input: null },
+        ],
+        stop_reason: "tool_use",
+      },
+    }));
+    const provider = new AnthropicProvider(anthropic_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.tool_calls).toEqual([{ id: "ok", name: "list_dir", args: { path: "." } }]);
+    expect(result.message.content.split("[unparseable tool arguments]")).toHaveLength(3);
   });
 
   it("omits executable tool calls when tool_use input is not an object", async () => {

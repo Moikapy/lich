@@ -137,8 +137,9 @@ export async function to_http_error(
   });
 }
 
+/** Plain object. Arrays are objects in JS, but tool arguments must be records. */
 export function is_record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && Array.isArray(value) === false;
 }
 
 function describe_error(error: unknown): string {
