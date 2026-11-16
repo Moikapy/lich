@@ -290,6 +290,41 @@ describe("twitch inbound", () => {
     await adapter.stop();
   });
 
+  it("survives a closed socket when the reply is sent", async () => {
+    remember_env();
+    process.env.LICH_TWITCH_OAUTH_TOKEN = "fixture-twitch-token";
+    process.env.LICH_TWITCH_NICK = "lichbot";
+    process.env.LICH_TWITCH_CHANNELS = "lobby";
+    const rejections: unknown[] = [];
+    const on_rejection = (error: unknown): void => {
+      rejections.push(error);
+    };
+    process.on("unhandledRejection", on_rejection);
+    vi.stubGlobal("WebSocket", FakeSocket);
+    let handled = false;
+    const adapter = create_twitch_adapter(adapter_params(async () => {
+      handled = true;
+      return "hello back";
+    }));
+    try {
+      await adapter.start();
+      const socket = await wait_for_socket(0);
+      socket.send = (data: string): void => {
+        if (data.startsWith("PRIVMSG ") === true) {
+          throw new Error("socket closed");
+        }
+        socket.sent.push(data);
+      };
+      socket.emit(":viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #lobby :hello\r\n");
+      await wait_for(() => handled === true);
+      await settle();
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", on_rejection);
+      await adapter.stop();
+    }
+  });
+
   it("does not double the oauth prefix when the token already has one", async () => {
     remember_env();
     process.env.LICH_TWITCH_OAUTH_TOKEN = "oauth:already";

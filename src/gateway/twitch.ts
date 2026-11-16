@@ -152,6 +152,22 @@ async function handle_irc_line(
   line: string,
   on_welcome: (ok: boolean) => void,
 ): Promise<void> {
+  try {
+    await deliver_irc_line(params, twitch, socket, line, on_welcome);
+  } catch (error) {
+    // The message handler is not awaited. A closed socket's send() throw
+    // would otherwise reject with nobody listening and take the process down.
+    logger.warn("gateway twitch deliver failed", error);
+  }
+}
+
+async function deliver_irc_line(
+  params: AdapterParams,
+  twitch: TwitchConfig,
+  socket: RawSocket,
+  line: string,
+  on_welcome: (ok: boolean) => void,
+): Promise<void> {
   if (line.length === 0) {
     return;
   }
