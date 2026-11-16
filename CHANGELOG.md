@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Providers: a tool call whose arguments are a JSON array, or any other
+  non-object, is omitted instead of being run. OpenAI-compatible, Anthropic,
+  and Ollama clients share this check.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).

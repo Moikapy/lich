@@ -279,6 +279,27 @@ describe("ollama provider", () => {
     expect(result.message.content).toBe("working");
   });
 
+  it("does not execute tool arguments that are an array or a JSON array string", async () => {
+    const { fetch_fn } = mock_fetch(() => ({
+      status: 200,
+      body: ok_body({
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { function: { name: "list_dir", arguments: ["."] } },
+            { function: { name: "list_dir", arguments: "[1,2]" } },
+            { function: { name: "list_dir", arguments: { path: "." } } },
+          ],
+        },
+      }),
+    }));
+    const provider = new OllamaProvider(ollama_config({ fetch_fn }));
+    const result = await provider.chat([{ role: "user", content: "go" }], [SAMPLE_TOOL]);
+    expect(result.message.tool_calls).toEqual([{ id: expect.any(String), name: "list_dir", args: { path: "." } }]);
+    expect(result.message.content.split("[unparseable tool arguments]")).toHaveLength(3);
+  });
+
   it("omits executable tool calls on unparseable string arguments", async () => {
     const { fetch_fn } = mock_fetch(() => ({
       status: 200,

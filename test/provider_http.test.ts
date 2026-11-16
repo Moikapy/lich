@@ -8,6 +8,7 @@ import {
   build_bearer_headers,
   do_fetch,
   first_non_empty,
+  is_record,
   read_success_json,
   to_http_error,
 } from "../src/providers/http.js";
@@ -27,6 +28,15 @@ function http_response(status: number, body: string, headers?: Record<string, st
 }
 
 describe("provider http helpers", () => {
+  it("accepts plain objects and rejects arrays, null, and scalars", () => {
+    expect(is_record({ path: "." })).toBe(true);
+    expect(is_record({})).toBe(true);
+    expect(is_record([])).toBe(false);
+    expect(is_record(null)).toBe(false);
+    expect(is_record("[]")).toBe(false);
+    expect(is_record(1)).toBe(false);
+  });
+
   it("skips blank values and omits a bearer header when no key is present", () => {
     expect(first_non_empty([undefined, "", "sk-env"])).toBe("sk-env");
     expect(first_non_empty(["", undefined])).toBeUndefined();
