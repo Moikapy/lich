@@ -592,6 +592,25 @@ describe("forbidden file paths", () => {
     const env_local = await executor.execute("write_file", { path: ".env.local", content: "X=1\n" });
     expect(env_local.error?.startsWith("forbidden_path")).toBe(true);
   });
+
+  it("applies the .lich allowlist after .. normalization", async () => {
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const slipped = await executor.execute("write_file", {
+      path: ".lich/skills/../sessions/secret.jsonl",
+      content: "secret\n",
+    });
+    expect(slipped.ok).toBe(false);
+    expect(slipped.error).toBe("forbidden_path: .lich writes limited to skills/ and plugins/");
+    await expect(read_temp(tmp_root, ".lich/sessions/secret.jsonl")).rejects.toThrow();
+    const normalized = await executor.execute("write_file", {
+      path: ".lich/plugins/../skills/ok.md",
+      content: "# ok\n",
+    });
+    expect(normalized.ok).toBe(true);
+    expect(await read_temp(tmp_root, ".lich/skills/ok.md")).toBe("# ok\n");
+  });
 });
 
 describe("grep_files", () => {

@@ -245,6 +245,16 @@ describe("fetch_url", () => {
     expect(calls).toHaveLength(5);
   });
 
+  it("rejects a body that is not a string or bytes before connecting", async () => {
+    reset_url_guard_fetch();
+    const lookup = vi.mocked(dns.lookup);
+    lookup.mockClear();
+    await expect(
+      safe_fetch("http://1.1.1.1/body", { method: "POST", body: new URLSearchParams("a=1") }),
+    ).rejects.toThrow("blocked_url: unsupported_body");
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
   it("returns a non-redirect status without following Location", async () => {
     const fetch_mock = vi.fn(async () =>
       fake_response("stay", { status: 200, headers: { location: "http://8.8.8.8/elsewhere" } }),
