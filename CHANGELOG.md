@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `fetch_url` and `http_request` stop reading a response after 1 MiB. A huge
+  body used to buffer until the process ran out of memory; shorter bodies are
+  unchanged, and both tools still clamp what they return to `max_chars`.
 - Serve: the package ships `schemas/serve-protocol.schema.json`, a JSON Schema
   of the wire protocol generated from `src/serve/protocol.ts`, for non-TS
   clients (#144).
