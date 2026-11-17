@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { connect as net_connect } from "node:net";
+import { connect as net_connect, type Socket } from "node:net";
 import path from "node:path";
 import { Writable } from "node:stream";
 import WebSocket from "ws";
@@ -219,6 +219,32 @@ describe("serve websocket transport", () => {
 
   it("refuses non-loopback hosts", () => {
     expect(() => create_serve_server({ host: "0.0.0.0", boot_stdout: null })).toThrow(/loopback/);
+  });
+
+  it("refuses a second start while the server is listening", async () => {
+    const server = create_serve_server({ port: 0, boot_stdout: null });
+    servers.push(server);
+    await server.start();
+    await expect(server.start()).rejects.toThrow(/already started/);
+  });
+
+  it("refuses a new upgrade with 503 while stop is closing a client", async () => {
+    const token = "stop-gate-token";
+    const server = create_serve_server({ port: 0, boot_stdout: null, token });
+    servers.push(server);
+    const boot = await server.start();
+    const held = await hold_upgraded_socket(boot.port, token);
+    try {
+      const stopped = server.stop();
+      const status = await read_upgrade_status(
+        boot.port,
+        upgrade_request(token, `127.0.0.1:${boot.port}`),
+      );
+      expect(status).toBe(503);
+      await stopped;
+    } finally {
+      held.destroy();
+    }
   });
 
   it("rejects upgrades with a non-loopback Host header", async () => {
@@ -568,6 +594,38 @@ function upgrade_request(token: string, host: string | undefined): string {
     `Sec-WebSocket-Key: ${WS_KEY}\r\n` +
     "\r\n"
   );
+}
+
+/** Finish the HTTP upgrade and leave the socket open so stop() stays in its close grace. */
+function hold_upgraded_socket(port: number, token: string): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = net_connect({ host: "127.0.0.1", port }, () => {
+      socket.write(upgrade_request(token, `127.0.0.1:${port}`));
+    });
+    let buf = "";
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("upgrade hold timeout"));
+    }, 5000);
+    socket.on("data", (chunk: Buffer) => {
+      buf += chunk.toString("utf8");
+      if (buf.includes("\r\n\r\n") === false) {
+        return;
+      }
+      clearTimeout(timer);
+      socket.removeAllListeners("data");
+      if (buf.startsWith("HTTP/1.1 101") === true) {
+        resolve(socket);
+        return;
+      }
+      socket.destroy();
+      reject(new Error(`upgrade hold failed: ${buf.slice(0, 32)}`));
+    });
+    socket.on("error", (error: Error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
 function read_upgrade_status(port: number, head: string): Promise<number> {

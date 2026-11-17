@@ -85,6 +85,27 @@ describe("load_theme", () => {
       spy.mockRestore();
     }
   });
+
+  it("rejects a theme name that would read outside the themes directory", async () => {
+    set_log_level("info");
+    const root = await themes_dir();
+    const dir = path.join(root, "themes");
+    await mkdir(dir);
+    await write_theme(root, "nope", { ...VAMPIRE, name: "nope", glyph: "OUT" });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(load_theme("../nope", dir)).toBe(LICH_THEME);
+      expect(load_theme("sub/../../nope", dir)).toBe(LICH_THEME);
+      const errors = spy.mock.calls.map((call) => call[1]);
+      expect(errors).toHaveLength(2);
+      for (const error of errors) {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe("invalid theme name");
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe("fill_template", () => {
