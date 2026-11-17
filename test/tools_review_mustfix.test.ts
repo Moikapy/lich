@@ -2,12 +2,14 @@
  * Must-fix tools: symlink escape, forbidden paths, SSRF, run_tests filter, env scrub.
  */
 import dns from "node:dns/promises";
+import { createServer } from "node:http";
 import { mkdir, mkdtemp, symlink, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { assert_file_tool_access, resolve_safe_path } from "../src/tools/guard.js";
 import {
   is_blocked_ip,
+  MAX_RESPONSE_BODY_BYTES,
   private_urls_allowed,
   reset_url_guard_fetch,
   resolve_public_ip,
@@ -184,6 +186,55 @@ describe("S-2 SSRF helpers", () => {
     const response = await safe_fetch("https://example.com/path");
     expect(response.status).toBe(200);
     expect(seen).toEqual(["https://example.com/path"]);
+  });
+
+  it("stops reading a pinned body at the cap instead of buffering the rest", async () => {
+    const saved = process.env["LICH_ALLOW_PRIVATE_URLS"];
+    process.env["LICH_ALLOW_PRIVATE_URLS"] = "1";
+    const chunk = Buffer.alloc(64 * 1024, 0x61);
+    const offered = MAX_RESPONSE_BODY_BYTES + chunk.length * 8;
+    const server = createServer((request, response) => {
+      response.on("error", () => undefined);
+      if (request.url === "/small") {
+        response.end("ok");
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/plain" });
+      let sent = 0;
+      const write_more = (): void => {
+        while (sent < offered) {
+          const ok = response.write(chunk);
+          sent += chunk.length;
+          if (ok === false) {
+            response.once("drain", write_more);
+            return;
+          }
+        }
+        response.end();
+      };
+      write_more();
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    try {
+      const small = await safe_fetch(`http://127.0.0.1:${port}/small`);
+      expect(await small.text()).toBe("ok");
+      const huge = await safe_fetch(`http://127.0.0.1:${port}/huge`);
+      const bytes = Buffer.from(await huge.arrayBuffer());
+      expect(huge.status).toBe(200);
+      expect(bytes.length).toBe(MAX_RESPONSE_BODY_BYTES);
+      expect(bytes[0]).toBe(0x61);
+      expect(bytes[bytes.length - 1]).toBe(0x61);
+    } finally {
+      restore_private_url_env(saved);
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    }
   });
 });
 

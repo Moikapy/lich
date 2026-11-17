@@ -11,6 +11,12 @@ import type { LookupFunction } from "node:net";
 
 const MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+/**
+ * Largest body `pinned_http_fetch` will hold. Tool callers clamp further
+ * (`fetch_url` / `http_request` max out at 400_000 bytes). Without this, one
+ * public URL can buffer until the process runs out of memory.
+ */
+export const MAX_RESPONSE_BODY_BYTES = 1_048_576;
 
 /** Optional fetch override for tests; otherwise uses pinned http(s).request. */
 let fetch_override: typeof fetch | undefined;
@@ -180,9 +186,90 @@ function request_body(init: RequestInit | undefined): string | Uint8Array | unde
   throw new Error("blocked_url: unsupported_body");
 }
 
+/** Copy Node response headers into a fetch Headers object. */
+function headers_from_incoming(incoming: http.IncomingMessage): Headers {
+  const response_headers = new Headers();
+  for (const [key, value] of Object.entries(incoming.headers)) {
+    if (typeof value === "string") {
+      response_headers.set(key, value);
+    } else if (Array.isArray(value) === true) {
+      for (const part of value) {
+        response_headers.append(key, part);
+      }
+    }
+  }
+  return response_headers;
+}
+
+/**
+ * Read at most `MAX_RESPONSE_BODY_BYTES`, then `stop` (destroy the socket).
+ * A cap-triggered destroy must not surface as a failure: the bytes already
+ * read are the response.
+ */
+function read_capped_body(incoming: http.IncomingMessage, stop: () => void): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let settled = false;
+    let capping = false;
+    const succeed = (): void => {
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      resolve(Buffer.concat(chunks));
+    };
+    const fail = (error: Error): void => {
+      if (capping === true) {
+        succeed();
+        return;
+      }
+      if (settled === true) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
+    incoming.on("data", (chunk: Buffer) => {
+      const room = MAX_RESPONSE_BODY_BYTES - received;
+      if (room <= 0) {
+        capping = true;
+        stop();
+        succeed();
+        return;
+      }
+      const slice = chunk.byteLength > room ? chunk.subarray(0, room) : chunk;
+      chunks.push(Buffer.from(slice));
+      received += slice.byteLength;
+      if (received >= MAX_RESPONSE_BODY_BYTES) {
+        capping = true;
+        stop();
+        succeed();
+      }
+    });
+    incoming.on("end", succeed);
+    incoming.on("error", fail);
+  });
+}
+
+/** Abort the pinned request when the caller signal fires. */
+function abort_request(req: http.ClientRequest, signal: AbortSignal | undefined | null): void {
+  if (signal === undefined || signal === null) {
+    return;
+  }
+  if (signal.aborted === true) {
+    req.destroy(new Error("aborted"));
+    return;
+  }
+  signal.addEventListener("abort", () => {
+    req.destroy(new Error("aborted"));
+  }, { once: true });
+}
+
 /**
  * Connect with hostname kept for SNI/Host, but DNS forced to the vetted IP.
- * Does not follow redirects (caller handles Location).
+ * Does not follow redirects (caller handles Location). The body is capped so
+ * a huge payload cannot exhaust the process.
  */
 function pinned_http_fetch(url: URL, ip: string, init: RequestInit): Promise<Response> {
   const lib = url.protocol === "https:" ? https : http;
@@ -190,6 +277,7 @@ function pinned_http_fetch(url: URL, ip: string, init: RequestInit): Promise<Res
   const headers = request_headers(init);
   const body = request_body(init);
   return new Promise((resolve, reject) => {
+    let capped = false;
     const req = lib.request(
       {
         protocol: url.protocol,
@@ -201,41 +289,24 @@ function pinned_http_fetch(url: URL, ip: string, init: RequestInit): Promise<Res
         lookup: pinned_lookup(ip),
       },
       (incoming) => {
-        const chunks: Buffer[] = [];
-        incoming.on("data", (chunk: Buffer) => {
-          chunks.push(chunk);
-        });
-        incoming.on("end", () => {
-          const status = incoming.statusCode ?? 0;
-          const response_headers = new Headers();
-          for (const [key, value] of Object.entries(incoming.headers)) {
-            if (typeof value === "string") {
-              response_headers.set(key, value);
-            } else if (Array.isArray(value) === true) {
-              for (const part of value) {
-                response_headers.append(key, part);
-              }
-            }
-          }
-          resolve(new Response(Buffer.concat(chunks), { status, headers: response_headers }));
-        });
+        const status = incoming.statusCode ?? 0;
+        const response_headers = headers_from_incoming(incoming);
+        read_capped_body(incoming, () => {
+          capped = true;
+          req.destroy();
+        }).then(
+          (bytes) => resolve(new Response(bytes, { status, headers: response_headers })),
+          reject,
+        );
       },
     );
-    req.on("error", reject);
-    const signal = init.signal;
-    if (signal !== undefined && signal !== null) {
-      if (signal.aborted === true) {
-        req.destroy(new Error("aborted"));
+    req.on("error", (error) => {
+      if (capped === true) {
         return;
       }
-      signal.addEventListener(
-        "abort",
-        () => {
-          req.destroy(new Error("aborted"));
-        },
-        { once: true },
-      );
-    }
+      reject(error);
+    });
+    abort_request(req, init.signal);
     if (body !== undefined) {
       req.write(body);
     }
