@@ -158,6 +158,36 @@ describe("fetch_url", () => {
     expect(binary.error).toBe("unsupported_content_type: application/octet-stream");
   });
 
+  it("drops non-2xx and parameterized binary bodies", async () => {
+    const marker = "BODY-MUST-NOT-LEAK";
+    stub_fetch(
+      vi.fn(async () => fake_response(marker, { status: 404, headers: { "content-type": "text/plain" } })),
+    );
+    const missing = await executor.execute("fetch_url", { url: "https://example.com/missing" });
+    expect(missing).toEqual({ ok: false, output: "", error: "http_404" });
+
+    stub_fetch(
+      vi.fn(async () =>
+        fake_response(marker, { headers: { "content-type": "image/png; charset=binary" } }),
+      ),
+    );
+    const image = await executor.execute("fetch_url", { url: "https://example.com/pic.png" });
+    expect(image.ok).toBe(false);
+    expect(image.output).toBe("");
+    expect(image.error).toBe("unsupported_content_type: image/png; charset=binary");
+
+    stub_fetch(
+      vi.fn(async () =>
+        fake_response(marker, { headers: { "content-type": "application/octet-stream; charset=binary" } }),
+      ),
+    );
+    const binary = await executor.execute("fetch_url", { url: "https://example.com/blob" });
+    expect(binary.ok).toBe(false);
+    expect(binary.output).toBe("");
+    expect(binary.error).toBe("unsupported_content_type: application/octet-stream; charset=binary");
+    expect(JSON.stringify([missing, image, binary])).not.toContain(marker);
+  });
+
   it("rejects invalid urls and non-http protocols", async () => {
     const malformed = await executor.execute("fetch_url", { url: "not a url" });
     expect(malformed.ok).toBe(false);
