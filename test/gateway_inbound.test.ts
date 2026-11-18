@@ -377,4 +377,66 @@ describe("telegram inbound", () => {
       polls.allow_exit();
     }
   });
+
+  it("advances getUpdates past update_id 0 and keeps that offset when a later id is missing", async () => {
+    remember_env();
+    process.env.LICH_TELEGRAM_BOT_TOKEN = "fixture-telegram-token";
+    const polls: string[] = [];
+    const seen: string[] = [];
+    let release_park = (): void => undefined;
+    const parked = new Promise<void>((resolve) => {
+      release_park = resolve;
+    });
+    vi.stubGlobal("fetch", async (url: unknown) => {
+      const href = String(url);
+      if (href.includes("getUpdates") !== true) {
+        return new Response("{}", { status: 200 });
+      }
+      polls.push(href);
+      const offset = new URL(href).searchParams.get("offset");
+      if (polls.length >= 3) {
+        await parked;
+        return new Response(JSON.stringify({ result: [] }), { status: 200 });
+      }
+      if (offset === "0") {
+        return new Response(
+          JSON.stringify({
+            result: [{ update_id: 0, message: { text: "once", chat: { id: 1 }, from: { id: 2 } } }],
+          }),
+          { status: 200 },
+        );
+      }
+      if (offset === "1") {
+        return new Response(
+          JSON.stringify({
+            result: [
+              { update_id: 4, message: { text: "four", chat: { id: 1 }, from: { id: 2 } } },
+              { message: { text: "no-id", chat: { id: 1 }, from: { id: 2 } } },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      await parked;
+      return new Response(JSON.stringify({ result: [] }), { status: 200 });
+    });
+    const adapter = create_telegram_adapter(adapter_params(async (_platform, chat, user, text) => {
+      seen.push(`${chat}:${user}:${text}`);
+      return "ok";
+    }));
+    const offsets = (): string[] => polls.map((href) => new URL(href).searchParams.get("offset") ?? "");
+    try {
+      await adapter.start();
+      await wait_for(() => polls.length >= 3 || (polls.length >= 2 && offsets()[1] !== "1"));
+      await wait_for(() => seen.length === 3 || (polls.length >= 2 && offsets()[1] !== "1"));
+      expect(offsets().slice(0, 3)).toEqual(["0", "1", "5"]);
+      expect(seen).toEqual(["1:2:once", "1:2:four", "1:2:no-id"]);
+      expect(polls[0]).toContain("https://api.telegram.org/botfixture-telegram-token/getUpdates?");
+      expect(polls[0]).toContain("timeout=50");
+      expect(polls[0]?.split("fixture-telegram-token")).toHaveLength(2);
+    } finally {
+      await adapter.stop();
+      release_park();
+    }
+  });
 });

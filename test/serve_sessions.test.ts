@@ -278,7 +278,8 @@ describe("serve session rpc", () => {
     const bad_create = await rpc(context, "session.create", { label: "x" });
     expect(bad_create.error).toMatchObject({ code: -32602 });
     const bad_clear = await rpc(context, "session.clear", { session_id: "missing" });
-    expect(bad_clear.error).toMatchObject({ code: -32000, message: /session not found/ });
+    expect(bad_clear.error).toEqual({ code: -32000, message: "session not found: missing" });
+    expect(JSON.stringify(bad_clear)).not.toContain(session_dir);
   });
 
   it("rejects empty-string labels on create (empty source also invalid)", async () => {
