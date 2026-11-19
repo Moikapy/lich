@@ -326,6 +326,24 @@ describe("read/write/edit", () => {
     expect(not_unique.error?.includes("old_string_not_unique (2 occurrences)")).toBe(true);
   });
 
+  it("does not replace a directory or return its contents as file text", async () => {
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    const secret = "sk-dir-write-secret";
+    await write_temp(tmp_root, "blocked-dir/keep.txt", secret);
+    const written = await executor.execute("write_file", { path: "blocked-dir", content: "replaced" });
+    expect(written.ok).toBe(false);
+    expect(written.output).toBe("");
+    expect(written.error ?? "").not.toContain(secret);
+    expect(await read_temp(tmp_root, "blocked-dir/keep.txt")).toBe(secret);
+    const read = await executor.execute("read_file", { path: "blocked-dir" });
+    expect(read.ok).toBe(false);
+    expect(read.output).toBe("");
+    expect(read.error ?? "").not.toContain(secret);
+    expect(read.error ?? "").not.toContain("keep.txt");
+  });
+
   it("edit_file replace_all replaces every occurrence", async () => {
     const registry = new ToolRegistry();
     register_builtin_tools(registry);
