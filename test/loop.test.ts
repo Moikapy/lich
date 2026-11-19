@@ -4,6 +4,7 @@ import type { ChatFn } from "../src/context/compressor.js";
 import {
   history_after_abort,
   history_after_run_error,
+  note_partial_messages,
   partial_messages_of,
   reply_after_abort,
   run_conversation,
@@ -637,6 +638,45 @@ describe("run_conversation", () => {
       caught = error;
     }
     expect(history_after_run_error(caught)).toBeUndefined();
+  });
+
+  it("keeps a private copy of finished turns and reads the string key examples set", () => {
+    const source: Message[] = [
+      { role: "user", content: "secret-prompt" },
+      { role: "assistant", content: "kept" },
+      { role: "user", content: "unanswered" },
+    ];
+    const error = new Error("provider exploded");
+    expect(note_partial_messages(error, source)).toBe(error);
+    source[0] = { role: "user", content: "mutated" };
+    const stored = partial_messages_of(error);
+    expect(stored).not.toBe(source);
+    expect(stored?.[0]).toEqual({ role: "user", content: "secret-prompt" });
+    expect(JSON.stringify(error)).not.toContain("secret-prompt");
+    expect(Object.keys(error)).not.toContain("lich_partial_messages");
+    expect(history_after_run_error(error)).toEqual([
+      { role: "user", content: "secret-prompt" },
+      { role: "assistant", content: "kept" },
+    ]);
+
+    const external = new Error("copied");
+    Object.defineProperty(external, "lich_partial_messages", {
+      value: [
+        { role: "user", content: "q" },
+        { role: "tool", content: "file-body", tool_call_id: "t1", name: "read_file" },
+        { role: "user", content: "tail" },
+      ],
+      enumerable: false,
+    });
+    expect(history_after_run_error(external)).toEqual([
+      { role: "user", content: "q" },
+      { role: "tool", content: "file-body", tool_call_id: "t1", name: "read_file" },
+    ]);
+    expect(history_after_run_error({ lich_partial_messages: [{ role: "user", content: "only" }] })).toBeUndefined();
+    expect(partial_messages_of("boom")).toBeUndefined();
+    expect(partial_messages_of({ lich_partial_messages: "nope" })).toBeUndefined();
+    expect(note_partial_messages("boom", source)).toBe("boom");
+    expect(note_partial_messages(null, source)).toBeNull();
   });
 
   it("emits only kind and message when chat throws ProviderError", async () => {
