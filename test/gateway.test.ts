@@ -20,7 +20,7 @@ import { create_twitch_adapter } from "../src/gateway/twitch.js";
 import { logger } from "../src/util/log.js";
 import { assert_bind_allowed, create_webhook_adapter, MAX_WEBHOOK_BODY_BYTES } from "../src/gateway/webhook.js";
 import { format_agent_reply } from "../src/gateway/format.js";
-import { create_gateway_bus } from "../src/gateway/runner.js";
+import { create_gateway_bus, run_gateway } from "../src/gateway/runner.js";
 import { create_telegram_adapter, split_text, TELEGRAM_CAPABILITIES, TELEGRAM_MAX_MESSAGE_CHARS } from "../src/gateway/telegram.js";
 import { resolve_docs_root } from "../src/tools/builtin/docs_read.js";
 import { parse_irc_line, sanitize_twitch_outbound, TWITCH_MESSAGE_CAP } from "../src/gateway/twitch.js";
@@ -1112,6 +1112,81 @@ describe("webhook adapter", () => {
       expect(seen).toEqual(["webhook:42:7:hi"]);
     } finally {
       await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports text is required and hides handler throws", async () => {
+    const work_dir = temp_work_dir();
+    let port: number | undefined;
+    const seen: string[] = [];
+    const adapter = make_adapter(work_dir, "echo", (bound) => {
+      port = bound;
+    }, async (_platform, _chat_id, _user_id, text) => {
+      seen.push(text);
+      if (text === "boom") {
+        throw new Error("secret at /tmp/lich-secret-marker");
+      }
+      return "ok";
+    });
+    try {
+      await adapter.start();
+      if (port === undefined) {
+        throw new Error("webhook did not report a listening port");
+      }
+      const base = `http://127.0.0.1:${port}/message`;
+      for (const body of ["", "   \n", "{", "[]", "null", JSON.stringify({ nope: true })]) {
+        const response = await fetch(base, { method: "POST", body });
+        expect(response.status).toBe(400);
+        expect(await response.text()).toBe('{"error":"text is required"}');
+      }
+      expect(seen).toEqual([]);
+      const empty = await fetch(base, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "" }),
+      });
+      expect(empty.status).toBe(200);
+      const spaced = await fetch(base, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: " " }),
+      });
+      expect(spaced.status).toBe(200);
+      expect(seen).toEqual(["", " "]);
+      const thrown = await fetch(base, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "boom" }),
+      });
+      expect(thrown.status).toBe(500);
+      expect(await thrown.text()).toBe('{"error":"internal error"}');
+    } finally {
+      await adapter.stop();
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 1 when every gateway platform name is unknown", async () => {
+    const work_dir = temp_work_dir();
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const pending = run_gateway(config_for(work_dir), ["Webhook", "irc"]);
+      const result = await Promise.race([
+        pending,
+        new Promise<number>((resolve) => {
+          timer = setTimeout(() => resolve(-1), 250);
+        }),
+      ]);
+      expect(result).toBe(1);
+      const text = stderr.mock.calls.map((call) => String(call[0])).join("");
+      expect(text).toContain('lich: unknown gateway platform "Webhook" (skipping)');
+      expect(text).toContain('lich: unknown gateway platform "irc" (skipping)');
+      expect(text).toContain("lich: gateway needs at least one valid platform (webhook|telegram|discord|twitch)");
+    } finally {
+      clearTimeout(timer);
+      stderr.mockRestore();
       rmSync(work_dir, { recursive: true, force: true });
     }
   });

@@ -326,6 +326,20 @@ describe("read/write/edit", () => {
     expect(not_unique.error?.includes("old_string_not_unique (2 occurrences)")).toBe(true);
   });
 
+  it("edit_file rejects a missing new_string and leaves the file", async () => {
+    const registry = new ToolRegistry();
+    register_builtin_tools(registry);
+    const executor = make_executor(registry);
+    await executor.execute("write_file", { path: "edit/keep.txt", content: "stay" });
+    const missing = await executor.execute("edit_file", { path: "edit/keep.txt", old_string: "stay" });
+    const numeric = await executor.execute("edit_file", { path: "edit/keep.txt", old_string: "stay", new_string: 0 });
+    expect(missing.ok).toBe(false);
+    expect(missing.error).toBe("missing_arg: new_string");
+    expect(numeric.ok).toBe(false);
+    expect(numeric.error).toBe("missing_arg: new_string");
+    expect(await read_temp(tmp_root, "edit/keep.txt")).toBe("stay");
+  });
+
   it("edit_file replace_all replaces every occurrence", async () => {
     const registry = new ToolRegistry();
     register_builtin_tools(registry);
