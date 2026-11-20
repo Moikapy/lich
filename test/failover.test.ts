@@ -251,6 +251,55 @@ describe("chat_with_failover", () => {
     expect(result.finish_reason).toBe("stop");
   });
 
+  it("does not call a provider when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    const router = new ProviderRouter([
+      openai_config("primary", () => {
+        calls += 1;
+        return Promise.resolve(new Response(JSON.stringify(OK_BODY), { status: 200 }));
+      }),
+    ]);
+    const failure = await chat_with_failover(router, [{ role: "user", content: "hi" }], [], {
+      signal: controller.signal,
+    }).catch((error: unknown) => error);
+    expect(calls).toBe(0);
+    expect(failure).toBeInstanceOf(ProviderError);
+    const provider_error = failure as ProviderError;
+    expect(provider_error.kind).toBe("unknown");
+    expect(provider_error.provider_name).toBe("router");
+    expect(provider_error.message).toBe("aborted before any provider succeeded");
+  });
+
+  it("does not fail over when the caller aborts during a hard provider error", async () => {
+    const controller = new AbortController();
+    let backup_calls = 0;
+    const router = new ProviderRouter([
+      openai_config("primary", () => {
+        controller.abort();
+        return Promise.resolve(new Response(JSON.stringify({ error: { message: "bad key" } }), { status: 401 }));
+      }),
+      openai_config("backup", () => {
+        backup_calls += 1;
+        return Promise.resolve(new Response(JSON.stringify(OK_BODY), { status: 200 }));
+      }),
+    ]);
+    const failure = await chat_with_failover(router, [{ role: "user", content: "hi" }], [], {
+      signal: controller.signal,
+    }).catch((error: unknown) => error);
+    expect(backup_calls).toBe(0);
+    expect(failure).toBeInstanceOf(Error);
+    const abort_error = failure as Error;
+    expect(abort_error.name).toBe("AbortError");
+    expect(abort_error.message).toBe("operation aborted before completion");
+    expect(abort_error.cause).toBeInstanceOf(ProviderError);
+    const cause = abort_error.cause as ProviderError;
+    expect(cause.kind).toBe("auth");
+    expect(cause.provider_name).toBe("primary");
+    expect(cause.message).toContain("bad key");
+  });
+
   it("rethrows caller aborts without failing over to the next provider", async () => {
     const controller = new AbortController();
     let backup_calls = 0;

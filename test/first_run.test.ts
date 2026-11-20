@@ -256,6 +256,77 @@ describe("lich init and bare lich", () => {
     expect(provider?.["base_url"]).toBe("http://gpu-box:11434");
   });
 
+  it("replaces the openai key env when --provider-kind switches to anthropic", async () => {
+    const dir = make_temp_dir("kind-openai-to-anthropic");
+    write_lich_config(dir, {
+      providers: [
+        {
+          kind: "openai_compat",
+          name: "main",
+          model: "gpt",
+          base_url: "https://api.openai.com/v1",
+          api_key_env: "OPENAI_API_KEY",
+        },
+      ],
+    });
+    tui_run.configs = [];
+    expect(await run_cli(["tui", "--work-dir", dir, "--provider-kind", "anthropic"])).toBe(0);
+    const provider = tui_run.configs[0]?.providers?.[0] as Record<string, unknown> | undefined;
+    expect(provider?.["kind"]).toBe("anthropic");
+    expect(provider?.["base_url"]).toBe("https://api.anthropic.com");
+    expect(provider?.["api_key_env"]).toBe("ANTHROPIC_API_KEY");
+  });
+
+  it("keeps an explicit base url and key env across a kind switch", async () => {
+    const dir = make_temp_dir("kind-explicit-url");
+    write_lich_config(dir, {
+      providers: [
+        {
+          kind: "openai_compat",
+          name: "main",
+          model: "gpt",
+          base_url: "https://api.openai.com/v1",
+          api_key_env: "OPENAI_API_KEY",
+        },
+      ],
+    });
+    tui_run.configs = [];
+    expect(
+      await run_cli([
+        "tui",
+        "--work-dir",
+        dir,
+        "--provider-kind",
+        "anthropic",
+        "--base-url",
+        "https://proxy.example/v1",
+        "--api-key-env",
+        "MY_ANTHROPIC_KEY",
+      ]),
+    ).toBe(0);
+    const provider = tui_run.configs[0]?.providers?.[0] as Record<string, unknown> | undefined;
+    expect(provider?.["kind"]).toBe("anthropic");
+    expect(provider?.["base_url"]).toBe("https://proxy.example/v1");
+    expect(provider?.["api_key_env"]).toBe("MY_ANTHROPIC_KEY");
+  });
+
+  it("rejects extra positionals and an unknown provider kind before starting", async () => {
+    const dir = make_temp_dir("cli-guards");
+    await expect(run_cli(["chat", "do the thing", "--work-dir", dir])).rejects.toThrow(
+      "chat mode takes no task argument",
+    );
+    await expect(run_cli(["init", "extra", "--work-dir", dir])).rejects.toThrow("init takes no extra arguments");
+    await expect(run_cli(["serve", "extra", "--work-dir", dir])).rejects.toThrow("serve takes no arguments");
+    await expect(run_cli(["update", "now"])).rejects.toThrow("update takes no arguments");
+    await expect(run_cli(["tui", "--work-dir", dir, "--provider-kind", "bedrock", "--model", "x"])).rejects.toThrow(
+      'lich tui: unknown provider kind "bedrock" (expected openai_compat, anthropic, or ollama)',
+    );
+    expect(tui_run.configs).toEqual([]);
+    expect(writes.calls).toEqual([]);
+    expect(gateway_run.fn).not.toHaveBeenCalled();
+    expect(existsSync(project_config_path(dir))).toBe(false);
+  });
+
   it("drops api_key_env when switching anthropic to ollama", async () => {
     const dir = make_temp_dir("init-kind-to-ollama");
     write_lich_config(dir, {

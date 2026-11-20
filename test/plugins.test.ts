@@ -224,6 +224,33 @@ describe("HookedToolRunner", () => {
     expect(marks).toEqual(["start", "end:final:3"]);
   });
 
+  it("continues lifecycle fan-out when a hook throws", async () => {
+    const marks: string[] = [];
+    const throwing: PluginHooks = {
+      on_run_start: async () => {
+        throw new Error("start blew up");
+      },
+      on_run_end: async () => {
+        throw new Error("end blew up");
+      },
+    };
+    const later: PluginHooks = {
+      on_run_start: async () => {
+        marks.push("start");
+      },
+      on_run_end: async (info) => {
+        marks.push(`end:${info.stopped_reason}`);
+      },
+    };
+    const { runner } = spy_runner("unused");
+    const hooked = new HookedToolRunner(runner, [plugin_with(throwing), plugin_with(later)]);
+    await expect(hooked.call_run_start({ input_chars: 4 }, { work_dir: "/tmp" })).resolves.toBeUndefined();
+    await expect(
+      hooked.call_run_end({ stopped_reason: "aborted", turns_used: 1 }, { work_dir: "/tmp" }),
+    ).resolves.toBeUndefined();
+    expect(marks).toEqual(["start", "end:aborted"]);
+  });
+
   it("exposes structured ok/error fields to after hooks (A7)", async () => {
     const seen_ok: boolean[] = [];
     const seen_error: Array<string | undefined> = [];
