@@ -61,7 +61,7 @@ vi.mock("../src/gateway.js", () => ({
 import { parse_agent_config } from "../src/agent/config.js";
 import { config_search_paths, existing_config_path, global_config_path, load_layered_config, project_config_path, write_lich_config } from "../src/cli_config.js";
 import { read_platform_token } from "../src/gateway/token_env.js";
-import { build_setup_config, collect_setup_answers } from "../src/setup_wizard.js";
+import { ask_save_global, build_setup_config, collect_setup_answers } from "../src/setup_wizard.js";
 import { run_cli } from "../src/cli.js";
 import { tui_banner_text } from "../src/tui/state.js";
 import { LICH_THEME } from "../src/util/lore.js";
@@ -883,6 +883,98 @@ describe("setup wizard fields", () => {
     } finally {
       delete process.env["sk-live"];
     }
+  });
+
+  it("re-prompts an unknown provider kind and keeps the corrected kind", async () => {
+    const dir = make_temp_dir("kind-retry");
+    const prompts: string[] = [];
+    const answers = await collect_setup_answers(dir, async (prompt) => {
+      prompts.push(prompt);
+      if (prompt.startsWith("Unknown kind")) {
+        return "anthropic";
+      }
+      if (prompt.startsWith("Provider kind")) {
+        return "Anthropic";
+      }
+      if (prompt.startsWith("Model")) {
+        return "claude-test";
+      }
+      return "";
+    });
+    expect(prompts.some((prompt) => prompt.startsWith("Unknown kind"))).toBe(true);
+    expect(answers).toMatchObject({
+      provider_kind: "anthropic",
+      model: "claude-test",
+      base_url: "https://api.anthropic.com",
+      api_key_env: "ANTHROPIC_API_KEY",
+      platforms: [],
+      plugins: [],
+    });
+  });
+
+  it("keeps each gateway platform once and drops unknown names", async () => {
+    const dir = make_temp_dir("platforms");
+    const prompts: string[] = [];
+    const answers = await collect_setup_answers(dir, async (prompt) => {
+      prompts.push(prompt);
+      if (prompt.startsWith("Gateway platforms")) {
+        return "Telegram, telegram, bogon, discord";
+      }
+      if (prompt.startsWith("telegram token env")) {
+        return "MY_TG_TOKEN";
+      }
+      if (prompt.startsWith("discord token env")) {
+        return "";
+      }
+      return "";
+    });
+    expect(answers?.platforms).toEqual(["telegram", "discord"]);
+    expect(answers?.token_envs).toEqual({
+      telegram: "MY_TG_TOKEN",
+      discord: "LICH_DISCORD_BOT_TOKEN",
+    });
+    expect(prompts.filter((prompt) => prompt.includes("token env"))).toEqual([
+      expect.stringContaining("telegram token env"),
+      expect.stringContaining("discord token env"),
+    ]);
+    expect(prompts.some((prompt) => prompt.includes("bogon"))).toBe(false);
+  });
+
+  it("enables only y or yes plugins and ignores non-module names", async () => {
+    const dir = make_temp_dir("plugins");
+    const plugin_dir = path.join(dir, ".lich", "plugins");
+    mkdirSync(plugin_dir, { recursive: true });
+    writeFileSync(path.join(plugin_dir, "keep.ts"), "export {}\n");
+    writeFileSync(path.join(plugin_dir, "skip.ts"), "export {}\n");
+    writeFileSync(path.join(plugin_dir, "notes.txt"), "nope\n");
+    writeFileSync(path.join(plugin_dir, "demo.ts.bak"), "export {}\n");
+    writeFileSync(path.join(plugin_dir, "Keep.TS"), "export {}\n");
+    const prompts: string[] = [];
+    const answers = await collect_setup_answers(dir, async (prompt) => {
+      prompts.push(prompt);
+      if (prompt.includes("keep.ts")) {
+        return " YES ";
+      }
+      if (prompt.includes("skip.ts")) {
+        return "yeah";
+      }
+      return "";
+    });
+    expect(answers?.plugins).toEqual([".lich/plugins/keep.ts"]);
+    const offered = prompts.filter((prompt) => prompt.startsWith("Enable plugin"));
+    expect(offered).toHaveLength(2);
+    expect(offered.join("\n")).not.toContain("notes.txt");
+    expect(offered.join("\n")).not.toContain("demo.ts.bak");
+    expect(offered.join("\n")).not.toContain("Keep.TS");
+  });
+
+  it("treats only y or yes as saving the global default", async () => {
+    const ask = async (answer: string | undefined) =>
+      ask_save_global(async () => answer, "/tmp/lich-global-config.json");
+    expect(await ask(" YES ")).toBe(true);
+    expect(await ask("yeah")).toBe(false);
+    expect(await ask("n")).toBe(false);
+    expect(await ask(undefined)).toBeUndefined();
   });
 
   it("writes nothing when the first prompt is cancelled", async () => {
