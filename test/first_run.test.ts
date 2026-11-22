@@ -885,6 +885,116 @@ describe("setup wizard fields", () => {
     }
   });
 
+  it("accepts a blank kind retry as ollama and stops when that retry is cancelled", async () => {
+    const blank_dir = make_temp_dir("kind-blank");
+    const prompts: string[] = [];
+    const blank = await collect_setup_answers(blank_dir, async (prompt) => {
+      prompts.push(prompt);
+      if (prompt.startsWith("Provider kind")) {
+        return "nope";
+      }
+      if (prompt.startsWith("Unknown kind")) {
+        return "   ";
+      }
+      return "";
+    });
+    expect(blank).toMatchObject({ provider_kind: "ollama", model: "qwen3:8b", base_url: "http://localhost:11434" });
+    expect(blank?.api_key_env).toBeUndefined();
+    expect(prompts.filter((prompt) => prompt.startsWith("Unknown kind"))).toHaveLength(1);
+    expect(prompts.filter((prompt) => prompt.startsWith("Model"))).toHaveLength(1);
+
+    const trimmed = await collect_setup_answers(make_temp_dir("kind-trim"), async (prompt) => {
+      if (prompt.startsWith("Provider kind")) {
+        return "  anthropic  ";
+      }
+      return "";
+    });
+    expect(trimmed).toMatchObject({
+      provider_kind: "anthropic",
+      model: "claude-sonnet-4",
+      api_key_env: "ANTHROPIC_API_KEY",
+    });
+
+    const cancel_prompts: string[] = [];
+    const cancelled = await collect_setup_answers(make_temp_dir("kind-cancel"), async (prompt) => {
+      cancel_prompts.push(prompt);
+      if (prompt.startsWith("Provider kind")) {
+        return "nope";
+      }
+      return undefined;
+    });
+    expect(cancelled).toBeUndefined();
+    expect(cancel_prompts.some((prompt) => prompt.startsWith("Model"))).toBe(false);
+  });
+
+  it("keeps a corrected token env name and uses the default when the retry is blank", async () => {
+    const dir = make_temp_dir("token-retry");
+    const answers = await collect_setup_answers(dir, async (prompt) => {
+      if (prompt.startsWith("Gateway platforms")) {
+        return "telegram, discord";
+      }
+      if (prompt.startsWith("telegram token")) {
+        return "1bad";
+      }
+      if (prompt.startsWith("Env var name") && prompt.includes("LICH_TELEGRAM_BOT_TOKEN")) {
+        return "MY_TG";
+      }
+      if (prompt.startsWith("discord token")) {
+        return "bad-name";
+      }
+      if (prompt.startsWith("Env var name") && prompt.includes("LICH_DISCORD_BOT_TOKEN")) {
+        return "  ";
+      }
+      return "";
+    });
+    expect(answers).toBeDefined();
+    if (answers === undefined) {
+      return;
+    }
+    expect(answers.platforms).toEqual(["telegram", "discord"]);
+    expect(answers.token_envs).toEqual({
+      telegram: "MY_TG",
+      discord: "LICH_DISCORD_BOT_TOKEN",
+    });
+    const config = parse_agent_config(build_setup_config(answers));
+    expect(config.gateway?.token_envs).toEqual(answers.token_envs);
+  });
+
+  it("returns no answers when a token retry or a later plugin prompt is cancelled", async () => {
+    const token_dir = make_temp_dir("token-cancel");
+    const token_prompts: string[] = [];
+    const token_cancelled = await collect_setup_answers(token_dir, async (prompt) => {
+      token_prompts.push(prompt);
+      if (prompt.startsWith("Gateway platforms")) {
+        return "webhook";
+      }
+      if (prompt.startsWith("webhook token")) {
+        return "bad-name";
+      }
+      if (prompt.startsWith("Env var name")) {
+        return undefined;
+      }
+      return "";
+    });
+    expect(token_cancelled).toBeUndefined();
+    expect(token_prompts.some((prompt) => prompt.includes("Enable plugin"))).toBe(false);
+
+    const plugin_dir = make_temp_dir("plugin-cancel");
+    mkdirSync(path.join(plugin_dir, ".lich", "plugins"), { recursive: true });
+    writeFileSync(path.join(plugin_dir, ".lich", "plugins", "a.ts"), "export const plugin = { name: 'a' };\n");
+    writeFileSync(path.join(plugin_dir, ".lich", "plugins", "b.ts"), "export const plugin = { name: 'b' };\n");
+    let plugin_prompts = 0;
+    const plugin_cancelled = await collect_setup_answers(plugin_dir, async (prompt) => {
+      if (prompt.includes("Enable plugin") === true) {
+        plugin_prompts += 1;
+        return plugin_prompts === 1 ? "y" : undefined;
+      }
+      return "";
+    });
+    expect(plugin_prompts).toBe(2);
+    expect(plugin_cancelled).toBeUndefined();
+  });
+
   it("writes nothing when the first prompt is cancelled", async () => {
     const dir = make_temp_dir("cancel");
     const answers = await collect_setup_answers(dir, async () => undefined);

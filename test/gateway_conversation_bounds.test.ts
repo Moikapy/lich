@@ -260,6 +260,38 @@ describe("gateway max_conversations", () => {
     const a2 = records.find((record) => record.input === "a2");
     expect(a2?.history_len).toBe(2);
   });
+
+  it("keeps at most the active chat when max_conversations is 0", async () => {
+    const work_dir = make_temp_dir();
+    const records: RunRecord[] = [];
+    const bus = new GatewayBus(
+      {
+        config: parse_agent_config({
+          providers: [{ kind: "openai_compat", name: "main", model: "mock-model" }],
+          work_dir,
+          log_level: "error",
+        }),
+        agent_factory: () => recording_agent(records),
+      },
+      { max_conversations: 0, history_cap: 40 },
+    );
+
+    expect(await bus.handle("webhook", "a", "u", "a1")).toBe("echo:a1");
+    expect(await bus.handle("webhook", "a", "u", "a2")).toBe("echo:a2");
+    expect(records.find((record) => record.input === "a2")?.history_len).toBe(2);
+
+    expect(await bus.handle("webhook", "b", "u", "b1")).toBe("echo:b1");
+    expect(records.find((record) => record.input === "b1")?.history_len).toBe(0);
+    expect(await bus.handle("webhook", "a", "u", "a3")).toBe("echo:a3");
+    expect(records.find((record) => record.input === "a3")?.history_len).toBe(0);
+
+    const histories = (bus as unknown as { histories: Map<string, Message[]> }).histories;
+    expect([...histories.keys()]).toEqual(["webhook:a"]);
+
+    expect(await bus.handle("webhook", "a", "u", "a4")).toBe("echo:a4");
+    expect(records.find((record) => record.input === "a4")?.history_len).toBe(2);
+    expect([...histories.keys()]).toEqual(["webhook:a"]);
+  });
 });
 
 /** Holds `fail_input` until release, then throws; every other input echoes. */
