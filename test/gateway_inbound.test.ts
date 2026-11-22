@@ -259,6 +259,39 @@ describe("discord inbound", () => {
     expect(socket.close_count).toBe(0);
     await adapter.stop();
   });
+
+  it("does not post when the channel id is not a string, and skips non-string content", async () => {
+    remember_env();
+    process.env.LICH_DISCORD_BOT_TOKEN = "fixture-discord-token";
+    const seen: string[] = [];
+    const urls: string[] = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("fetch", async (url: unknown, init?: RequestInit) => {
+      urls.push(String(url));
+      const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as { content?: string };
+      seen.push(`post:${body.content ?? ""}`);
+      return new Response("{}", { status: 200 });
+    });
+    const adapter = create_discord_adapter(adapter_params(async (_platform, chat, user, text) => {
+      seen.push(`${chat}|${user}|${text}`);
+      return `echo ${text}`;
+    }));
+    await adapter.start();
+    const socket = await wait_for_socket(0);
+    const emit = (data: Record<string, unknown>): void => {
+      socket.emit(JSON.stringify({ t: "MESSAGE_CREATE", d: data }));
+    };
+    emit({ channel_id: 42, content: "numeric-channel", author: { id: "u9", bot: false } });
+    emit({ channel_id: "c9", content: 7, author: { id: "u8", bot: false } });
+    emit({ channel_id: "c9", content: "numeric-author", author: { id: 7, bot: false } });
+    await wait_for(() => seen.filter((line) => line.startsWith("post:")).length === 1 && seen.includes("|u9|numeric-channel"));
+    expect(seen).toContain("|u9|numeric-channel");
+    expect(seen).toContain("c9||numeric-author");
+    expect(seen.some((line) => line.includes("u8"))).toBe(false);
+    expect(urls).toEqual(["https://discord.com/api/v10/channels/c9/messages"]);
+    expect(socket.close_count).toBe(0);
+    await adapter.stop();
+  });
 });
 
 describe("twitch inbound", () => {
