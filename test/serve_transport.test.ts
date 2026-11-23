@@ -247,6 +247,38 @@ describe("serve websocket transport", () => {
     expect(empty).toBe(401);
   });
 
+  it("rejects an equal-length token, a joined duplicate header, and a dotted loopback host", async () => {
+    const token = "secret-token-value";
+    const server = create_serve_server({ port: 0, boot_stdout: null, token });
+    servers.push(server);
+    const boot = await server.start();
+    const host = `127.0.0.1:${boot.port}`;
+    const same_length = `${token.slice(0, -1)}X`;
+    expect(same_length).toHaveLength(token.length);
+
+    const mismatch = await read_upgrade_status(
+      boot.port,
+      upgrade_head({ path: `/?token=${encodeURIComponent(same_length)}`, host }),
+    );
+    expect(mismatch).toBe(401);
+
+    const joined = await read_upgrade_status(
+      boot.port,
+      upgrade_head({
+        path: "/",
+        host,
+        headers: [`x-lich-token: nope-token-valueX`, `x-lich-token: ${token}`],
+      }),
+    );
+    expect(joined).toBe(401);
+
+    const dotted = await read_upgrade_status(
+      boot.port,
+      upgrade_head({ path: `/?token=${encodeURIComponent(token)}`, host: `localhost.:${boot.port}` }),
+    );
+    expect(dotted).toBe(403);
+  });
+
   it("rejects a missing Host and hosts that are not exact loopback names", async () => {
     const token = "host-allow-token";
     const server = create_serve_server({ port: 0, boot_stdout: null, token });
@@ -562,6 +594,20 @@ function upgrade_request(token: string, host: string | undefined): string {
   return (
     `GET /?token=${encodeURIComponent(token)} HTTP/1.1\r\n` +
     host_line +
+    "Upgrade: websocket\r\n" +
+    "Connection: Upgrade\r\n" +
+    "Sec-WebSocket-Version: 13\r\n" +
+    `Sec-WebSocket-Key: ${WS_KEY}\r\n` +
+    "\r\n"
+  );
+}
+
+function upgrade_head(parts: { path: string; host: string; headers?: readonly string[] }): string {
+  const extra = (parts.headers ?? []).map((line) => `${line}\r\n`).join("");
+  return (
+    `GET ${parts.path} HTTP/1.1\r\n` +
+    `Host: ${parts.host}\r\n` +
+    extra +
     "Upgrade: websocket\r\n" +
     "Connection: Upgrade\r\n" +
     "Sec-WebSocket-Version: 13\r\n" +

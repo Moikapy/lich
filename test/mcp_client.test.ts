@@ -10,6 +10,7 @@ import { parse_agent_config } from "../src/agent/config.js";
 import { catalog_client_entry } from "../src/mcp/mcp_catalog_entry.js";
 import { plan_stdio } from "../src/mcp/mcp_plan.js";
 import { create_line_queue } from "../src/mcp/mcp_lines.js";
+import { McpSession } from "../src/mcp/mcp_session.js";
 import { attach_enabled_mcp_tools } from "../src/mcp/mcp_tools.js";
 import type { LineSpawner } from "../src/mcp/mcp_stdio.js";
 import { ToolRegistry } from "../src/tools/registry.js";
@@ -351,6 +352,38 @@ describe("mcp handshake", () => {
     expect(registry.list()).toEqual([]);
     expect(record.tool_names).toEqual([]);
     expect(record.stopped).toBe(1);
+  });
+
+  it("closes a session whose handshake version or server name is blank", async () => {
+    const rejected = [
+      null,
+      { protocolVersion: "", serverInfo: { name: "ok" } },
+      { protocolVersion: "2024-11-05", serverInfo: { name: "" } },
+      { protocolVersion: "2024-11-05", serverInfo: { name: 7 } },
+      { protocolVersion: 1, serverInfo: { name: "ok" } },
+    ];
+    for (const result of rejected) {
+      let closed = false;
+      let notified = false;
+      let requests = 0;
+      const session = new McpSession({
+        request: async () => {
+          requests += 1;
+          return result;
+        },
+        notify: () => {
+          notified = true;
+        },
+        close: () => {
+          closed = true;
+        },
+      });
+      await expect(session.list_tools()).rejects.toThrow(/mcp handshake rejected/);
+      await expect(session.list_tools()).rejects.toThrow(/mcp handshake rejected/);
+      expect(closed).toBe(true);
+      expect(notified).toBe(false);
+      expect(requests).toBe(2);
+    }
   });
 
   it("posts JSON-RPC to loopback and does not log env secrets", async () => {

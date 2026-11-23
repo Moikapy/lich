@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import dns from "node:dns/promises";
+import http from "node:http";
+import https from "node:https";
 import { mkdir, mkdtemp, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
@@ -254,6 +256,32 @@ describe("fetch_url", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("stay");
     expect(fetch_mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a non-byte body before opening a socket", async () => {
+    const http_request = vi.spyOn(http, "request");
+    const https_request = vi.spyOn(https, "request");
+    const bodies: Array<RequestInit["body"]> = [
+      new Blob(["x"]),
+      new URLSearchParams("a=1"),
+      1 as unknown as RequestInit["body"],
+    ];
+    try {
+      for (const body of bodies) {
+        await expect(
+          safe_fetch("http://192.0.2.1/pinned", {
+            method: "POST",
+            body,
+            signal: AbortSignal.timeout(500),
+          }),
+        ).rejects.toThrow(/blocked_url: unsupported_body/);
+      }
+      expect(http_request).not.toHaveBeenCalled();
+      expect(https_request).not.toHaveBeenCalled();
+    } finally {
+      http_request.mockRestore();
+      https_request.mockRestore();
+    }
   });
 
   it("keeps the https hostname in the URL handed to fetch (TLS/SNI)", async () => {
