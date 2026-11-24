@@ -237,6 +237,93 @@ describe("lich mcp", () => {
     expect(empty).toEqual({ code: 0, out: "" });
   });
 
+  it("rejects a missing flag value before it can rewrite the config", async () => {
+    const work_dir = await temp_dir("mcp-flag-values");
+    await write_config(work_dir, {
+      ...base_config(),
+      mcp_servers: {
+        lab: { enabled: false, command: "echo", args: ["hi"], env: { LICH_SECRET: SECRET } },
+      },
+    });
+    const file = path.join(work_dir, ".lich", "config.json");
+    const before = await readFile(file, "utf8");
+    const cases: Array<[string[], RegExp]> = [
+      [["mcp", "add", "notes", "--command"], /--command requires a value/],
+      [["mcp", "add", "notes", "--command", "--url"], /--command requires a value/],
+      [["mcp", "add", "notes", "--url"], /--url requires a value/],
+      [["mcp", "add", "notes", "--url", "--command"], /--url requires a value/],
+      [["mcp", "add", "notes", "--arg"], /--arg requires a value/],
+      [["mcp", "add", "redot", "--project-path"], /--project-path requires a value/],
+    ];
+    for (const [args, pattern] of cases) {
+      await expect(run_cli(["--work-dir", work_dir, ...args])).rejects.toThrow(pattern);
+    }
+    expect(await readFile(file, "utf8")).toBe(before);
+    expect(before).toContain(SECRET);
+  });
+
+  it("stores a flag-shaped arg and still refuses an interpreter eval flag", async () => {
+    const work_dir = await temp_dir("mcp-arg-shape");
+    await write_config(work_dir, base_config());
+    const added = await capture([
+      "--work-dir", work_dir, "mcp", "add", "notes", "--command", "echo", "--arg", "--stdio",
+    ]);
+    expect(added).toEqual({ code: 0, out: "added notes disabled\n" });
+    const saved = await read_config(work_dir);
+    expect(saved.mcp_servers).toEqual({
+      notes: { enabled: false, command: "echo", args: ["--stdio"] },
+    });
+    const file = path.join(work_dir, ".lich", "config.json");
+    const before = await readFile(file, "utf8");
+    await expect(run_cli([
+      "--work-dir", work_dir, "mcp", "add", "py", "--command", "python", "--arg", "--eval",
+    ])).rejects.toThrow(/eval flag/);
+    expect(await readFile(file, "utf8")).toBe(before);
+    expect(before).not.toContain("python");
+  });
+
+  it("refuses a non-object server entry and a bad mcp action without rewriting", async () => {
+    const work_dir = await temp_dir("mcp-entry-shape");
+    await write_config(work_dir, {
+      ...base_config(),
+      mcp_servers: {
+        lab: null,
+        notes: { enabled: false, command: "echo", args: ["hi"], env: { LICH_SECRET: SECRET } },
+      },
+    });
+    const file = path.join(work_dir, ".lich", "config.json");
+    const before = await readFile(file, "utf8");
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "list"])).rejects.toThrow(
+      /mcp server 'lab' is not an object/,
+    );
+    expect(await readFile(file, "utf8")).toBe(before);
+    await write_config(work_dir, {
+      ...base_config(),
+      mcp_servers: {
+        lab: "echo",
+        notes: { enabled: false, command: "echo", args: ["hi"], env: { LICH_SECRET: SECRET } },
+      },
+    });
+    const string_entry = await readFile(file, "utf8");
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "enable", "notes"])).rejects.toThrow(
+      /mcp server 'lab' is not an object/,
+    );
+    await expect(run_cli(["--work-dir", work_dir, "mcp"])).rejects.toThrow(
+      /mcp requires list, add, enable, disable, or remove/,
+    );
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "rename", "notes"])).rejects.toThrow(
+      /mcp requires list, add, enable, disable, or remove/,
+    );
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "enable"])).rejects.toThrow(
+      /mcp enable requires a snake_case name/,
+    );
+    await expect(run_cli(["--work-dir", work_dir, "mcp", "remove"])).rejects.toThrow(
+      /mcp remove requires a snake_case name/,
+    );
+    expect(await readFile(file, "utf8")).toBe(string_entry);
+    expect(string_entry).toContain(SECRET);
+  });
+
   it("falls back to LICH_MODEL when project config has only mcp_servers", async () => {
     const work_dir = await temp_dir("mcp-env-fallback");
     await write_config(work_dir, {
