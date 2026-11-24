@@ -478,6 +478,14 @@ describe("mcp tool disablement", () => {
       providers,
       mcp_servers: { "redot-mcp": { command: "redot", args: redot_args("/game") } },
     })).toThrow(/snake_case/);
+    expect(() => parse_agent_config({
+      providers,
+      mcp_servers: { lab: { enabled: "true", command: "tool", args: ["--stdio"] } },
+    })).toThrow(/boolean/);
+    expect(() => parse_agent_config({
+      providers,
+      mcp_servers: { lab: { enabled: 1, command: "tool", args: ["--stdio"] } },
+    })).toThrow(/boolean/);
     const config = parse_agent_config({
       providers,
       mcp_servers: { loop: { url: "http://localhost:9/mcp" } },
