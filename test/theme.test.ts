@@ -98,7 +98,13 @@ describe("fill_template", () => {
 
   it("keeps the greppable budget keyword and exposes the flavor suffix", () => {
     expect(LICH_THEME.notices.budget_exhausted.startsWith("budget exhausted")).toBe(true);
+    expect(LICH_THEME.notices.compressed.startsWith("context compressed")).toBe(true);
     expect(notice_flavor(LICH_THEME.notices.budget_exhausted)).toBe("the ritual is spent");
     expect(notice_flavor(VAMPIRE.notices.budget_exhausted)).toBe("the blood bank is dry");
+    expect(notice_flavor("budget exhausted")).toBe("");
+    expect(notice_flavor("budget exhausted — the ritual is spent")).toBe("the ritual is spent");
+    expect(notice_flavor("context compressed — memories distilled (summary 12 chars)")).toBe(
+      "memories distilled",
+    );
   });
 });
