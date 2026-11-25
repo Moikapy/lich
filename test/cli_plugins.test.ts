@@ -2,6 +2,7 @@
  * CLI plugin loading: one-shot execution, chat/tui construction, gateway bus
  * reuse, and warn-and-continue for a missing entry. No network.
  */
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -188,6 +189,50 @@ describe("cli plugin load", () => {
     await bus.handle("webhook", "c1", "u1", "echo on the bus");
     bus.stop();
     expect(ended).toEqual(["plugin_echo"]);
+  });
+
+  it("exits 1 when the turn budget stops a one-shot and does not run that turn's tool", async () => {
+    const work_dir = await make_temp_dir();
+    const fetch_fn = scripted_fetch(() =>
+      completion_body(
+        {
+          role: "assistant",
+          content: "partial before the cap",
+          tool_calls: [
+            {
+              id: "t-budget",
+              type: "function",
+              function: {
+                name: "write_file",
+                arguments: JSON.stringify({ path: "planted.txt", content: "should-not-land" }),
+              },
+            },
+          ],
+        },
+        "tool_calls",
+      ),
+    );
+    const stderr = spy_stderr();
+    const stdout_chunks: string[] = [];
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout_chunks.push(String(chunk));
+      return true;
+    });
+    try {
+      const code = await run_one_shot(
+        mock_config(work_dir, fetch_fn, { max_turns: 1, plugins: [], log_level: "error" }),
+        "write a file",
+      );
+      expect(code).toBe(1);
+      expect(stderr.text()).toContain("[lich] budget exhausted after 1 turns — the ritual is spent\n");
+      expect(stderr.text()).not.toContain("(turn cap reached)");
+      expect(stderr.text()).toContain("write_file: error: turn_budget_exhausted");
+      expect(stdout_chunks.join("")).toBe("partial before the cap\n");
+      expect(existsSync(path.join(work_dir, "planted.txt"))).toBe(false);
+    } finally {
+      stderr.restore();
+      stdout.mockRestore();
+    }
   });
 
   it("warns once for a missing plugin and still completes one-shot", async () => {
