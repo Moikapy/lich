@@ -135,6 +135,26 @@ describe("load_plugins", () => {
     await rm(no_export, { force: true });
   });
 
+  it("rejects an empty plugin name and still loads a named export beside it", async () => {
+    const dir = await make_temp_dir();
+    const blank = path.join(dir, "blank.plugin.ts");
+    const both = path.join(dir, "both.plugin.ts");
+    await writeFile(blank, "export default { name: \"\", tools: [] };\n", "utf8");
+    await writeFile(
+      both,
+      "export default { name: \"\" };\nexport const plugin = { name: \"kept\", hooks: {} };\n",
+      "utf8",
+    );
+    const rejected = await load_plugins([blank], dir);
+    expect(rejected.plugins).toEqual([]);
+    expect(rejected.errors).toEqual([
+      { entry: blank, error_message: `plugin_module_has_no_plugin_export: ${blank}` },
+    ]);
+    const loaded = await load_plugins([both], dir);
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.plugins.map((item) => item.plugin.name)).toEqual(["kept"]);
+  });
+
   it("refuses non-module entries before import and still loads the rest", async () => {
     const { plugins, errors } = await load_plugins(
       ["notes.txt", "good.plugin.ts", "payload.json"],
