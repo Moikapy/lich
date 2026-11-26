@@ -115,6 +115,39 @@ describe("S-2 SSRF helpers", () => {
     }
   });
 
+  it("blocks the whole 127/8 and 0/8, and the top of ULA, before any fetch", async () => {
+    const blocked = [
+      "127.0.0.2",
+      "127.255.255.255",
+      "0.0.0.1",
+      "0.255.255.255",
+      "::ffff:127.0.0.2",
+      "::ffff:0.255.255.255",
+      "fdff::1",
+    ];
+    for (const address of blocked) {
+      expect(is_blocked_ip(address), address).toBe(true);
+    }
+    const allowed = ["126.255.255.255", "128.0.0.0", "1.0.0.1", "9.255.255.255", "::ffff:1.1.1.1", "fe00::1"];
+    for (const address of allowed) {
+      expect(is_blocked_ip(address), address).toBe(false);
+    }
+    if (private_urls_allowed() === true) {
+      return;
+    }
+    const calls: string[] = [];
+    set_url_guard_fetch(async (input) => {
+      calls.push(String(input));
+      return new Response("nope", { status: 200 });
+    });
+    await expect(safe_fetch("http://127.0.0.2/admin")).rejects.toThrow("blocked_url: 127.0.0.2");
+    await expect(safe_fetch("http://0.255.255.255/")).rejects.toThrow("blocked_url: 0.255.255.255");
+    await expect(safe_fetch("http://127.255.255.255/")).rejects.toThrow("blocked_url: 127.255.255.255");
+    expect(calls).toEqual([]);
+    await expect(resolve_public_ip("128.0.0.0")).resolves.toBe("128.0.0.0");
+    await expect(resolve_public_ip("9.255.255.255")).resolves.toBe("9.255.255.255");
+  });
+
   it("rejects mapped loopback and CGNAT literals before DNS", async () => {
     if (private_urls_allowed() === true) {
       return;
