@@ -115,6 +115,32 @@ describe("S-2 SSRF helpers", () => {
     }
   });
 
+  it("applies the IPv4 windows to dotted IPv4-mapped addresses", () => {
+    const blocked = [
+      "::ffff:100.64.0.1",
+      "::ffff:100.127.255.255",
+      "::ffff:172.16.0.1",
+      "::ffff:172.31.255.255",
+      "::ffff:192.168.0.1",
+      "::ffff:224.0.0.1",
+    ];
+    for (const address of blocked) {
+      expect(is_blocked_ip(address), address).toBe(true);
+    }
+    const public_addrs = [
+      "::ffff:100.63.255.255",
+      "::ffff:100.128.0.1",
+      "::ffff:172.15.255.255",
+      "::ffff:172.32.0.1",
+      "::ffff:192.167.255.255",
+      "::ffff:223.255.255.255",
+      "fbff::1",
+    ];
+    for (const address of public_addrs) {
+      expect(is_blocked_ip(address), address).toBe(false);
+    }
+  });
+
   it("rejects mapped loopback and CGNAT literals before DNS", async () => {
     if (private_urls_allowed() === true) {
       return;
@@ -123,6 +149,10 @@ describe("S-2 SSRF helpers", () => {
     await expect(resolve_public_ip("100.64.0.1")).rejects.toThrow(/blocked_url/);
     await expect(resolve_public_ip("172.16.0.1")).rejects.toThrow(/blocked_url/);
     await expect(resolve_public_ip("8.8.8.8")).resolves.toBe("8.8.8.8");
+    await expect(resolve_public_ip("::ffff:192.168.0.1")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("[::ffff:100.64.0.1]")).rejects.toThrow(/blocked_url/);
+    await expect(resolve_public_ip("::ffff:172.32.0.1")).resolves.toBe("::ffff:172.32.0.1");
+    await expect(resolve_public_ip("fbff::1")).resolves.toBe("fbff::1");
   });
 
   it("rejects localhost resolution when private URLs are disallowed", async () => {

@@ -23,4 +23,20 @@ describe("refuse_http_url", () => {
     expect(refuse_http_url("ws://127.0.0.1/mcp")).toBe("refused mcp url");
     expect(refuse_http_url("not a url")).toBe("refused mcp url");
   });
+
+  it("folds the exact loopback names and refuses the rest of 127/8", () => {
+    expect(refuse_http_url("http://LOCALHOST/mcp")).toBeUndefined();
+    expect(refuse_http_url("https://LocalHost:9/mcp")).toBeUndefined();
+    expect(refuse_http_url("http://127.0.0.2/mcp")).toBe("refused mcp url; loopback only");
+    expect(refuse_http_url("http://localhost.localdomain/mcp")).toBe("refused mcp url; loopback only");
+    expect(refuse_http_url("http://localhost./mcp")).toBe("refused mcp url; loopback only");
+    expect(refuse_http_url("http://[::ffff:127.0.0.1]/mcp")).toBe("refused mcp url; loopback only");
+  });
+
+  it("refuses a password with an empty username and does not echo it", () => {
+    const secret = "s3cret-value";
+    const refused = refuse_http_url(`http://:${secret}@127.0.0.1/mcp`);
+    expect(refused).toBe("refused mcp url credentials");
+    expect(refused?.includes(secret)).toBe(false);
+  });
 });

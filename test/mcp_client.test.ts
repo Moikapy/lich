@@ -200,6 +200,18 @@ describe("mcp refusal", () => {
     expect(plan_stdio("lab", "", [], undefined)).toMatch(/refused mcp command/);
   });
 
+  it("refuses case-folded basenames, leftover interpreters, and a shell after env flags", () => {
+    expect(plan_stdio("lab", "CURL", ["https://example.invalid/x"], undefined)).toMatch(/download command 'curl'/);
+    expect(plan_stdio("lab", "Bash", ["-c", "id"], undefined)).toMatch(/shell 'bash'/);
+    expect(plan_stdio("lab", "Pwsh", ["-c", "id"], undefined)).toMatch(/shell 'pwsh'/);
+    expect(plan_stdio("lab", "python2", ["-c", "import os"], undefined)).toMatch(/eval flag '-c'/);
+    expect(plan_stdio("lab", "php", ["-e", "echo 1"], undefined)).toMatch(/eval flag '-e'/);
+    expect(plan_stdio("lab", "php", ["--eval=echo 1"], undefined)).toMatch(/eval flag '--eval=echo 1'/);
+    expect(plan_stdio("lab", "node", ["-EncodedCommand", "YQ=="], undefined)).toMatch(/eval flag '-EncodedCommand'/);
+    expect(plan_stdio("lab", "env", ["--", "sh"], undefined)).toMatch(/env → 'sh'/);
+    expect(plan_stdio("lab", "env", ["-u", "HOME", "bash", "-c", "id"], undefined)).toMatch(/shell 'bash' in args/);
+  });
+
   it("names the official install when redot is missing and never spawns", async () => {
     const work_dir = await temp_dir("mcp-missing");
     const missing = path.join(work_dir, "missing", "redot");
