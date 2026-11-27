@@ -550,6 +550,13 @@ describe("forbidden file paths", () => {
     expect(read.error?.startsWith("forbidden_path")).toBe(true);
     const write = await executor.execute("write_file", { path: ".lich/config.json", content: "{}\n" });
     expect(write.error?.startsWith("forbidden_path")).toBe(true);
+    const edit = await executor.execute("edit_file", {
+      path: ".lich/config.json",
+      old_string: "true",
+      new_string: "false",
+    });
+    expect(edit.error?.startsWith("forbidden_path: .lich/config.json")).toBe(true);
+    expect(await read_temp(tmp_root, ".lich/config.json")).toBe('{"ok":true}\n');
   });
 
   it("denies .lich/profiles to read and write (global identity files when work_dir is home)", async () => {
@@ -562,6 +569,13 @@ describe("forbidden file paths", () => {
     expect(read.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
     const write = await executor.execute("write_file", { path: ".lich/profiles/coder.json", content: "{}\n" });
     expect(write.error?.startsWith("forbidden_path")).toBe(true);
+    const edit = await executor.execute("edit_file", {
+      path: ".lich/profiles/coder.md",
+      old_string: "soul",
+      new_string: "other",
+    });
+    expect(edit.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
+    expect(await read_temp(tmp_root, ".lich/profiles/coder.md")).toBe("soul\n");
     const listed = await executor.execute("list_dir", { path: ".lich/profiles" });
     expect(listed.error?.startsWith("forbidden_path: .lich/profiles")).toBe(true);
     const walked = await executor.execute("list_dir", { path: ".lich", depth: 3 });
@@ -585,6 +599,12 @@ describe("forbidden file paths", () => {
     expect(skill.ok).toBe(true);
     const plugin = await executor.execute("write_file", { path: ".lich/plugins/greet.ts", content: "export default {}\n" });
     expect(plugin.ok).toBe(true);
+    const skills_case = await executor.execute("write_file", { path: ".lich/Skills/demo.md", content: "# no\n" });
+    expect(skills_case.error?.startsWith("forbidden_path")).toBe(true);
+    await expect(read_temp(tmp_root, ".lich/Skills/demo.md")).rejects.toThrow();
+    const plugins_case = await executor.execute("write_file", { path: ".lich/Plugins/greet.ts", content: "export default {}\n" });
+    expect(plugins_case.error?.startsWith("forbidden_path")).toBe(true);
+    await expect(read_temp(tmp_root, ".lich/Plugins/greet.ts")).rejects.toThrow();
     const other = await executor.execute("write_file", { path: ".lich/sessions/x.jsonl", content: "{}\n" });
     expect(other.error?.startsWith("forbidden_path")).toBe(true);
     const env_file = await executor.execute("write_file", { path: ".env", content: "X=1\n" });
