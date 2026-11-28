@@ -773,6 +773,66 @@ describe("lich init and bare lich", () => {
       }
     });
   });
+
+  it("applies prompt, log, theme, and session flags without rewriting the file", async () => {
+    const dir = make_temp_dir("cli-overrides");
+    const session_dir = path.join(dir, "sessions");
+    write_lich_config(dir, {
+      providers: [{ kind: "ollama", name: "main", model: "kept" }],
+      system_prompt: "from file",
+      log_level: "error",
+      theme: "lich",
+      session_dir: path.join(dir, "from-file"),
+    });
+    writes.calls = [];
+    expect(
+      await run_cli([
+        "tui",
+        "--work-dir",
+        dir,
+        "--system-prompt",
+        "from flag",
+        "--log-level",
+        "warn",
+        "--theme",
+        "vampire",
+        "--session-dir",
+        session_dir,
+      ]),
+    ).toBe(0);
+    const config = tui_run.configs[0] as {
+      system_prompt?: string;
+      log_level?: string;
+      theme?: string;
+      session_dir?: string;
+    } | undefined;
+    expect(config?.system_prompt).toBe("from flag");
+    expect(config?.log_level).toBe("warn");
+    expect(config?.theme).toBe("vampire");
+    expect(config?.session_dir).toBe(session_dir);
+    expect(writes.calls).toEqual([]);
+    const saved = JSON.parse(readFileSync(project_config_path(dir), "utf8")) as {
+      system_prompt?: string;
+      log_level?: string;
+    };
+    expect(saved.system_prompt).toBe("from file");
+    expect(saved.log_level).toBe("error");
+
+    tui_run.configs = [];
+    await expect(run_cli(["tui", "--work-dir", dir, "--log-level", "INFO"])).rejects.toThrow(/lich tui:[\s\S]*"log_level"/);
+    await expect(run_cli(["tui", "--work-dir", dir, "--log-level", "trace"])).rejects.toThrow(/lich tui:[\s\S]*"log_level"/);
+    await expect(run_cli(["tui", "--work-dir", dir, "--theme", ""])).rejects.toThrow(/lich tui:[\s\S]*"theme"/);
+    await expect(run_cli(["tui", "--work-dir", dir, "--log-level", "--theme"])).rejects.toThrow(
+      "--log-level requires a value",
+    );
+    await expect(run_cli(["tui", "--work-dir", dir, "--system-prompt", "--model"])).rejects.toThrow(
+      "--system-prompt requires a value",
+    );
+    await expect(run_cli(["tui", "--work-dir", dir, "--session-dir", "--system-prompt"])).rejects.toThrow(
+      "--session-dir requires a value",
+    );
+    expect(tui_run.configs).toEqual([]);
+  });
 });
 
 describe("setup wizard fields", () => {
