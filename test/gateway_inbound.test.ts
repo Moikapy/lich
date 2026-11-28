@@ -377,4 +377,56 @@ describe("telegram inbound", () => {
       polls.allow_exit();
     }
   });
+
+  it("does not confirm an update until the reply has been delivered", async () => {
+    remember_env();
+    process.env.LICH_TELEGRAM_BOT_TOKEN = "fixture-telegram-token";
+    const calls: string[] = [];
+    let release_turn: () => void = () => undefined;
+    const turn = new Promise<void>((resolve) => {
+      release_turn = resolve;
+    });
+    let release_poll: () => void = () => undefined;
+    const parked = new Promise<void>((resolve) => {
+      release_poll = resolve;
+    });
+    vi.stubGlobal("fetch", async (url: unknown, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("getUpdates") === true) {
+        const offset = new URL(href).searchParams.get("offset");
+        calls.push(`poll:${offset}`);
+        if (offset === "0") {
+          return new Response(
+            JSON.stringify({
+              result: [{ update_id: 7, message: { text: "hi", chat: { id: 1 }, from: { id: 2 } } }],
+            }),
+            { status: 200 },
+          );
+        }
+        await parked;
+        return new Response(JSON.stringify({ result: [] }), { status: 200 });
+      }
+      if (typeof init?.body === "string") {
+        calls.push("send");
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const adapter = create_telegram_adapter(adapter_params(async () => {
+      await turn;
+      return "pong";
+    }));
+    try {
+      await adapter.start();
+      await wait_for(() => calls.includes("poll:0"));
+      await settle();
+      expect(calls).toEqual(["poll:0"]);
+      release_turn();
+      await wait_for(() => calls.includes("poll:8"));
+      expect(calls).toEqual(["poll:0", "send", "poll:8"]);
+    } finally {
+      await adapter.stop();
+      release_turn();
+      release_poll();
+    }
+  });
 });
