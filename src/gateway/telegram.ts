@@ -49,16 +49,37 @@ async function poll_loop(params: AdapterParams, token: string, keep_running: () 
     try {
       const updates = await fetch_updates(token, offset);
       backoff_index = 0;
-      for (const update of updates) {
-        offset = update.update_id !== undefined ? update.update_id + 1 : offset;
-        void deliver_update(params, token, update);
-      }
+      // The next getUpdates offset confirms every update below it. Wait until
+      // this batch is delivered so a restart mid-turn can still redeliver it.
+      offset = await deliver_batch(params, token, updates, offset);
     } catch (error) {
       logger.warn("gateway telegram poll failed; backing off", error);
       await sleep(TELEGRAM_BACKOFF_MS[backoff_index] ?? 30000);
       backoff_index = Math.min(backoff_index + 1, TELEGRAM_BACKOFF_MS.length - 1);
     }
   }
+}
+
+/**
+ * Deliver the whole batch before reporting the next offset. A thrown delivery
+ * leaves the previous offset in place so the caller retries instead of confirming.
+ */
+async function deliver_batch(
+  params: AdapterParams,
+  token: string,
+  updates: readonly TelegramUpdate[],
+  offset: number,
+): Promise<number> {
+  let next_offset = offset;
+  const pending: Promise<void>[] = [];
+  for (const update of updates) {
+    if (update.update_id !== undefined) {
+      next_offset = update.update_id + 1;
+    }
+    pending.push(deliver_update(params, token, update));
+  }
+  await Promise.all(pending);
+  return next_offset;
 }
 
 async function fetch_updates(token: string, offset: number): Promise<TelegramUpdate[]> {
