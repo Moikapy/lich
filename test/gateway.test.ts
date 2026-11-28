@@ -178,6 +178,20 @@ describe("gateway bus", () => {
     }
   });
 
+  it("stores no prior turns when history_cap is 0 or negative", async () => {
+    const work_dir = temp_work_dir();
+    try {
+      const transcript: Message[] = [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "reply-1" },
+      ];
+      expect(await capped_followup_history(work_dir, transcript, 0)).toEqual([]);
+      expect(await capped_followup_history(work_dir, transcript, -1)).toEqual([]);
+    } finally {
+      rmSync(work_dir, { recursive: true, force: true });
+    }
+  });
+
   it("drops leading non-user messages after a history cap slice (G-7)", async () => {
     const work_dir = temp_work_dir();
     try {
